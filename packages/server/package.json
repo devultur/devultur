@@ -1,0 +1,48 @@
+{
+	"name": "@devultur/server",
+	"version": "1.0.0",
+	"private": false,
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/devultur/devultur",
+		"directory": "packages/server"
+	},
+	"homepage": "https://github.com/devultur/devultur#readme",
+	"bugs": {
+		"url": "https://github.com/devultur/devultur/issues"
+	},
+	"type": "module",
+	"main": "./dist/index.js",
+	"module": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"import": "./dist/index.js",
+			"types": "./dist/index.d.ts"
+		},
+		"./node": {
+			"import": "./dist/node.js",
+			"types": "./dist/node.d.ts"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "tsup src/index.ts src/node.ts --format esm --dts",
+		"dev": "tsup src/index.ts src/node.ts --format esm --dts --watch",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@devultur/core": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/node": "^22.20.0",
+		"tsup": "^8.0.0",
+		"typescript": "^5.8.0"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

@@ -1,0 +1,73 @@
+{
+	"name": "@devultur/convex",
+	"version": "1.0.0",
+	"private": false,
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/devultur/devultur",
+		"directory": "packages/convex"
+	},
+	"homepage": "https://github.com/devultur/devultur#readme",
+	"bugs": {
+		"url": "https://github.com/devultur/devultur/issues"
+	},
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./convex.config": {
+			"types": "./dist/component/convex.config.d.ts",
+			"default": "./dist/component/convex.config.js"
+		},
+		"./_generated/component.js": {
+			"types": "./dist/component/_generated/component.d.ts"
+		},
+		"./validators": {
+			"import": "./dist/validators.js",
+			"types": "./dist/validators.d.ts"
+		},
+		"./react": {
+			"import": "./dist/react.js",
+			"types": "./dist/react.d.ts"
+		}
+	},
+	"bin": {
+		"@devultur/convex": "./dist/bin/init.js",
+		"devultur-init": "./dist/bin/init.js"
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "tsup src/index.ts src/validators.ts src/react.tsx src/bin/init.ts --format esm --dts && tsc -p src/component/tsconfig.json",
+		"dev": "tsup src/index.ts src/react.tsx --format esm --dts --watch",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@devultur/core": "workspace:*",
+		"@devultur/react": "workspace:*"
+	},
+	"peerDependencies": {
+		"convex": ">=1.25.0",
+		"react": ">=19.0.0"
+	},
+	"peerDependenciesMeta": {
+		"react": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@types/node": "^22.0.0",
+		"@types/react": "^19.0.0",
+		"convex": "^1.21.0",
+		"react": "^19.0.0",
+		"tsup": "^8.0.0",
+		"typescript": "^5.8.0"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

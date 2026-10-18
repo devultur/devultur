@@ -1,0 +1,42 @@
+# `cloudflare` runner (Cloudflare Containers): paste this into the media Worker's wrangler.toml, alongside its
+# `MEDIA_BUCKET` (R2) and `MEDIA_KV` (KV) bindings.
+# Requires the Workers Paid plan and local Docker (wrangler builds and pushes the image on `wrangler deploy`).
+#
+# Worker entry (src/index.ts):
+#   import { createWorker } from "@devultur/self-host";
+#   export { TranscodeContainer } from "@devultur/self-host/transcode-container";
+#   export default createWorker();
+#
+# Required secrets (without them the Worker fails closed: 503, never left open):
+#   wrangler secret put WORKER_AUTH_SECRET         # bearer for your backend on the control routes; the runner
+#                                                  # also uploads renditions with it
+#   wrangler secret put TRANSCODE_WEBHOOK_SECRET   # signs the transcode callbacks
+
+[vars]
+TRANSCODE_RUNNER = "cloudflare"
+# Optional: lite | basic | standard-1 … standard-4 (default standard-4 = 4 vCPU, 12 GiB, 20 GB disk).
+# The raw file plus the renditions have to fit on the instance's disk.
+# CF_TRANSCODE_INSTANCE = "standard-4"
+
+# `durable_object` policy: the image and size are chosen in `ctx.container.start()`, one container per video.
+[[containers]]
+class_name = "TranscodeContainer"
+scheduling_policy = "durable_object"
+
+# The same image Fly uses (alpine + ffmpeg + curl). The name `transcode` is what the runner looks up.
+# The path is relative to this wrangler.toml.
+[containers.images.transcode]
+dockerfile = "../../infra/transcode/Dockerfile"
+
+[[durable_objects.bindings]]
+name = "TRANSCODE_CONTAINER"
+class_name = "TranscodeContainer"
+
+[exports.TranscodeContainer]
+type = "durable-object"
+storage = "sqlite"
+
+# With a wrangler build that has no `exports`, declare the class with a migration instead:
+# [[migrations]]
+# tag = "v1"
+# new_sqlite_classes = ["TranscodeContainer"]

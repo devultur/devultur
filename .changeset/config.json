@@ -1,0 +1,11 @@
+{
+	"$schema": "https://unpkg.com/@changesets/config@3.1.1/schema.json",
+	"changelog": ["@changesets/changelog-github", { "repo": "devultur/devultur" }],
+	"commit": false,
+	"fixed": [["@devultur/core", "@devultur/server", "@devultur/react", "@devultur/convex", "@devultur/self-host"]],
+	"linked": [],
+	"access": "public",
+	"baseBranch": "main",
+	"updateInternalDependencies": "patch",
+	"ignore": []
+}

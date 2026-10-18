@@ -1,0 +1,22 @@
+Copyright (c) 2026 Cristhian De Marchena
+
+This repository contains packages under two licenses. Each package's own LICENSE file is authoritative for that
+package.
+
+MIT License
+  packages/core       (@devultur/core)
+  packages/server     (@devultur/server)
+  packages/react      (@devultur/react)
+  packages/convex     (@devultur/convex)
+  packages/config     (shared TypeScript config, not published)
+  infra/transcode     (transcode image and reference HTTP runner)
+  scripts, docs and the repository tooling
+
+GNU Affero General Public License v3.0 only (AGPL-3.0-only)
+  packages/self-host  (@devultur/self-host)
+
+In short: you can use the SDKs in any project, open or closed, under the MIT terms. You can run, modify and
+deploy the self-host media Worker freely, but if you modify it and let others interact with it over a network,
+the AGPL requires you to offer them the source of your modified version.
+
+The full MIT text is in packages/core/LICENSE. The full AGPL-3.0 text is in packages/self-host/LICENSE.
