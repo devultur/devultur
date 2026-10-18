@@ -1,6 +1,17 @@
 {
 	"name": "@devultur/self-host",
 	"version": "1.0.0",
+	"description": "Self-hosted media Worker for Cloudflare: R2 uploads, edge-cached delivery, image transforms, HLS transcode and captions",
+	"keywords": [
+		"cloudflare-workers",
+		"hono",
+		"r2",
+		"media",
+		"video",
+		"hls",
+		"transcode",
+		"ffmpeg"
+	],
 	"private": false,
 	"license": "AGPL-3.0-only",
 	"repository": {

@@ -1,6 +1,15 @@
 {
 	"name": "@devultur/convex",
 	"version": "1.0.0",
+	"description": "Convex component for Devultur media: media records, uploads, transcodes, watch progress and React bindings",
+	"keywords": [
+		"convex",
+		"convex-component",
+		"media",
+		"video",
+		"hls",
+		"upload"
+	],
 	"private": false,
 	"license": "MIT",
 	"repository": {

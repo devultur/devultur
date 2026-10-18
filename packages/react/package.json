@@ -1,6 +1,16 @@
 {
 	"name": "@devultur/react",
 	"version": "1.0.0",
+	"description": "React components and hooks for Devultur media: HLS video player, uploads with progress, image cropper and captions",
+	"keywords": [
+		"react",
+		"media",
+		"video",
+		"hls",
+		"video-player",
+		"upload",
+		"captions"
+	],
 	"private": false,
 	"license": "MIT",
 	"repository": {
