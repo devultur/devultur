@@ -1,6 +1,17 @@
 {
 	"name": "@devultur/server",
 	"version": "1.0.0",
+	"description": "Server SDK for Devultur media: upload URLs, viewer tokens, signed delivery URLs, transcodes, captions and webhooks",
+	"keywords": [
+		"media",
+		"video",
+		"r2",
+		"cloudflare",
+		"hls",
+		"upload",
+		"webhooks",
+		"signed-url"
+	],
 	"private": false,
 	"license": "MIT",
 	"repository": {

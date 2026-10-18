@@ -1,6 +1,16 @@
 {
 	"name": "@devultur/core",
 	"version": "1.0.0",
+	"description": "Shared config, types, storage path conventions, media references and URL signing for the Devultur media SDKs",
+	"keywords": [
+		"media",
+		"video",
+		"r2",
+		"cloudflare",
+		"hls",
+		"upload",
+		"signed-url"
+	],
 	"private": false,
 	"license": "MIT",
 	"repository": {
