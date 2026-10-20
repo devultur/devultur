@@ -15,6 +15,7 @@ package's source.
 - [Progress tracking](guides/progress-tracking.md)
 - [Security](guides/security.md)
 - [Framework examples](guides/framework-examples.md)
+- [Convex component with a self-hosted Worker](../packages/convex/README.md#using-a-self-hosted-worker)
 
 ## React
 
