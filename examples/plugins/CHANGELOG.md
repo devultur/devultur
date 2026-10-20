@@ -1,5 +1,12 @@
 # @devultur/example-plugins
 
+## 0.0.5
+
+### Patch Changes
+
+- Updated dependencies [[`6eb3aa4`](https://github.com/devultur/devultur/commit/6eb3aa461d0c18cfc5f71fb0fd23663df23082df)]:
+  - @devultur/self-host@1.2.0
+
 ## 0.0.4
 
 ### Patch Changes
