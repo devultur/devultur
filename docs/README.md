@@ -18,7 +18,8 @@ package's source.
   caveats
 - [Framework examples](guides/framework-examples.md)
 - [Convex component with a self-hosted Worker](../packages/convex/README.md#using-a-self-hosted-worker), its
-  [errors](../packages/convex/README.md#errors) and [object lock](../packages/convex/README.md#object-lock)
+  [media library](../packages/convex/README.md#media-library), [errors](../packages/convex/README.md#errors) and
+  [object lock](../packages/convex/README.md#object-lock)
 
 ## React
 

@@ -10,9 +10,19 @@ export class UploadHttpError extends Error {
 	}
 }
 
+/** Bytes of an upload sent so far. */
+export interface UploadProgress {
+	loadedBytes: number;
+	totalBytes: number;
+	/** `loadedBytes / totalBytes`, from 0 to 1. */
+	fraction: number;
+}
+
 export interface UploadFileOptions {
 	/** Upload progress (0-100). */
 	onProgress?: (percent: number) => void;
+	/** Upload progress in bytes (single PUT and every part of a multipart upload). */
+	onBytes?: (progress: UploadProgress) => void;
 	/** Aborts the upload when the signal fires → rejects with `AbortError`. */
 	signal?: AbortSignal;
 }
@@ -24,6 +34,12 @@ interface XhrPutOptions {
 }
 
 const abortError = () => new DOMException("Upload aborted", "AbortError");
+
+function reportBytes(options: UploadFileOptions | undefined, loadedBytes: number, totalBytes: number) {
+	if (!options?.onBytes) return;
+	const fraction = totalBytes > 0 ? Math.min(1, loadedBytes / totalBytes) : 1;
+	options.onBytes({ loadedBytes, totalBytes, fraction });
+}
 
 // A PUT via XHR (the only way to report upload progress in the browser) as a cancelable promise.
 function xhrPut(url: string, body: Blob, options: XhrPutOptions): Promise<string> {
@@ -69,6 +85,13 @@ function xhrPut(url: string, body: Blob, options: XhrPutOptions): Promise<string
 }
 
 async function uploadInParts(url: string, file: File, options?: UploadFileOptions): Promise<void> {
+	// Each part is its own Blob: the bytes sent are the sum of what every part reported.
+	const loadedByPart = new Map<Blob, number>();
+	const reportPartBytes = (part: Blob, loadedBytes: number) => {
+		loadedByPart.set(part, loadedBytes);
+		const loadedTotal = [...loadedByPart.values()].reduce((total, loaded) => total + loaded, 0);
+		reportBytes(options, loadedTotal, file.size);
+	};
 	try {
 		await uploadMultipart(url, file, {
 			onProgress: options?.onProgress,
@@ -76,7 +99,10 @@ async function uploadInParts(url: string, file: File, options?: UploadFileOption
 			uploadPart: async (partUrl, part, partOptions) => {
 				const responseText = await xhrPut(partUrl, part, {
 					signal: partOptions.signal,
-					onProgress: (loadedBytes) => partOptions.onProgress(loadedBytes),
+					onProgress: (loadedBytes) => {
+						partOptions.onProgress(loadedBytes);
+						reportPartBytes(part, loadedBytes);
+					},
 				});
 				return JSON.parse(responseText) as MultipartPart;
 			},
@@ -98,12 +124,17 @@ async function uploadInParts(url: string, file: File, options?: UploadFileOption
 export async function uploadFileWithProgress(url: string, file: File, options?: UploadFileOptions): Promise<void> {
 	if (shouldUseMultipart(url, file.size)) {
 		await uploadInParts(url, file, options);
+		reportBytes(options, file.size, file.size);
 		return;
 	}
 	await xhrPut(url, file, {
 		contentType: file.type,
 		signal: options?.signal,
-		onProgress: (loaded, total) => options?.onProgress?.(Math.round((loaded / total) * 100)),
+		onProgress: (loaded, total) => {
+			options?.onProgress?.(Math.round((loaded / total) * 100));
+			reportBytes(options, loaded, total);
+		},
 	});
 	options?.onProgress?.(100);
+	reportBytes(options, file.size, file.size);
 }

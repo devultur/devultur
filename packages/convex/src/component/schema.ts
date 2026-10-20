@@ -30,6 +30,12 @@ export default defineSchema({
 		filename: v.string(),
 		contentType: v.string(),
 		sizeBytes: v.number(),
+		// Set by a confirmed upload (see uploads.ts). Unset on records from before 1.1.1 and on videos recorded only by
+		// `processVideo`. The record's `key` is the media id for every kind; `objectKey` is the stored object's key.
+		visibility: v.optional(v.union(v.literal("public"), v.literal("private"))),
+		objectKey: v.optional(v.string()),
+		width: v.optional(v.number()),
+		height: v.optional(v.number()),
 		transcodeStatus: v.optional(
 			v.union(
 				v.literal("queued"),
@@ -70,7 +76,10 @@ export default defineSchema({
 		captionsPending: v.optional(v.boolean()),
 		duration: v.optional(v.number()),
 		createdAt: v.number(),
-	}).index("by_key", ["key"]),
+	})
+		.index("by_key", ["key"])
+		// The media library by kind (`listMediaPage`), newest first.
+		.index("by_type", ["type"]),
 
 	captions: defineTable({
 		mediaKey: v.string(),

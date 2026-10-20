@@ -5,7 +5,15 @@ describe("dv.media", () => {
 	it("produce un validador object con los campos de DevulturMedia", () => {
 		const validator = dv.media();
 		expect(validator.kind).toBe("object");
-		expect(Object.keys(validator.fields).sort()).toEqual(["filename", "height", "id", "kind", "visibility", "width"]);
+		expect(Object.keys(validator.fields).sort()).toEqual([
+			"filename",
+			"height",
+			"id",
+			"key",
+			"kind",
+			"visibility",
+			"width",
+		]);
 	});
 
 	it("sin kind: acepta los tres tipos (union)", () => {
@@ -25,5 +33,9 @@ describe("dv.media", () => {
 		expect(fields.visibility.isOptional).toBe("required");
 		expect(fields.filename.isOptional).toBe("optional");
 		expect(fields.width.isOptional).toBe("optional");
+	});
+
+	it("keeps `key` optional, so references stored without it stay valid", () => {
+		expect(dv.media().fields.key.isOptional).toBe("optional");
 	});
 });

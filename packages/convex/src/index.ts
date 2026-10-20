@@ -18,5 +18,6 @@ export {
 } from "@devultur/core";
 export { Devultur } from "./client";
 export { type DevulturErrorData, devulturErrorOf, isDevulturError } from "./errors";
+export { mediaFromRecord } from "./media-record";
 export type { DevulturComponentConfig, MediaRecord, ProgressRecord } from "./types";
 export { dv } from "./validators";

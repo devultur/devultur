@@ -1,10 +1,16 @@
 // A minimal in-memory stand-in for a Convex `ctx.db`: enough of insert / get / patch / delete and
-// `query(table).withIndex(name, (q) => q.eq(...)).first() | .collect()` to run the component's mutations for real.
+// `query(table).withIndex(name, (q) => q.eq(...)).first() | .collect()` (plus `.filter()` and `.collect()` on a whole
+// table) to run the component's functions for real.
 
 type Document = Record<string, unknown> & { _id: string };
 
 interface IndexRange {
 	eq(field: string, value: unknown): IndexRange;
+}
+
+interface FieldFilter {
+	field(name: string): string;
+	eq(field: string, value: unknown): [string, unknown];
 }
 
 export function memoryDb() {
@@ -55,11 +61,27 @@ export function memoryDb() {
 					return range;
 				},
 			};
+			// `order(...).paginate(...)`: the cursor is the offset of the page's end, as a string.
+			const order = (direction: "asc" | "desc") => ({
+				paginate: async ({ numItems, cursor }: { numItems: number; cursor: string | null }) => {
+					const ordered = direction === "desc" ? matches().reverse() : matches();
+					const start = cursor ? Number(cursor) : 0;
+					const end = start + numItems;
+					return { page: ordered.slice(start, end), isDone: end >= ordered.length, continueCursor: String(end) };
+				},
+			});
 			return {
 				withIndex(_index: string, select: (q: IndexRange) => IndexRange) {
 					select(range);
-					return { first: async () => matches()[0] ?? null, collect: async () => matches() };
+					return { first: async () => matches()[0] ?? null, collect: async () => matches(), order };
 				},
+				order,
+				// Only `filter((q) => q.eq(q.field(name), value))`, the one filter the component uses.
+				filter(select: (q: FieldFilter) => [string, unknown]) {
+					conditions.push(select({ field: (name) => name, eq: (field, value) => [field, value] }));
+					return { collect: async () => matches() };
+				},
+				collect: async () => matches(),
 			};
 		},
 	};

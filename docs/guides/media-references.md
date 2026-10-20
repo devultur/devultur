@@ -60,6 +60,13 @@ async function onFile(file: File) {
 }
 ```
 
+`upload()` also takes `onProgress` (`{ loadedBytes, totalBytes, fraction }` of the PUT) and an abort `signal`. The
+reference it returns carries the uploaded object's `key` (`thumbnail.key`), an optional field of `DevulturMedia` and
+`dv.media()`, so it stores as-is and references saved without it stay valid. Delivery never reads it: paths are
+derived from the other fields. With the Convex component, every upload is also recorded in its media library
+(`listMedia`); see [Upload progress and the media
+library](../../packages/convex/README.md#media-library).
+
 ## Render with `<Image>`
 
 `<Image>` composes the URL, injects the viewer token when needed, and works inside a

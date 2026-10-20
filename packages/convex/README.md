@@ -67,6 +67,86 @@ function CoverUpload({ onSaved }) {
 }
 ```
 
+## Upload progress
+
+`upload(file, { onProgress, signal })` reports the PUT's progress and resolves to the stored reference:
+
+```tsx
+const { upload } = useDevultur();
+
+const media = await upload(file, {
+  onProgress: ({ loadedBytes, totalBytes, fraction }) => setPercent(Math.round(fraction * 100)),
+  signal: controller.signal, // aborts the PUT; upload() rejects with an AbortError
+});
+media.key; // the uploaded object's key ("private/image/<id>/<name>"; a video's raw file)
+await saveCover({ cover: media }); // a DevulturMedia: stores as-is in a dv.media() field, key included
+```
+
+The PUT goes through `XMLHttpRequest` (`fetch` reports no upload progress), in parts for large files. `key` is an
+optional field of `DevulturMedia` and of `dv.media()` (since 1.1.1), so references stored without it stay valid. It
+is informational: delivery URLs are still derived from `id`, `kind`, `visibility` and `filename`.
+
+## Media library
+
+Every upload, whatever its kind, gets a record in the component's `media` table once its bytes are stored, so
+`listMedia` lists your images, files and videos:
+
+```typescript
+// convex/library.ts
+import { Devultur, mediaFromRecord } from "@devultur/convex";
+import { query } from "./_generated/server";
+import { components } from "./_generated/api";
+
+const devultur = new Devultur(components.devultur);
+
+export const images = query({
+  args: {},
+  handler: async (ctx) => {
+    // Check who's asking first: listMedia returns every record, of every user.
+    const records = await devultur.listMedia(ctx, { type: "image" }); // or "video" | "file", or no filter
+    return records.map((record) => ({ record, media: mediaFromRecord(record) }));
+  },
+});
+```
+
+`listMedia` reads every record at once: fine for a handful, unbounded for a library. Page a library with
+`listMediaPage`, newest first, on a `by_type` index:
+
+```typescript
+import { paginationOptsValidator } from "convex/server";
+import { v } from "convex/values";
+
+export const imagesPage = query({
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, { paginationOpts }) => {
+    // Check who's asking first.
+    return devultur.listMediaPage(ctx, { type: "image", paginationOpts });
+  },
+});
+// React: usePaginatedQuery(api.library.imagesPage, {}, { initialNumItems: 24 })
+```
+
+`Devultur.exposeApi` also returns a `listMediaPage` query (`{ type?, paginationOpts }`). It lists every user's media,
+so export it only when every caller may see the whole library.
+
+A record is written only after the Worker confirms the object exists, so an abandoned upload never shows up:
+
+1. After its PUT, the client calls `confirmUpload({ key, filename, width, height })`. The component asks the Worker
+   for the object (a `HEAD`) and records its size and content type. `useDevultur().upload()` and `useMediaUpload` do
+   this for you when the `api` you pass `<DevulturProvider>` has `confirmUpload` (add it to the functions you export
+   from `Devultur.exposeApi` in `convex/devultur.ts`). From your server: `devultur.confirmUpload(ctx, { key })`.
+2. `createUploadUrl` also schedules the same check for 25 hours later, past the longest an upload can take. An upload
+   whose client never confirmed is recorded then; one that was never stored, or was deleted, isn't.
+
+A record's `key` is the media id for every kind (what `getMedia` takes), and `objectKey` is the uploaded object's key.
+`confirmUpload` only accepts upload keys (`{visibility}/{image|file}/{id}/{name}`, `{visibility}/video/{id}/raw/{name}`)
+and is idempotent: a video's transcode state stays as it is. `deleteMedia` removes an image's or a file's record once
+the Worker deleted the object (a delete refused by a lock keeps it). `deleteVideo` removes a video's.
+
+Records from before 1.1.1 (and a video only `processVideo` recorded) have no `visibility` or `objectKey`;
+`mediaFromRecord` returns `null` for them. Nothing needs migrating: the new fields are optional. `listMedia` doesn't
+report an object's lock: read it from an action with `devultur.getLock(ctx, record.objectKey)`.
+
 ## Using a self-hosted Worker
 
 The component talks to any Worker built with `createWorker()` from

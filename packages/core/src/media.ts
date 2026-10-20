@@ -22,6 +22,11 @@ export interface DevulturMedia<V extends Visibility = Visibility> {
 	readonly visibility: V;
 	/** Original upload name (display / download). */
 	readonly filename?: string;
+	/**
+	 * Key of the uploaded object (`{visibility}/{kind}/{id}/…`; a video's raw file), as the upload returned it. Optional
+	 * and informational: delivery paths are still derived from the other fields (`mediaPath`), never from it.
+	 */
+	readonly key?: string;
 	/** Intrinsic width (px) — enables `<img>` with no CLS. */
 	readonly width?: number;
 	/** Intrinsic height (px). */

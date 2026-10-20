@@ -8,6 +8,8 @@ const mediaFields = {
 	id: v.string(),
 	visibility: v.union(v.literal("public"), v.literal("private")),
 	filename: v.optional(v.string()),
+	// The uploaded object's key, as `upload()` returns it. Optional: references stored before it stay valid.
+	key: v.optional(v.string()),
 	width: v.optional(v.number()),
 	height: v.optional(v.number()),
 } as const;

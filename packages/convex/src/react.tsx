@@ -19,13 +19,19 @@ import {
 	type Visibility,
 	visibilityFromKey,
 } from "@devultur/core";
-import { type MediaUploadError, type MediaUploadState, UploadHttpError, uploadFileWithProgress } from "@devultur/react";
+import {
+	type MediaUploadError,
+	type MediaUploadState,
+	UploadHttpError,
+	type UploadProgress,
+	uploadFileWithProgress,
+} from "@devultur/react";
 import { useAction, useConvex, useMutation, useQuery } from "convex/react";
 import type { FunctionReference } from "convex/server";
 import { isSessionMismatch } from "./image-recovery";
 import { deriveUploadState, type UploadPhase } from "./media-upload-derive";
 
-export type { MediaUploadError, MediaUploadState } from "@devultur/react";
+export type { MediaUploadError, MediaUploadState, UploadProgress } from "@devultur/react";
 export type { CropUploadLabels, CropUploadProps, CropUploadRenderProps } from "./crop-upload";
 export { CropUpload } from "./crop-upload";
 
@@ -39,6 +45,8 @@ type AnyQuery = FunctionReference<"query">;
 interface DevulturApi {
 	issueViewerToken: AnyAction;
 	createUploadUrl: AnyAction;
+	/** Records an upload in the component after its PUT, so it shows in `listMedia`. Optional (uploads still work). */
+	confirmUpload?: AnyAction;
 	deleteMedia: AnyAction;
 	/** Deletes the full folder of a video (raw/hls/thumbnails/captions). Required to delete videos. */
 	deleteVideo?: AnyAction;
@@ -54,6 +62,25 @@ interface DevulturApi {
 interface UploadOptions {
 	/** Visibility override for this resource. Omitted → inherits the router's default by type. */
 	visibility?: Visibility;
+	/** Progress of the PUT: bytes sent, total bytes and their fraction (0 to 1). */
+	onProgress?: (progress: UploadProgress) => void;
+	/** Aborts the PUT → `upload()` rejects with an `AbortError`. */
+	signal?: AbortSignal;
+}
+
+/**
+ * The reference `upload()` resolves to: a `DevulturMedia` whose `key` is always set (the uploaded object's key; a
+ * video's raw file, what `processVideo` takes). It stores as-is in a `dv.media()` field.
+ */
+export type UploadedMedia = DevulturMedia & { readonly key: string };
+
+/** What `createUploadUrl` returns. */
+interface UploadTarget {
+	url: string;
+	key: string;
+	id: string;
+	kind: DevulturKind;
+	visibility: Visibility;
 }
 
 interface DevulturContextValue {
@@ -62,8 +89,8 @@ interface DevulturContextValue {
 	/** Browser session secret → sent in `${SESSION_HEADER}` on every private delivery. */
 	sessionSecret: string;
 	uploadUrl: (file: File) => Promise<{ url: string; key: string }>;
-	/** Uploads a file and returns the typed reference ready to save. */
-	upload: (file: File, options?: UploadOptions) => Promise<DevulturMedia>;
+	/** Uploads a file (reporting progress), records it in the component, and returns the reference ready to save. */
+	upload: (file: File, options?: UploadOptions) => Promise<UploadedMedia>;
 	/** Delivery URL from a reference (non-hook → usable in handlers and `.map`). Token-transparent. */
 	url: (media: DevulturMedia, options?: MediaRenderOptions) => string;
 	/** Downloads a video's subtitle text for a locale (auth-transparent). */
@@ -115,6 +142,8 @@ export function DevulturProvider({ api, baseUrl, children }: DevulturProviderPro
 	const issueViewerToken = useAction(api.issueViewerToken);
 	const createUploadUrlAction = useAction(api.createUploadUrl);
 	const deleteMediaAction = useAction(api.deleteMedia);
+	// Fallback ref to respect the rules of hooks; only invoked if `api.confirmUpload` exists.
+	const confirmUploadAction = useAction(api.confirmUpload ?? api.createUploadUrl);
 	// `useAction` can't be conditional (rules of hooks); if there's no `deleteVideo`, it falls back to
 	// `deleteMedia` as a valid reference — but it's only invoked when `api.deleteVideo` exists (see `deleteMedia`).
 	const deleteVideoAction = useAction(api.deleteVideo ?? api.deleteMedia);
@@ -180,29 +209,27 @@ export function DevulturProvider({ api, baseUrl, children }: DevulturProviderPro
 	);
 
 	const upload = React.useCallback(
-		async (file: File, options?: UploadOptions): Promise<DevulturMedia> => {
+		async (file: File, options?: UploadOptions): Promise<UploadedMedia> => {
 			const dimensions = await readImageDimensions(file);
-			const result = await createUploadUrlAction({
+			const target = (await createUploadUrlAction({
 				filename: file.name,
 				contentType: file.type,
 				visibility: options?.visibility,
-			});
-			const uploadResponse = await fetch(result.url as string, {
-				method: "PUT",
-				body: file,
-				headers: { "Content-Type": file.type },
-			});
-			if (!uploadResponse.ok) throw new Error(`Upload failed: ${uploadResponse.status}`);
+			})) as UploadTarget;
+			// XHR (fetch reports no upload progress); large files against the Worker go in parts.
+			await uploadFileWithProgress(target.url, file, { onBytes: options?.onProgress, signal: options?.signal });
+			if (api.confirmUpload) await confirmUploadBestEffort(confirmUploadAction, target.key, file, dimensions);
 
 			return {
-				id: result.id as string,
-				kind: result.kind as DevulturKind,
-				visibility: result.visibility as Visibility,
+				id: target.id,
+				kind: target.kind,
+				visibility: target.visibility,
 				filename: file.name,
+				key: target.key,
 				...dimensions,
 			};
 		},
-		[createUploadUrlAction],
+		[createUploadUrlAction, confirmUploadAction, api.confirmUpload],
 	);
 
 	const url = React.useCallback(
@@ -376,6 +403,21 @@ export function useMediaUrl(key: string | null | undefined, options?: MediaRende
 		const isPublic = visibilityFromKey(key) === "public";
 		return buildMediaUrl(baseUrl, key, { ...options, token: isPublic ? undefined : (token ?? undefined) });
 	}, [key, baseUrl, token, options]);
+}
+
+// Records the upload in the component. Best-effort: the bytes are stored, and the component's scheduled check records
+// an upload nobody confirmed, so a failure here never fails the upload.
+async function confirmUploadBestEffort(
+	confirmUpload: (args: Record<string, unknown>) => Promise<unknown>,
+	key: string,
+	file: File,
+	dimensions: { width?: number; height?: number },
+): Promise<void> {
+	try {
+		await confirmUpload({ key, filename: file.name, ...dimensions });
+	} catch (error) {
+		console.warn("Devultur: could not record the upload; it is recorded later", error);
+	}
 }
 
 // Captures an image's intrinsic dimensions in the browser (for <img> with no CLS). No-op outside the
@@ -820,7 +862,8 @@ export function useMediaUpload(options?: UseMediaUploadOptions): UseMediaUploadR
 	if (!api) throw new Error("useMediaUpload must be used within <DevulturProvider>");
 	const createUploadUrlAction = useAction(api.createUploadUrl);
 	const deleteMediaAction = useAction(api.deleteMedia);
-	// Fallback ref to respect the rules of hooks; only invoked if `api.processVideo` exists.
+	// Fallback refs to respect the rules of hooks; only invoked if `api.confirmUpload` / `api.processVideo` exist.
+	const confirmUploadAction = useAction(api.confirmUpload ?? api.createUploadUrl);
 	const processVideoAction = useAction(api.processVideo ?? api.createUploadUrl);
 
 	const [phase, setPhase] = React.useState<UploadPhase>("idle");
@@ -872,7 +915,7 @@ export function useMediaUpload(options?: UseMediaUploadOptions): UseMediaUploadR
 				return null;
 			};
 
-			let result: { url: string; key: string; id: string; kind: DevulturKind; visibility: Visibility };
+			let result: UploadTarget;
 			try {
 				result = (await createUploadUrlAction({
 					filename: file.name,
@@ -898,11 +941,15 @@ export function useMediaUpload(options?: UseMediaUploadOptions): UseMediaUploadR
 				return fail(rejected ? "rejected" : "network", err instanceof Error ? err.message : "The upload failed");
 			}
 
+			// Before the transcode request: both write the media record, and this one carries the upload's fields.
+			if (api.confirmUpload) await confirmUploadBestEffort(confirmUploadAction, result.key, file, dimensions);
+
 			const uploaded: DevulturMedia = {
 				id: result.id,
 				kind: result.kind,
 				visibility: result.visibility,
 				filename: file.name,
+				key: result.key,
 				...dimensions,
 			};
 			setMedia(uploaded);
@@ -915,7 +962,18 @@ export function useMediaUpload(options?: UseMediaUploadOptions): UseMediaUploadR
 
 			return uploaded;
 		},
-		[createUploadUrlAction, deleteMediaAction, triggerProcess, visibility, replaces, process, onComplete, onError],
+		[
+			createUploadUrlAction,
+			confirmUploadAction,
+			api.confirmUpload,
+			deleteMediaAction,
+			triggerProcess,
+			visibility,
+			replaces,
+			process,
+			onComplete,
+			onError,
+		],
 	);
 
 	const cancel = React.useCallback(() => {
