@@ -13,5 +13,9 @@ Object lock fixes from a security review:
 - **Completion marker:** the durable transcode completion marker is written from the job's signed ticket, so it no longer depends on the 24 h launch record.
 - **Invalid release times:** a lock record with an invalid hold release time fails closed.
 - **Authenticated PUTs:** an authenticated `PUT /v1/upload/<key>` with no pending upload gets `config.lock` (originals only).
-- **Expiry:** a locked file is served past its `expiresAt` instead of answering `410`.
+- **Retention vs expiry:** these are now separate, as in S3 Object Lock. Retention preserves a file; it doesn't extend access to it.
+  - Past `expiresAt`, viewers, public requests and download links get `410`, even for a retained file.
+  - The owner (Worker secret) can still read a retained file, which isn't deleted until its lock ends.
+  - `GET /v1/assets` lists expired-but-retained files with `expired: true` and `retainedUntil` or `hold: true` (new optional `AssetEntry` fields in `@devultur/core`).
+  - A lock may now outlive `expiresAt`: the `400 lock_conflicts_expiry` refusal is gone.
 - **Conditional writes:** writes over an existing object are also pinned by its upload time, not only its etag.

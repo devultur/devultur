@@ -72,33 +72,6 @@ describe("resolveUploadLock", () => {
 			expect(resolveUploadLock({ now: NOW, grant: held })).toEqual({ hold: true });
 		});
 	});
-
-	describe("expiry", () => {
-		it("rejects a file that would expire before its retention ends", () => {
-			const lock = { retention: { mode: "compliance", period: 2 * DAY } };
-			expect(resolveUploadLock({ now: NOW, lock, expiresAt: NOW + DAY * 1000 })).toMatchObject({
-				status: 400,
-				code: "lock_conflicts_expiry",
-			});
-			expect(resolveUploadLock({ now: NOW, lock, expiresAt: NOW + 3 * DAY * 1000 })).toMatchObject({
-				retention: { period: 2 * DAY },
-			});
-		});
-
-		it("rejects any expiry on a held file (a hold has no end)", () => {
-			expect(resolveUploadLock({ now: NOW, hold: true, expiresAt: NOW + 365 * DAY * 1000 })).toMatchObject({
-				code: "lock_conflicts_expiry",
-			});
-		});
-
-		it("accepts an expiry with no lock, or after a fixed until", () => {
-			expect(resolveUploadLock({ now: NOW, expiresAt: NOW + 1000 })).toBeUndefined();
-			const lock = { retention: { mode: "governance", until: "2030-01-02T00:00:00Z" } };
-			expect(resolveUploadLock({ now: NOW, lock, expiresAt: NOW + 2 * DAY * 1000 })).toMatchObject({
-				retention: { until: "2030-01-02T00:00:00Z" },
-			});
-		});
-	});
 });
 
 describe("upload token lock claim", () => {

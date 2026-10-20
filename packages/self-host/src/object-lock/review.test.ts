@@ -213,15 +213,85 @@ describe("9. an authenticated PUT with no pending upload gets the config's defau
 	});
 });
 
-describe("10. a locked file doesn't expire", () => {
-	it("is served past its expiresAt while held, and 410 once free", async () => {
+// Retention preserves, expiry ends access (like S3 Object Lock): past `expiresAt`, viewers get 410 whether or not the
+// file is retained; the owner can still read a retained one; nothing retained is deleted.
+describe("10. retention vs expiry", () => {
+	const KEY = "private/file/e/e.pdf";
+	const expired = (lock?: unknown) => ({
+		...empty(),
+		customMetadata: { expiresAt: String(Date.now() - 1000), ...(lock ? { lock: JSON.stringify(lock) } : {}) },
+	});
+
+	async function viewerToken(send: (path: string, init?: RequestInit) => Response | Promise<Response>) {
+		const res = await send("/v1/token", { method: "POST", body: JSON.stringify({ userId: "viewer" }) });
+		return ((await res.json()) as { token: string }).token;
+	}
+
+	it("expired and retained: viewers 410, the owner reads it, it isn't deleted", async () => {
+		quiet();
+		const { app, env, executionCtx, send, mediaBucket } = lockedFixture();
+		mediaBucket.objects.set(KEY, expired({ hold: true }));
+		const token = await viewerToken(send);
+		const asViewer = await app.request(
+			`https://media.example/v1/media/${KEY}?token=${token}`,
+			{},
+			env as never,
+			executionCtx as never,
+		);
+		expect(asViewer.status).toBe(410);
+		expect((await send(`/v1/media/${KEY}`)).status).toBe(200);
+		expect((await send(`/v1/media/${KEY}`, { method: "DELETE" })).status).toBe(409);
+		expect(mediaBucket.objects.has(KEY)).toBe(true);
+	});
+
+	it("expired and free: 410 for everyone, and the expiry cleanup can delete it", async () => {
 		quiet();
 		const { send, mediaBucket } = lockedFixture();
-		const key = "private/file/e/e.pdf";
-		const expiresAt = String(Date.now() - 1000);
-		mediaBucket.objects.set(key, { ...empty(), customMetadata: { expiresAt, lock: JSON.stringify({ hold: true }) } });
-		expect((await send(`/v1/media/${key}`)).status).toBe(200);
-		await send("/v1/lock/hold", { method: "POST", body: JSON.stringify({ hold: false, keys: [key] }) });
-		expect((await send(`/v1/media/${key}`)).status).toBe(410);
+		mediaBucket.objects.set(KEY, expired({ hold: true }));
+		await send("/v1/lock/hold", { method: "POST", body: JSON.stringify({ hold: false, keys: [KEY] }) });
+		expect((await send(`/v1/media/${KEY}`)).status).toBe(410);
+		expect((await send(`/v1/media/${KEY}`, { method: "DELETE" })).status).toBe(204);
+	});
+
+	it("the owner's asset listing includes expired-but-retained files, marked, and leaves free expired ones out", async () => {
+		quiet();
+		const { send, mediaBucket } = lockedFixture();
+		mediaBucket.objects.set("private/asset/r/live.pdf", empty());
+		mediaBucket.objects.set("private/asset/r/held.pdf", expired({ hold: true }));
+		mediaBucket.objects.set(
+			"private/asset/r/kept.pdf",
+			expired({ retention: { mode: "compliance", until: "2999-01-01T00:00:00Z" } }),
+		);
+		mediaBucket.objects.set("private/asset/r/gone.pdf", expired());
+		const res = await send("/v1/assets?prefix=r/&visibility=private");
+		const { objects } = (await res.json()) as { objects: Record<string, unknown>[] };
+		const byPath = Object.fromEntries(objects.map((entry) => [entry.path, entry]));
+		expect(Object.keys(byPath).sort()).toEqual(["r/held.pdf", "r/kept.pdf", "r/live.pdf"]);
+		expect(byPath["r/live.pdf"]).not.toHaveProperty("expired");
+		expect(byPath["r/held.pdf"]).toMatchObject({ expired: true, hold: true });
+		expect(byPath["r/kept.pdf"]).toMatchObject({ expired: true, retainedUntil: "2999-01-01T00:00:00.000Z" });
+	});
+});
+
+describe("download links are access: capped by expiresAt, retained or not", () => {
+	it("refuses a link for an expired retained file, and caps one for a live file", async () => {
+		const worker = exportsWorker();
+		const expiresAt = Date.now() - 1000;
+		const lock = JSON.stringify({ hold: true });
+		worker.mediaBucket.objects.set("prefix-a/private/asset/x/old.pdf", {
+			...empty(),
+			customMetadata: { expiresAt: String(expiresAt), lock },
+		});
+		const refused = await worker.postJson("/v1/token/download", { key: "private/asset/x/old.pdf" });
+		expect(refused.status).toBe(410);
+
+		const soon = Date.now() + 60_000;
+		worker.mediaBucket.objects.set("prefix-a/private/asset/x/new.pdf", {
+			...empty(),
+			customMetadata: { expiresAt: String(soon), lock },
+		});
+		const issued = await worker.postJson("/v1/token/download", { key: "private/asset/x/new.pdf", expiresIn: 3600 });
+		expect(issued.status).toBe(200);
+		expect(((await issued.json()) as { expiresAt: number }).expiresAt).toBeLessThanOrEqual(soon);
 	});
 });

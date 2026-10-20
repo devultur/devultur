@@ -8,12 +8,11 @@ import { contentDispositionAttachment, relativeMediaPath, TokenScope } from "@de
 import { type Context, Hono } from "hono";
 import { DownloadLinkPath, type DownloadLinkRecord, recordContext } from "../download-link";
 import { contentDispositionInline, storageKey } from "../helpers";
-import { isExpiredAndUnlocked } from "../object-lock/delivery";
 import { cappedExpiry, decideCredential, gateLinkRedemption, getPluginHooks } from "../plugin-hooks";
 import { getRequestState } from "../request-state";
 import { addRouteResult, type DownloadLinkInfo } from "../route-result";
 import type { WorkerApp } from "../types";
-import { expiredResponse, streamObject } from "./object-response";
+import { expiredResponse, isObjectExpired, streamObject } from "./object-response";
 
 const DEFAULT_LINK_TTL_SECONDS = 15 * 60;
 export const MAX_LINK_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -71,10 +70,10 @@ export async function handleDownloadLink(context: WorkerContext): Promise<Respon
 	const fullKey = storageKey(context, parsed.key);
 	const object = await context.env.MEDIA_BUCKET.head(fullKey);
 	if (!object) return context.json({ error: "Not found" }, 404);
-	const location = { root: getRequestState(context).storagePrefix, key: parsed.key };
-	if (await isExpiredAndUnlocked(context.env.MEDIA_BUCKET, location, object)) return expiredResponse();
+	// A link is access: past `expiresAt` there's none to give, even for a retained file (retention doesn't extend it).
+	if (isObjectExpired(object.customMetadata)) return expiredResponse();
 
-	// The link doesn't outlive the file, nor whatever the `issueCredential` hook allows.
+	// The link doesn't outlive the file's `expiresAt`, nor whatever the `issueCredential` hook allows.
 	const objectExpiresAt = Number(object.customMetadata?.expiresAt) || Infinity;
 	const requestedExpiresAt = Math.min(Date.now() + parsed.expiresIn * 1000, objectExpiresAt);
 	const decision = await decideCredential(context, {
@@ -148,8 +147,7 @@ download.get("/:linkId", async (context) => {
 
 	const object = await context.env.MEDIA_BUCKET.get(record.storageKey);
 	if (!object) return context.json({ error: "Not found" }, 404);
-	const location = { root: record.storagePrefix, key: record.key };
-	if (await isExpiredAndUnlocked(context.env.MEDIA_BUCKET, location, object)) return expiredResponse();
+	if (isObjectExpired(object.customMetadata)) return expiredResponse();
 	addRouteResult(context, { redeemedLink: linkInfoOf(record) });
 
 	const headers = new Headers({

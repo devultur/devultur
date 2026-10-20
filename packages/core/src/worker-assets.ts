@@ -16,6 +16,15 @@ export interface AssetEntry {
 	uploaded: string;
 	cacheControl: string | null;
 	visibility: Visibility;
+	/**
+	 * Past its `expiresAt` but still retained by a lock: viewers get `410`, the worker's credential can still read it,
+	 * and it isn't deleted until its lock ends. Absent on a live entry (expired free entries aren't listed).
+	 */
+	expired?: true;
+	/** The effective expiry of the retention keeping an expired entry, when it has a date (ISO 8601). */
+	retainedUntil?: string;
+	/** An expired entry kept by a hold. */
+	hold?: true;
 }
 
 export interface ListAssetsOptions {

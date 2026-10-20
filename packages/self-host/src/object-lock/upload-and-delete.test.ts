@@ -68,10 +68,13 @@ describe("lock at upload", () => {
 		expect(storedLock(worker, key)).toBe('{"hold":true}');
 	});
 
-	it("rejects an expiry before the lock ends", async () => {
+	// Retention keeps the object; expiry ends access to it. Share for a minute, keep for centuries.
+	it("accepts a lock that outlives the file's expiry", async () => {
 		const worker = exportsWorker();
-		const result = await upload(worker, { hold: true, expiresIn: 60 });
-		expect(result).toMatchObject({ status: 400, code: "lock_conflicts_expiry" });
+		const result = await upload(worker, { lock: COMPLIANCE, hold: true, expiresIn: 60 });
+		expect(result.status).toBe(200);
+		const stored = worker.mediaBucket.objects.get(`prefix-a/${result.key}`)?.customMetadata;
+		expect(stored).toMatchObject({ expiresAt: expect.any(String), lock: expect.stringContaining("compliance") });
 	});
 
 	it("enforces an upload token's minimum lock", async () => {

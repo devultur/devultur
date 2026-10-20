@@ -119,7 +119,6 @@ upload.post("/", async (context) => {
 		grant,
 		appDefault: scope.config?.lock,
 		now: Date.now(),
-		expiresAt,
 	});
 	if (isUploadTargetError(lock)) return targetFailure(context, lock);
 
