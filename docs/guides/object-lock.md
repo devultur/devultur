@@ -355,7 +355,9 @@ do {
   too, inert, as with the routes. Nothing under `__lock/` or `__lock-audit/` is touched: once a storage prefix has
   nothing retained left, delete those yourself if you're tearing it down.
 - **Bounded.** A Worker invocation has a subrequest limit. Each call stops before `maxSubrequests` bucket calls
-  (default 500) and returns a `cursor` to go on from. `batchSize` (default 100, at most 1000) sets how many objects it
+  and returns a `cursor` to go on from. The default, 40, fits under the Workers Free plan's 50 subrequests per
+  request and leaves room for your own calls. On a paid plan, raise it (to a few hundred, say) so each call gets
+  further. `batchSize` (default 100, at most 1000) sets how many objects it
   lists at a time. Run a large prefix over several invocations (a queue, or a cron that keeps the cursor).
 - **Not audited.** The call is your code, not a request, so no audit record or hook runs: log `retained` if you need a
   trail. The [check/delete window](#caveats) applies.

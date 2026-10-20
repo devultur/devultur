@@ -12,11 +12,14 @@ export interface PrefixWalkOptions extends LockLookupOptions {
 	cursor?: string;
 	/** Objects listed per page. Default 100, at most 1000. */
 	batchSize?: number;
-	/** Bucket calls this call may make. Default 500. */
+	/**
+	 * Bucket calls this call may make. Default 40: under the free plan's 50 subrequests per request, with room for the
+	 * caller's own. Raise it on a paid plan.
+	 */
 	maxSubrequests?: number;
 }
 
-export const DEFAULT_MAX_SUBREQUESTS = 500;
+export const DEFAULT_MAX_SUBREQUESTS = 40;
 const DEFAULT_BATCH_SIZE = 100;
 const MAX_BATCH_SIZE = 1000;
 
