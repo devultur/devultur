@@ -122,6 +122,11 @@ pnpm test
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: [SECURITY.md](SECURITY.md).
 
+## Contributing
+
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md); contributors sign a one-time
+[Contributor License Agreement](CLA.md).
+
 ## License
 
 The SDKs (`core`, `server`, `react`, `convex`) are MIT. The media Worker (`self-host`) is AGPL-3.0-only. See
