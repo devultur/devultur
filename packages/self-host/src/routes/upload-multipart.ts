@@ -26,6 +26,7 @@ import {
 } from "@devultur/core";
 import type { Context } from "hono";
 import { contentDispositionInline, createObjectEncryption, loadStorageKey, shouldEncryptAtRest } from "../helpers";
+import { isKeysBucketMissing, keysBucketMissing } from "../keys-bucket";
 import { afterUploadWrite, prepareUploadWrite } from "../object-lock/upload-write";
 import { getRequestState } from "../request-state";
 import type { MultipartPending, UploadPending, WorkerApp } from "../types";
@@ -128,6 +129,10 @@ async function handleMultipartCreate(context: UploadContext, key: string, target
 	if (pending.multipart) {
 		return context.json({ uploadId: pending.multipart.uploadId, partSize: pending.multipart.partSize, partCount });
 	}
+	const policy = resolveSecurity(pending.security, getRequestState(context).config?.security);
+	const shouldEncrypt = shouldEncryptAtRest(policy, key);
+	// Fail closed: no R2 session for a private file that can't be encrypted (see keys-bucket.ts).
+	if (isKeysBucketMissing(shouldEncrypt, context.env)) return keysBucketMissing(context);
 	// Before the encryption key and the R2 session: a taken asset or a locked object gets nothing created.
 	const write = await prepareUploadWrite(context, pending.key ?? key, pending, pending.storageKey);
 	if ("blocked" in write) return write.blocked;
@@ -140,9 +145,8 @@ async function handleMultipartCreate(context: UploadContext, key: string, target
 		...lockMetadata(pending.lock),
 	};
 	if (pending.security) customMetadata.security = JSON.stringify(pending.security);
-	const policy = resolveSecurity(pending.security, getRequestState(context).config?.security);
 	let enc: string | undefined;
-	if (context.env.KEYS_BUCKET && shouldEncryptAtRest(policy, key, true)) {
+	if (shouldEncrypt && context.env.KEYS_BUCKET) {
 		({ enc } = await createObjectEncryption(context.env.KEYS_BUCKET, pending.storageKey, { ...customMetadata }));
 		customMetadata.enc = enc;
 	}

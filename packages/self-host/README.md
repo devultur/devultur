@@ -30,6 +30,10 @@ compatibility_date = "2026-10-01"
 binding = "MEDIA_BUCKET"
 bucket_name = "my-media"
 
+[[r2_buckets]]
+binding = "KEYS_BUCKET" # per-object encryption keys: required when security.encrypt is on
+bucket_name = "my-media-keys"
+
 [[kv_namespaces]]
 binding = "MEDIA_KV" # pending uploads and transcode job state
 id = "<your KV namespace id>"
@@ -44,13 +48,16 @@ new_sqlite_classes = ["DownloadLink"]
 ```
 
 ```bash
+wrangler r2 bucket create my-media
+wrangler r2 bucket create my-media-keys        # keep it private and backed up
 wrangler secret put DELIVERY_SIGN_SECRET       # signs viewer tokens and links
 wrangler secret put WORKER_AUTH_SECRET         # your backend's bearer on control routes
 wrangler secret put TRANSCODE_WEBHOOK_SECRET   # signs transcode callbacks
 wrangler deploy
 ```
 
-Without its secrets the Worker fails closed: control routes answer `503`. Call it from your backend with
+Without its secrets the Worker fails closed: control routes answer `503`. With encryption at rest on and no
+`KEYS_BUCKET`, private writes answer `503 keys_bucket_missing` instead of storing plaintext. Call it from your backend with
 [`@devultur/server`](https://www.npmjs.com/package/@devultur/server). The Worker is built from plugins:
 `createWorker({ plugins })` takes your rules, your own auth, hooks before a credential is issued, and routes and
 middleware of your own.
