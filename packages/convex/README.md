@@ -79,12 +79,12 @@ const media = await upload(file, {
   signal: controller.signal, // aborts the PUT; upload() rejects with an AbortError
 });
 media.key; // the uploaded object's key ("private/image/<id>/<name>"; a video's raw file)
-await saveCover({ cover: media }); // still a plain DevulturMedia for a dv.media() field
+await saveCover({ cover: media }); // a DevulturMedia: stores as-is in a dv.media() field, key included
 ```
 
-The PUT goes through `XMLHttpRequest` (`fetch` reports no upload progress), in parts for large files. `key` is not
-enumerable, so the reference stores in a `dv.media()` field unchanged, and a spread copy (`{ ...media }`) leaves it
-out.
+The PUT goes through `XMLHttpRequest` (`fetch` reports no upload progress), in parts for large files. `key` is an
+optional field of `DevulturMedia` and of `dv.media()` (since 1.1.1), so references stored without it stay valid. It
+is informational: delivery URLs are still derived from `id`, `kind`, `visibility` and `filename`.
 
 ## Media library
 
@@ -108,6 +108,26 @@ export const images = query({
   },
 });
 ```
+
+`listMedia` reads every record at once: fine for a handful, unbounded for a library. Page a library with
+`listMediaPage`, newest first, on a `by_type` index:
+
+```typescript
+import { paginationOptsValidator } from "convex/server";
+import { v } from "convex/values";
+
+export const imagesPage = query({
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, { paginationOpts }) => {
+    // Check who's asking first.
+    return devultur.listMediaPage(ctx, { type: "image", paginationOpts });
+  },
+});
+// React: usePaginatedQuery(api.library.imagesPage, {}, { initialNumItems: 24 })
+```
+
+`Devultur.exposeApi` also returns a `listMediaPage` query (`{ type?, paginationOpts }`). It lists every user's media,
+so export it only when every caller may see the whole library.
 
 A record is written only after the Worker confirms the object exists, so an abandoned upload never shows up:
 

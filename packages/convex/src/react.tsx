@@ -69,9 +69,8 @@ interface UploadOptions {
 }
 
 /**
- * The reference `upload()` resolves to: a `DevulturMedia` that also carries the uploaded object's `key` (a video's raw
- * file, what `processVideo` takes). `key` is not enumerable, so the reference still stores as-is in a `dv.media()`
- * field; read it as `media.key` (a spread copy doesn't keep it).
+ * The reference `upload()` resolves to: a `DevulturMedia` whose `key` is always set (the uploaded object's key; a
+ * video's raw file, what `processVideo` takes). It stores as-is in a `dv.media()` field.
  */
 export type UploadedMedia = DevulturMedia & { readonly key: string };
 
@@ -82,10 +81,6 @@ interface UploadTarget {
 	id: string;
 	kind: DevulturKind;
 	visibility: Visibility;
-}
-
-function withUploadKey(media: DevulturMedia, key: string): UploadedMedia {
-	return Object.defineProperty({ ...media }, "key", { value: key, enumerable: false }) as UploadedMedia;
 }
 
 interface DevulturContextValue {
@@ -225,14 +220,14 @@ export function DevulturProvider({ api, baseUrl, children }: DevulturProviderPro
 			await uploadFileWithProgress(target.url, file, { onBytes: options?.onProgress, signal: options?.signal });
 			if (api.confirmUpload) await confirmUploadBestEffort(confirmUploadAction, target.key, file, dimensions);
 
-			const media: DevulturMedia = {
+			return {
 				id: target.id,
 				kind: target.kind,
 				visibility: target.visibility,
 				filename: file.name,
+				key: target.key,
 				...dimensions,
 			};
-			return withUploadKey(media, target.key);
 		},
 		[createUploadUrlAction, confirmUploadAction, api.confirmUpload],
 	);
@@ -954,6 +949,7 @@ export function useMediaUpload(options?: UseMediaUploadOptions): UseMediaUploadR
 				kind: result.kind,
 				visibility: result.visibility,
 				filename: file.name,
+				key: result.key,
 				...dimensions,
 			};
 			setMedia(uploaded);

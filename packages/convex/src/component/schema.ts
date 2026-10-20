@@ -76,7 +76,10 @@ export default defineSchema({
 		captionsPending: v.optional(v.boolean()),
 		duration: v.optional(v.number()),
 		createdAt: v.number(),
-	}).index("by_key", ["key"]),
+	})
+		.index("by_key", ["key"])
+		// The media library by kind (`listMediaPage`), newest first.
+		.index("by_type", ["type"]),
 
 	captions: defineTable({
 		mediaKey: v.string(),

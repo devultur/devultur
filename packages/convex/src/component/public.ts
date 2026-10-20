@@ -1,5 +1,6 @@
 import type { WorkerClient } from "@devultur/core";
 import { DEFAULT_TOKEN_EXPIRY_SECONDS, extractId, MediaEventName, MediaStatus } from "@devultur/core";
+import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { api, internal } from "./_generated/api";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
@@ -318,6 +319,7 @@ export const getMediaByKey = query({
 	},
 });
 
+// Every record at once: fine for a handful, unbounded for a library. A library pages with `listMediaPage`.
 export const listMedia = query({
 	args: { type: v.optional(v.union(v.literal("video"), v.literal("image"), v.literal("file"))) },
 	handler: async (ctx, args) => {
@@ -326,6 +328,21 @@ export const listMedia = query({
 			return mediaQuery.filter((q) => q.eq(q.field("type"), args.type)).collect();
 		}
 		return mediaQuery.collect();
+	},
+});
+
+/** One page of the media library, newest first, optionally of one type (`by_type` index). */
+export const listMediaPage = query({
+	args: {
+		type: v.optional(v.union(v.literal("video"), v.literal("image"), v.literal("file"))),
+		paginationOpts: paginationOptsValidator,
+	},
+	handler: async (ctx, args) => {
+		const { type } = args;
+		const records = type
+			? ctx.db.query("media").withIndex("by_type", (q) => q.eq("type", type))
+			: ctx.db.query("media");
+		return records.order("desc").paginate(args.paginationOpts);
 	},
 });
 

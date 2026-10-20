@@ -22,6 +22,7 @@ describe("mediaFromRecord", () => {
 			kind: "image",
 			visibility: "public",
 			filename: "Cover photo.png",
+			key: "public/image/abc123/Cover_photo.png",
 			width: 640,
 			height: 480,
 		});

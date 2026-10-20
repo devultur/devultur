@@ -13,6 +13,7 @@ export function mediaFromRecord(record: MediaRecord): DevulturMedia | null {
 		kind: record.type,
 		visibility: record.visibility,
 		filename: record.filename,
+		...(record.objectKey ? { key: record.objectKey } : {}),
 		...(record.width !== undefined ? { width: record.width } : {}),
 		...(record.height !== undefined ? { height: record.height } : {}),
 	};

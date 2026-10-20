@@ -106,19 +106,15 @@ describe("useDevultur().upload()", () => {
 		expect(onProgress).toHaveBeenLastCalledWith({ loadedBytes: 12, totalBytes: 12, fraction: 1 });
 	});
 
-	it("returns the reference with the uploaded key, which a dv.media() field still stores as-is", async () => {
+	it("returns the reference with the uploaded key, which survives a spread and a Convex call", async () => {
 		const { result } = renderDevultur();
 
 		const media = await act(() => result.current.upload(pdf()));
 
-		expect(media).toEqual({ id: "abc123", kind: "file", visibility: "private", filename: "doc.pdf" });
-		expect(media.key).toBe(UPLOAD_KEY);
-		expect(convexToJson(media as unknown as Value)).toEqual({
-			id: "abc123",
-			kind: "file",
-			visibility: "private",
-			filename: "doc.pdf",
-		});
+		const reference = { id: "abc123", kind: "file", visibility: "private", filename: "doc.pdf", key: UPLOAD_KEY };
+		expect(media).toEqual(reference);
+		expect({ ...media }).toEqual(reference);
+		expect(convexToJson(media as unknown as Value)).toEqual(reference);
 	});
 
 	it("confirms the upload after the PUT, so it shows in listMedia", async () => {

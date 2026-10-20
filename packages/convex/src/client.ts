@@ -1,7 +1,14 @@
 import type { HoldPage, LockView, ObjectLock, SetLockOptions } from "@devultur/core";
 import { extractId } from "@devultur/core";
-import type { GenericActionCtx, GenericDataModel, GenericMutationCtx, GenericQueryCtx } from "convex/server";
-import { actionGeneric, mutationGeneric, queryGeneric } from "convex/server";
+import type {
+	GenericActionCtx,
+	GenericDataModel,
+	GenericMutationCtx,
+	GenericQueryCtx,
+	PaginationOptions,
+	PaginationResult,
+} from "convex/server";
+import { actionGeneric, mutationGeneric, paginationOptsValidator, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import type { ComponentApi } from "./component/_generated/component.js";
 import type { DevulturComponentConfig, MediaRecord } from "./types";
@@ -12,6 +19,7 @@ type MutationCtx = GenericMutationCtx<GenericDataModel>;
 type ActionCtx = GenericActionCtx<GenericDataModel>;
 type UploadUrlArgs = { filename: string; contentType: string; visibility?: "public" | "private" };
 type MediaType = "video" | "image" | "file";
+type MediaPageArgs = { type?: MediaType; paginationOpts: PaginationOptions };
 type ConfirmUploadArgs = { key: string; filename?: string; width?: number; height?: number };
 
 export class Devultur {
@@ -48,10 +56,16 @@ export class Devultur {
 
 	/**
 	 * The recorded media (every confirmed upload, and every video sent to `processVideo`), optionally of one type.
-	 * `mediaFromRecord(record)` turns a row into the reference `<Image>` and `dv.media()` take.
+	 * `mediaFromRecord(record)` turns a row into the reference `<Image>` and `dv.media()` take. Unbounded: it reads every
+	 * record, so a media library pages with `listMediaPage`.
 	 */
 	async listMedia(ctx: QueryCtx, args?: { type?: MediaType }): Promise<MediaRecord[]> {
 		return ctx.runQuery(this.component.public.listMedia, args ?? {});
+	}
+
+	/** One page of the recorded media, newest first, optionally of one type. Takes Convex's `paginationOpts`. */
+	async listMediaPage(ctx: QueryCtx, args: MediaPageArgs): Promise<PaginationResult<MediaRecord>> {
+		return ctx.runQuery(this.component.public.listMediaPage, args);
 	}
 
 	/** The lock in force on `key`. */
@@ -150,6 +164,18 @@ export class Devultur {
 				handler: async (ctx: QueryCtx, args: { key: string }) => {
 					const mediaKey = args.key.includes("/") ? extractId(args.key) : args.key;
 					return ctx.runQuery(component.public.getMediaByKey, { key: mediaKey });
+				},
+			}),
+
+			// The media library, a page at a time (for `usePaginatedQuery`). It lists every record, of every user: export
+			// it only when every caller may see the whole library, otherwise wrap `devultur.listMediaPage` with your checks.
+			listMediaPage: queryGeneric({
+				args: {
+					type: v.optional(v.union(v.literal("video"), v.literal("image"), v.literal("file"))),
+					paginationOpts: paginationOptsValidator,
+				},
+				handler: async (ctx: QueryCtx, args: MediaPageArgs) => {
+					return ctx.runQuery(component.public.listMediaPage, args);
 				},
 			}),
 

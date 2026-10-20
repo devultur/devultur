@@ -196,6 +196,8 @@ function setup() {
 
 	/** The component's media record for `key`, as the app's queries read it. */
 	const mediaRecord = (key: string) => runFunction("public.getMediaByKey", { key }) as Promise<Record<string, unknown>>;
+	/** A component query, run against the database (actions go through `run`). */
+	const query = (name: string, args: unknown) => runFunction(`public.${name}`, args);
 	/** The component's media library, as `listMedia` returns it. */
 	const listMedia = (args: { type?: string } = {}) =>
 		runFunction("public.listMedia", args) as Promise<Record<string, unknown>[]>;
@@ -211,6 +213,7 @@ function setup() {
 		runMutation,
 		mediaRecord,
 		listMedia,
+		query,
 		scheduled,
 		db,
 		transcription,
@@ -583,6 +586,31 @@ describe("the media library (confirmed uploads in listMedia)", () => {
 		});
 
 		expect(await contract.listMedia()).toEqual([expect.objectContaining({ objectKey: held.key })]);
+	});
+
+	it("pages the library newest first, filtered by type", async () => {
+		const contract = setup();
+		const names = ["a.pdf", "b.pdf", "c.pdf"];
+		for (const filename of names) {
+			const { key } = await uploadThroughComponent(contract, { filename, contentType: "application/pdf" });
+			await contract.run("confirmUpload", { key, filename });
+		}
+		const image = await uploadThroughComponent(contract, { filename: "cover.png", contentType: "image/png" });
+		await contract.run("confirmUpload", { key: image.key });
+
+		const page = (cursor: string | null) =>
+			contract.query("listMediaPage", { type: "file", paginationOpts: { numItems: 2, cursor } }) as Promise<{
+				page: Array<{ filename: string }>;
+				isDone: boolean;
+				continueCursor: string;
+			}>;
+		const first = await page(null);
+		const second = await page(first.continueCursor);
+
+		expect(first.page.map((record) => record.filename)).toEqual(["c.pdf", "b.pdf"]);
+		expect(first.isDone).toBe(false);
+		expect(second.page.map((record) => record.filename)).toEqual(["a.pdf"]);
+		expect(second.isDone).toBe(true);
 	});
 
 	it("refuses to record a key that isn't an upload's", async () => {

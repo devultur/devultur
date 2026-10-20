@@ -145,6 +145,23 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         any,
         Name
       >;
+      listMediaPage: FunctionReference<
+        "query",
+        "internal",
+        {
+          paginationOpts: {
+            cursor: string | null;
+            endCursor?: string | null;
+            id?: number;
+            maximumBytesRead?: number;
+            maximumRowsRead?: number;
+            numItems: number;
+          };
+          type?: "video" | "image" | "file";
+        },
+        any,
+        Name
+      >;
       loadProgress: FunctionReference<
         "query",
         "internal",
