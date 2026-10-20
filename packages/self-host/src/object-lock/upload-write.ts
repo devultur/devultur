@@ -1,17 +1,21 @@
 // Lock checks of the upload routes (POST, single PUT, multipart create and complete), kept here so the routes only
 // ask one question: may this upload write its key, and under which condition.
-import { decodeEncryptionMeta } from "@devultur/core";
+import { decodeEncryptionMeta, type ResolvedLock, resolveLock } from "@devultur/core";
 import type { Context } from "hono";
 import { storageKey } from "../helpers";
+import { getRequestState } from "../request-state";
 import { alreadyExists, discardStaleVariants } from "../routes/upload-integrity";
 import type { UploadPending, WorkerApp } from "../types";
 import { recordLockAudit } from "./audit";
+import { lockSubjectOf } from "./guard";
 import { isInProgressJobOutput } from "./job-outputs";
 import { checkWrite, type WriteCondition, writeConflict } from "./overwrite";
+import { forgetLock } from "./sidecar";
 
 type UploadContext = Context<WorkerApp>;
 
-export type UploadWrite = { blocked: Response } | { onlyIf: WriteCondition };
+/** `exists`: the write replaces an object (an overwrite). */
+export type UploadWrite = { blocked: Response } | { onlyIf: WriteCondition; exists: boolean };
 
 /**
  * Before the bytes (and before any encryption key is created): an asset without `overwrite` must not exist yet, and an
@@ -28,7 +32,7 @@ export async function prepareUploadWrite(
 	if ("blocked" in check) return check;
 	const isCreateOnly = Boolean(pending?.isAsset && !pending.overwrite);
 	if (isCreateOnly && check.exists) return { blocked: alreadyExists(context, key) };
-	return { onlyIf: check.onlyIf };
+	return { onlyIf: check.onlyIf, exists: check.exists };
 }
 
 /**
@@ -64,26 +68,52 @@ export async function failedWrite(
 }
 
 /**
- * After the bytes landed (single PUT or multipart complete): an overwrite drops the stale image variants, and a file
- * uploaded with a lock gets its first audit record (`set`, from nothing), so its protection is provable from its first
- * write. The actor is the uploader: the POST's plugin context, since the PUT may carry no credential.
+ * The lock a new object is stored with: the one its upload POST resolved, or, for an authenticated write with no
+ * pending upload (`PUT /v1/upload/<key>` with the Worker secret), the config's default. That default only applies to
+ * an original: a video's derived outputs follow their raw through `retention.derivatives` instead. An invalid default
+ * fails closed (a hold), since the POST that would have reported it never ran.
+ */
+export function uploadLockOf(
+	context: UploadContext,
+	key: string,
+	pending: UploadPending | null,
+): ResolvedLock | undefined {
+	if (pending) return pending.lock;
+	if (lockSubjectOf(key)?.kind !== "original") return undefined;
+	const resolution = resolveLock(undefined, getRequestState(context).config?.lock);
+	if (!resolution.ok) {
+		console.error("config.lock is invalid:", resolution.errors.join("; "));
+		return { hold: true };
+	}
+	const { lock } = resolution;
+	return lock.retention || lock.hold ? lock : undefined;
+}
+
+/**
+ * After the bytes landed (single PUT or multipart complete):
+ * - an overwrite drops the stale image variants and the replaced object's lock record (the new object brings its own);
+ * - a file stored with a lock gets its first audit record (`set`, from nothing), so its protection is provable from its
+ *   first write. The actor is the uploader: the POST's plugin context, since the PUT may carry no credential.
  */
 export async function afterUploadWrite(
 	context: UploadContext,
 	key: string,
 	pending: UploadPending | null,
+	isReplacement: boolean,
 ): Promise<void> {
-	if (!pending) return;
-	await discardStaleVariants(context.env.MEDIA_BUCKET, pending);
-	if (!pending.lock) return;
-	const root = pending.storageKey.endsWith(key) ? pending.storageKey.slice(0, -key.length) : undefined;
+	const fullKey = pending?.storageKey ?? storageKey(context, key);
+	const root = fullKey.endsWith(key) ? fullKey.slice(0, -key.length) : getRequestState(context).storagePrefix;
+	if (pending) await discardStaleVariants(context.env.MEDIA_BUCKET, pending);
+	if (isReplacement) await forgetLock(context.env.MEDIA_BUCKET, root, key);
+	const lock = uploadLockOf(context, key, pending);
+	if (!lock) return;
 	await recordLockAudit(context, {
 		action: "set",
 		keys: [key],
 		before: null,
-		after: pending.lock,
+		after: lock,
 		outcome: "applied",
-		actor: pending.context ?? null,
-		...(root !== undefined ? { root } : {}),
+		actor: pending ? (pending.context ?? null) : (getRequestState(context).context ?? null),
+		root,
 	});
 }

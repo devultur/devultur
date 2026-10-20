@@ -96,7 +96,6 @@ transcode.post("/", async (context) => {
 	const video = { id: videoId, folder: `${visibility}/${videoBasePath(videoId)}`, rawKey: body.key };
 	const retained = await assertRetranscodable(context, video, object);
 	if (retained) return retained;
-
 	// Preset: the request's (name or inline spec, strictly validated) → the config's default → `hls-720p`.
 	const scope = getRequestState(context);
 	const transcodeConfig = scope.config?.transcode;
@@ -193,11 +192,11 @@ transcode.post("/", async (context) => {
 		encrypt: shouldEncrypt,
 	});
 
-	// The runner echoes this ticket on every callback: the webhook knows which job (and whose request) it belongs to
-	// without anything stored per job.
+	// Echoed by the runner on every callback: which job, whose request and where its video is, with nothing stored.
 	const { ticket: jobTicket } = await signJobTicket(context.env.DELIVERY_SIGN_SECRET, {
 		videoId,
 		...(scope.context ? { context: scope.context } : {}),
+		location: { root: scope.storagePrefix, folder: video.folder },
 	});
 
 	const runner = createRunner(context.env);

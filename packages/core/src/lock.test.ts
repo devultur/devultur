@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isIsoInstant, resolveLock, validateLock } from "./lock";
+import { isIsoInstant, MAX_RETENTION_PERIOD_SECONDS, resolveLock, validateLock } from "./lock";
 
 const FUTURE = "2030-01-01T00:00:00Z";
 
@@ -60,7 +60,17 @@ describe("validateLock", () => {
 		const result = validateLock({ retention: { mode: "compliance", period } });
 		expect(result.ok).toBe(false);
 		if (!result.ok)
-			expect(result.errors).toContain("lock.retention.period: must be a positive integer number of seconds");
+			expect(result.errors).toContain(
+				"lock.retention.period: must be a positive integer number of seconds, at most 100 years",
+			);
+	});
+
+	it("bounds period to 100 years, so an expiry is always a valid date", () => {
+		expect(validateLock({ retention: { mode: "compliance", period: MAX_RETENTION_PERIOD_SECONDS } }).ok).toBe(true);
+		expect(validateLock({ retention: { mode: "compliance", period: MAX_RETENTION_PERIOD_SECONDS + 1 } }).ok).toBe(
+			false,
+		);
+		expect(validateLock({ retention: { mode: "compliance", period: Number.MAX_SAFE_INTEGER } }).ok).toBe(false);
 	});
 
 	it("rejects a bad mode, until, derivatives and hold", () => {
@@ -139,7 +149,7 @@ describe("resolveLock", () => {
 		expect(result).toEqual({
 			ok: false,
 			errors: [
-				"lock.retention.period: must be a positive integer number of seconds",
+				"lock.retention.period: must be a positive integer number of seconds, at most 100 years",
 				"default.retention.until: must be an ISO 8601 date-time with a zone",
 			],
 		});

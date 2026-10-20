@@ -71,7 +71,8 @@ export function memoryBucket() {
 			return toR2(key, stored, range ? stored.body.subarray(range.offset, range.offset + range.length) : stored.body);
 		},
 		async head(key: string) {
-			return objects.has(key) ? { key } : null;
+			const stored = objects.get(key);
+			return stored ? { key, customMetadata: stored.customMetadata } : null;
 		},
 		async put(key: string, body: ArrayBuffer | Uint8Array, options?: PutOptions) {
 			const bytes = new Uint8Array(body instanceof Uint8Array ? body.slice() : body.slice(0));

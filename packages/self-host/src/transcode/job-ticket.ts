@@ -22,10 +22,16 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const ticketKey = (secret: string) => `${secret}${JOB_TICKET_KEY_SUFFIX}`;
 
+/** Where the job's video lives: its storage prefix and virtual folder (`{visibility}/video/{id}`). */
+export interface JobLocation {
+	root: string;
+	folder: string;
+}
+
 /** Signs the ticket of a new run of `videoId`. */
 export async function signJobTicket(
 	secret: string,
-	job: { videoId: string; context?: PluginContext },
+	job: { videoId: string; context?: PluginContext; location?: JobLocation },
 	nowMs = Date.now(),
 ): Promise<{ ticket: string; runId: string }> {
 	const runId = generateId();
@@ -38,6 +44,7 @@ export async function signJobTicket(
 			iat: issuedAt,
 			exp: issuedAt + JOB_TICKET_TTL_SECONDS,
 			...(job.context ? { context: job.context } : {}),
+			...(job.location ? { loc: { root: job.location.root, folder: job.location.folder } } : {}),
 		},
 		ticketKey(secret),
 	);
@@ -59,4 +66,19 @@ export async function verifyJobTicket(
 		startedAt: claims.iat * 1000,
 		...(isRecord(claims.context) ? { context: claims.context as PluginContext } : {}),
 	};
+}
+
+/**
+ * The video's location a verified ticket carries (signed at launch, so a runner can't point it at another video), or
+ * null. It outlives the launch's KV records: the ticket lives as long as the job's callbacks.
+ */
+export async function verifyJobLocation(
+	secret: string,
+	ticket: string | undefined,
+	videoId: string,
+): Promise<JobLocation | null> {
+	const claims = await verifyViewerToken(ticket, ticketKey(secret));
+	if (claims?.typ !== JOB_TICKET_TYPE || claims.sub !== videoId || !isRecord(claims.loc)) return null;
+	const { root, folder } = claims.loc;
+	return typeof root === "string" && typeof folder === "string" ? { root, folder } : null;
 }

@@ -3,7 +3,7 @@ import { isTranscodeWebhookAuthorized, KV_JOB_TTL_SECONDS, KvPrefix } from "../h
 import { markTranscodeCompleted } from "../object-lock/transcode-marker";
 import type { RequestState } from "../request-state";
 import { addRouteResult } from "../route-result";
-import { JOB_TICKET_HEADER, verifyJobTicket } from "../transcode/job-ticket";
+import { JOB_TICKET_HEADER, verifyJobLocation, verifyJobTicket } from "../transcode/job-ticket";
 import { logEncodeMetrics, parseEncodeMetrics, withoutOperatorFields } from "../transcode/metrics";
 import { loadOutputBaseUrl, withClientStoryboard, withOutputUrls } from "../transcode/outputs-report";
 import { disposeRawAfterTranscode } from "../transcode/raw-retention";
@@ -37,7 +37,9 @@ webhooks.post("/transcode", async (context) => {
 		const disposal = await disposeRawAfterTranscode(context, body.videoId);
 		if (disposal === "deleted") addRouteResult(context, { originalDeleted: true });
 		if (disposal === "retained") addRouteResult(context, { originalRetained: true });
-		await markTranscodeCompleted(context.env, body.videoId);
+		const ticket = context.req.header(JOB_TICKET_HEADER);
+		const location = await verifyJobLocation(context.env.DELIVERY_SIGN_SECRET, ticket, body.videoId);
+		await markTranscodeCompleted(context.env, body.videoId, location);
 		await context.env.MEDIA_KV.put(
 			`${KvPrefix.TRANSCODE_META}:${body.videoId}`,
 			JSON.stringify({ duration: body.duration }),

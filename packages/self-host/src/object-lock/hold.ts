@@ -15,7 +15,7 @@ import { getRequestState } from "../request-state";
 import type { WorkerApp } from "../types";
 import { recordLockAudit } from "./audit";
 import { isReservedLockKey } from "./guard";
-import { effectiveLock, type LockSidecar, writeSidecar } from "./sidecar";
+import { effectiveLock, type LockSidecar, objectVersionOf, writeSidecar } from "./sidecar";
 
 /** Objects changed per request: a list of keys may name at most this many; a prefix is walked this many at a time. */
 export const HOLD_PAGE_SIZE = 50;
@@ -58,7 +58,10 @@ async function targetsOf(context: HoldContext, body: HoldBody): Promise<HoldTarg
 		...(cursor ? { cursor } : {}),
 	});
 	const root = getRequestState(context).storagePrefix;
-	const keys = listing.objects.map((object) => object.key.slice(root.length)).filter((key) => !isVariantKey(key));
+	// A prefix like `_` also lists the Worker's own lock records and audit objects: never touch those.
+	const keys = listing.objects
+		.map((object) => object.key.slice(root.length))
+		.filter((key) => !isVariantKey(key) && !isReservedLockKey(key));
 	return { keys, prefix: body.prefix, ...(listing.truncated ? { cursor: listing.cursor } : {}) };
 }
 
@@ -79,7 +82,7 @@ async function applyHold(context: HoldContext, key: string, hold: boolean, now: 
 	const holdReleasedAt = hold ? previous?.holdReleasedAt : now.toISOString();
 	const sidecar: LockSidecar = {
 		revision: (effective.stored?.sidecar.revision ?? 0) + 1,
-		objectEtag: object.etag,
+		objectVersion: objectVersionOf(object),
 		lock: after,
 		...(holdReleasedAt ? { holdReleasedAt } : {}),
 		updatedAt: now.toISOString(),
@@ -115,7 +118,17 @@ export async function handleHold(context: HoldContext): Promise<Response> {
 		before: null,
 		after: { hold },
 	});
-	if (!decision.allow) return decision.response;
+	if (!decision.allow) {
+		await recordLockAudit(context, {
+			action: hold ? "hold" : "release",
+			keys: targets.keys,
+			before: null,
+			after: { hold },
+			outcome: "rejected",
+			reason: "hook_refused",
+		});
+		return decision.response;
+	}
 
 	const now = new Date();
 	const updated: string[] = [];

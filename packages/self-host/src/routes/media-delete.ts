@@ -6,11 +6,14 @@ import { storageKey } from "../helpers";
 import { isVariantKey, variantPrefix } from "../image/transform-plan";
 import {
 	assertWritable,
+	deleteFolderKeys,
 	deleteKeysFor,
 	guardedDeletePrefix,
 	isReservedLockKey,
 	reservedKeyResponse,
 } from "../object-lock/guard";
+import { forgetLock } from "../object-lock/sidecar";
+import { getRequestState } from "../request-state";
 import type { WorkerApp } from "../types";
 
 export async function handleVideoDelete(context: Context<WorkerApp>): Promise<Response> {
@@ -45,7 +48,7 @@ export async function handleVideoDelete(context: Context<WorkerApp>): Promise<Re
 		// storyboard… at `{object}/{keyId}`) lives under the SAME prefix in the keys bucket. Public never encrypts
 		// (shouldEncryptAtRest), so there's nothing to sweep there.
 		if (!folder.startsWith("private/")) continue;
-		const deletedKeys = await deleteKeysFor(context, folder);
+		const deletedKeys = await deleteFolderKeys(context, folder);
 		if ("blocked" in deletedKeys) return deletedKeys.blocked;
 		deletedKeyCount += deletedKeys.deletedCount;
 	}
@@ -75,9 +78,10 @@ export async function handleKeyDelete(context: Context<WorkerApp>): Promise<Resp
 	// could touch another object whose name starts the same way.
 	const variants = await guardedDeletePrefix(context, variantPrefix(key));
 	if ("blocked" in variants) return variants.blocked;
-	// The object's L4 key lives at `${fullKey}/{keyId}` (see createObjectEncryption) and derived ones at
-	// `${fullKey}/__variants/…/{keyId}` → everything falls under `${fullKey}/` in KEYS_BUCKET, which only holds keys.
-	const keys = await deleteKeysFor(context, key);
+	// Its own L4 key (`${fullKey}/{keyId}`) and its variants' keys: not the keys of an asset nested under its path.
+	const keys = await deleteKeysFor(context, key, exists.customMetadata?.enc);
 	if ("blocked" in keys) return keys.blocked;
+	// Its lock record goes with it: a file uploaded later at this key starts from its own upload lock.
+	await forgetLock(context.env.MEDIA_BUCKET, getRequestState(context).storagePrefix, key);
 	return new Response(null, { status: 204 });
 }

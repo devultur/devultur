@@ -152,7 +152,7 @@ export default createWorker({
 | `captionsLocales` | Locales `/v1/captions` accepts (unset: any) |
 | `cacheRules` | `Cache-Control` per prefix of the `asset/` namespace |
 | `originalStorageClass` | R2 storage class of an uploaded video original (`Standard` or `InfrequentAccess`) |
-| `maxFileLifetimeSeconds` | Longest lifetime of an uploaded file, in seconds: the default TTL and a ceiling (a shorter `expiresIn` still wins). For a demo or scratch Worker whose uploads clean themselves up. |
+| `maxFileLifetimeSeconds` | Longest lifetime of an uploaded file, in seconds: the default TTL and a ceiling (a shorter `expiresIn` still wins). For a demo or scratch Worker whose uploads clean themselves up. A [locked](object-lock.md#retention-vs-expiry) file still expires (viewers get `410`) but isn't deleted until its lock ends. |
 | `uploadMetadata` | String map added to the R2 `customMetadata` of every uploaded object (for example which app uploaded it). Keys the Worker owns (`security`, `enc`, `expiresAt`, `derivedFrom`, `lock`, `sha256*`) are dropped. |
 | `lock` | Default lock of an uploaded file: retention and hold (see [Retention and holds](object-lock.md)). An upload or its upload token overrides it. |
 | `transcode.presets` | Named presets and the default one, used when a request names no preset |

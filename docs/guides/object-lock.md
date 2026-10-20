@@ -9,6 +9,7 @@ enforces it on every route that deletes or replaces stored bytes.
 - [Derived files](#derived-files)
 - [Transcoding a locked video](#transcoding-a-locked-video)
 - [Locking at upload](#locking-at-upload)
+- [Retention vs expiry](#retention-vs-expiry)
 - [Changing a lock](#changing-a-lock)
 - [Holds](#holds)
 - [Audit](#audit)
@@ -29,8 +30,8 @@ type ObjectLock = {
 };
 ```
 
-- **Retention** keeps the file until `until`, or for `period` seconds. Set one of the two: passing both is a `400`. A
-  `period` counts from the upload, or from the moment a hold is released.
+- **Retention** keeps the file until `until`, or for `period` seconds (at most 100 years). Set one of the two: passing
+  both is a `400`. A `period` counts from the upload, or from the moment a hold is released.
 - **Hold** keeps the file indefinitely, whatever its retention says. Releasing it starts the retention's `period`.
   If there's no retention, the file is free again.
 
@@ -63,6 +64,10 @@ after that date passes.
 
 Any lock can be made stricter without privilege: set a later date, a longer period, `inherit`, or a hold. An expired
 retention can be replaced freely.
+
+While a hold is set, a `period` can't be swapped for a fixed `until`. The period only starts at the release, so any
+date could end before it: compliance refuses it, and governance needs the privilege. Release the hold first, or
+extend the period.
 
 ## What's enforced, and where
 
@@ -111,7 +116,6 @@ All the lock error codes:
 | `409` | `lock_conflict` | Another lock change landed first: retry |
 | `403` | `lock_privilege_required` | Shortening or removing a governance retention without an approved bypass |
 | `403` | `lock_below_minimum` | An upload asks for a looser lock than its upload token requires |
-| `400` | `lock_conflicts_expiry` | An upload would expire (`expiresIn`, a token's or the config's TTL) before its lock ends |
 | `400` | `invalid_lock`, `invalid_hold` | A malformed lock or hold request |
 | `400` | `reserved_key` | A key under `__lock/` or `__lock-audit/`, which the Worker keeps for itself |
 
@@ -177,12 +181,35 @@ export default createWorker({
 **Upload tokens** can pin a minimum lock: `uploads.createToken({ prefix, lock })`. An upload with that token gets at
 least that lock. It can ask for a stricter one, never a looser one (`403 lock_below_minimum`).
 
-**Expiry.** A file can't expire while it's locked. An upload whose `expiresIn` (or token or config TTL) ends before
-its lock gets `400 lock_conflicts_expiry`, and so does any expiry on a held file. Keep this in mind with
-`maxFileLifetimeSeconds`.
+**Expiry.** A lock may outlive the file's `expiresAt` (`expiresIn`, the token's or the config's TTL): see
+[Retention vs expiry](#retention-vs-expiry).
+
+**Uploads without a pending upload.** A `PUT /v1/upload/<key>` with the Worker secret and no `POST /v1/upload` before
+it gets `config.lock` too, unless the key is a video's derived output (those follow their original through
+`derivatives`).
 
 Locks need the media Worker. In direct-storage mode, `createMediaRouter` throws when an upload asks for a lock,
 because a presigned PUT to the bucket can't enforce one.
+
+## Retention vs expiry
+
+Retention and expiry are separate, as in S3 Object Lock. **Retention preserves** the object: it can't be deleted or
+overwritten. **Expiry ends access** to it: past `expiresAt`, nobody but the owner reads it. A lock doesn't extend
+access, and an expiry doesn't shorten a lock. A file can be shared for 30 days and kept for 10 years.
+
+| State | Viewers, public requests, download links | The owner (Worker secret) | The object |
+| --- | --- | --- | --- |
+| Before `expiresAt` | Normal access | Normal access | Kept (and protected while locked) |
+| After `expiresAt`, still retained | `410` | Can read it, to export or audit | Not deleted: delete and overwrite answer `409 retention_active` |
+| After `expiresAt`, free | `410` | `410` | Deleted by the expiry cleanup |
+
+- **Download links are access.** A link never outlives the file's `expiresAt`, even for a retained file. Creating one
+  for an expired file answers `410`, and redeeming one after the file expired does too.
+- **Listings.** `GET /v1/assets` (an owner route) includes an expired file that's still retained, marked
+  `expired: true` with `retainedUntil` (its retention's end) or `hold: true`. An expired free file isn't listed.
+- **The expiry cleanup** deletes expired files through the Worker (`DELETE /v1/media/<key>`), so it goes through the
+  lock check: a retained file is skipped with `409` until its lock ends. An R2 lifecycle rule doesn't go through the
+  Worker (see [Caveats](#caveats)).
 
 ## Changing a lock
 
@@ -202,8 +229,10 @@ The fields merge over the current retention, and `until` and `period` replace ea
 only. Holds have [their own route](#holds).
 
 R2 can't edit an object's metadata in place, so a change goes to a small record at `{storagePrefix}__lock/<key>`. The
-record is bound to the object version it was written for: a file uploaded again at the same key (once its lock has
-ended) starts from its own upload lock. Two concurrent changes can't both land: the second gets `409 lock_conflict`.
+record is bound to the object version it was written for (R2's per-write `version`, never the etag, which repeats when
+the same bytes are uploaded again). Deleting or overwriting the file deletes the record, and a file uploaded again at
+the same key starts from its own upload lock. Two concurrent changes can't both land: the second gets
+`409 lock_conflict`.
 
 ## Holds
 
@@ -228,7 +257,8 @@ for await (const page of client.lock.holdAll({ prefix: "private/asset/case-17/" 
   date stays.
 - **Releasing:** with a `retention.period`, the period starts now. With a fixed `until`, that date still applies.
   With no retention, the file is free.
-- Image variants under a prefix are skipped, since they're caches.
+- Image variants under a prefix are skipped, since they're caches. The Worker's own records (`__lock/`,
+  `__lock-audit/`) are never listed or changed, whatever the prefix.
 
 ## Audit
 
@@ -303,6 +333,23 @@ for await (const page of client.lock.releaseAll({ prefix: "private/asset/record-
   if (page.skipped.length > 0) console.warn(page.skipped);
 }
 ```
+
+### Share for 30 days, keep for 10 years
+
+Access ends after 30 days, and the file stays (undeletable) for 10 years:
+
+```typescript
+await client.createUploadUrl({
+  filename: "statement.pdf",
+  contentType: "application/pdf",
+  expiresIn: 30 * 24 * 3600,
+  lock: { retention: { mode: "compliance", period: 10 * 365 * 24 * 3600 } },
+});
+```
+
+After 30 days, viewers and download links get `410`. Your backend can still read the file with the Worker secret,
+and `GET /v1/assets` lists it with `expired: true` and `retainedUntil`. Once the 10 years pass, the expiry cleanup
+deletes it.
 
 ### Compliance retention for N years from upload
 

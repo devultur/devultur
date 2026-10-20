@@ -4,6 +4,7 @@
 import { ASSET_NAMESPACE, normalizeAssetPrefix, type Visibility } from "@devultur/core";
 import { Hono } from "hono";
 import { storagePrefix } from "../helpers";
+import { retainedOf } from "../object-lock/delivery";
 import type { WorkerApp } from "../types";
 import { isObjectExpired } from "./object-response";
 import { ObjectMeta } from "./upload-integrity";
@@ -21,6 +22,12 @@ export interface AssetListEntry {
 	uploaded: string;
 	cacheControl: string | null;
 	visibility: Visibility;
+	/** Past its `expiresAt` but still retained: listed (the owner can still read it), and not deleted. */
+	expired?: true;
+	/** The retention that keeps an expired entry (its effective expiry), when it has a date. */
+	retainedUntil?: string;
+	/** An expired entry kept by a hold. */
+	hold?: true;
 }
 
 // `include` exists at runtime (compat ≥ 2022-08-04 requires it to fetch the metadata) but not in the types of
@@ -99,9 +106,23 @@ assets.get("/", async (context) => {
 		include: ["httpMetadata", "customMetadata"],
 	};
 	const listing = await context.env.MEDIA_BUCKET.list(listOptions);
-	const objects = listing.objects
-		.filter((object) => !isObjectExpired(object.customMetadata))
-		.map((object) => toEntry(object, storageRoot, position.visibility));
+	const objects: AssetListEntry[] = [];
+	for (const object of listing.objects) {
+		const entry = toEntry(object, storageRoot, position.visibility);
+		if (!isObjectExpired(object.customMetadata)) {
+			objects.push(entry);
+			continue;
+		}
+		// Expired: gone unless a lock retains it, in which case the owner sees it, marked, to export or audit it.
+		const retained = await retainedOf(context.env.MEDIA_BUCKET, { root: storageRoot, key: entry.key }, object);
+		if (!retained) continue;
+		objects.push({
+			...entry,
+			expired: true,
+			...(retained.until ? { retainedUntil: retained.until } : {}),
+			...(retained.hold ? { hold: true } : {}),
+		});
+	}
 	return context.json({ objects, cursor: nextCursor(listing, position, visibilities) });
 });
 

@@ -174,6 +174,16 @@ describe("canChange", () => {
 			expect(canChange(held, compliance(LATER), user)).toEqual({ ok: true, bypass: false });
 		});
 
+		// The release hasn't happened, so the period's end is unknown: any fixed date could come before it.
+		it("a held period can't become a fixed date while the hold stays", () => {
+			const far = { ...compliance("2999-01-01T00:00:00Z"), hold: true };
+			expect(canChange(held, far, admin)).toEqual({ ok: false, reason: "compliance_extend_only" });
+			const heldGovernance: ObjectLock = { retention: { mode: "governance", period: DAY }, hold: true };
+			const governanceDate: ObjectLock = { ...governance("2999-01-01T00:00:00Z"), hold: true };
+			expect(canChange(heldGovernance, governanceDate, user)).toEqual({ ok: false, reason: "lock_privilege_required" });
+			expect(canChange(heldGovernance, governanceDate, admin)).toEqual({ ok: true, bypass: true });
+		});
+
 		it("a held governance period needs privilege to drop", () => {
 			const heldGovernance: ObjectLock = { retention: { mode: "governance", period: DAY }, hold: true };
 			expect(canChange(heldGovernance, { hold: true }, user)).toEqual({ ok: false, reason: "lock_privilege_required" });

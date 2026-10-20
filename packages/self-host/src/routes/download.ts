@@ -70,9 +70,10 @@ export async function handleDownloadLink(context: WorkerContext): Promise<Respon
 	const fullKey = storageKey(context, parsed.key);
 	const object = await context.env.MEDIA_BUCKET.head(fullKey);
 	if (!object) return context.json({ error: "Not found" }, 404);
+	// A link is access: past `expiresAt` there's none to give, even for a retained file (retention doesn't extend it).
 	if (isObjectExpired(object.customMetadata)) return expiredResponse();
 
-	// The link doesn't outlive the file, nor whatever the `issueCredential` hook allows.
+	// The link doesn't outlive the file's `expiresAt`, nor whatever the `issueCredential` hook allows.
 	const objectExpiresAt = Number(object.customMetadata?.expiresAt) || Infinity;
 	const requestedExpiresAt = Math.min(Date.now() + parsed.expiresIn * 1000, objectExpiresAt);
 	const decision = await decideCredential(context, {

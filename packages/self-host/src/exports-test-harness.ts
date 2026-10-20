@@ -1,8 +1,12 @@
-// Harness for the private exports tests: in-memory R2 with metadata, `uploaded`, `onlyIf` (If-None-Match: * and
-// `etagMatches`), ranges and
-// multipart; in-memory KV; and a Durable Objects namespace that instantiates the real `DownloadLink` class with an
-// in-memory storage and a `blockConcurrencyWhile` that, like the Workers one, doesn't let anything else run meanwhile.
+// Harness for the private exports tests: in-memory R2 with metadata, ranges and multipart, behaving like R2 where the
+// object lock depends on it: the etag is the content's MD5 (a multipart's, the MD5 of its parts' MD5s plus `-N`), so
+// the same bytes written again get the same etag; every write gets a new `version` and a later `uploaded`; `onlyIf`
+// supports `If-None-Match: *`, `etagMatches` and `uploadedBefore`. Also an in-memory KV, and a Durable Objects
+// namespace that instantiates the real `DownloadLink` class with an in-memory storage and a `blockConcurrencyWhile`
+// that, like the Workers one, doesn't let anything else run meanwhile.
+
 import type { CacheRule, ObjectLock, SecurityPolicy } from "@devultur/core";
+import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import { DownloadLink, type DownloadLinkState, type DownloadLinkStorage } from "./download-link";
 import { type PluginContext, updateRequestState } from "./request-state";
@@ -21,26 +25,41 @@ export interface StoredObject {
 	customMetadata: Record<string, string>;
 	/** Set by every write; a test that seeds `objects` directly may leave it out (the epoch). */
 	uploaded?: Date;
-	/** Changes on every write, so `onlyIf.etagMatches` can tell a stale read from the current object. */
+	/** Set by a write: the content's MD5 (a multipart's, see above). Seeded objects get the MD5 of their bytes. */
 	etag?: string;
+	/** Unique per write, like R2's `version`. Seeded objects: `v0`. */
+	version?: string;
 }
 
 export interface PutOptions {
 	httpMetadata?: Record<string, string>;
 	customMetadata?: Record<string, string>;
-	onlyIf?: Headers | { etagMatches?: string };
+	onlyIf?: Headers | { etagMatches?: string; uploadedBefore?: Date };
 }
 
 export interface MemoryBucketOptions {
-	/** `uploaded` of each write. Default: the epoch, so listings stay deterministic. */
+	/** `uploaded` of each write. Default: one millisecond after the epoch per write, so tests stay deterministic. */
 	now?: () => Date;
+}
+
+const md5 = (bytes: Uint8Array) => createHash("md5").update(bytes).digest("hex");
+
+const etagOf = (stored: StoredObject) => stored.etag ?? md5(stored.bytes);
+
+/** R2's multipart etag: the MD5 of the parts' binary MD5s, then `-{part count}`. */
+function multipartEtag(parts: Uint8Array[]): string {
+	const digests = parts.map((part) => createHash("md5").update(part).digest());
+	return `${createHash("md5").update(Buffer.concat(digests)).digest("hex")}-${parts.length}`;
 }
 
 function failsCondition(onlyIf: PutOptions["onlyIf"], existing: StoredObject | undefined): boolean {
 	if (!onlyIf) return false;
 	if (onlyIf instanceof Headers) return onlyIf.get("If-None-Match") === "*" && existing !== undefined;
-	if (onlyIf.etagMatches === undefined) return false;
-	return !existing || (existing.etag ?? "etag-0") !== onlyIf.etagMatches.replaceAll('"', "");
+	if (onlyIf.etagMatches !== undefined && (!existing || etagOf(existing) !== onlyIf.etagMatches.replaceAll('"', ""))) {
+		return true;
+	}
+	const uploaded = existing?.uploaded ?? new Date(0);
+	return onlyIf.uploadedBefore !== undefined && (!existing || uploaded >= onlyIf.uploadedBefore);
 }
 
 function toBytes(value: ArrayBuffer | Uint8Array | string): Uint8Array {
@@ -51,9 +70,10 @@ function r2Body(key: string, stored: StoredObject, bytes = stored.bytes) {
 	return {
 		key,
 		size: stored.bytes.byteLength,
-		etag: stored.etag ?? "etag-0",
-		httpEtag: `"${stored.etag ?? "etag-0"}"`,
+		etag: etagOf(stored),
+		httpEtag: `"${etagOf(stored)}"`,
 		uploaded: stored.uploaded ?? new Date(0),
+		version: stored.version ?? "v0",
 		httpMetadata: stored.httpMetadata,
 		customMetadata: stored.customMetadata,
 		body: new Blob([bytes as BlobPart]).stream(),
@@ -62,15 +82,18 @@ function r2Body(key: string, stored: StoredObject, bytes = stored.bytes) {
 	};
 }
 
-export function memoryBucket({ now = () => new Date(0) }: MemoryBucketOptions = {}) {
+export function memoryBucket({ now }: MemoryBucketOptions = {}) {
 	const objects = new Map<string, StoredObject>();
 	let writes = 0;
-	const stamp = () => ({ uploaded: now(), etag: `etag-${++writes}` });
+	const stamp = (etag: string) => {
+		writes += 1;
+		return { uploaded: now ? now() : new Date(writes), etag, version: `v${writes}` };
+	};
 	const sessions = new Map<string, { key: string; options: PutOptions; parts: Map<number, Uint8Array> }>();
 	const resumeMultipartUpload = (key: string, uploadId: string) => ({
 		uploadPart: async (partNumber: number, value: ArrayBuffer | Uint8Array) => {
 			sessions.get(uploadId)?.parts.set(partNumber, toBytes(value));
-			return { partNumber, etag: `etag-${partNumber}` };
+			return { partNumber, etag: md5(toBytes(value)) };
 		},
 		complete: async (parts: Array<{ partNumber: number }>) => {
 			const session = sessions.get(uploadId);
@@ -80,7 +103,7 @@ export function memoryBucket({ now = () => new Date(0) }: MemoryBucketOptions = 
 				bytes,
 				httpMetadata: session?.options.httpMetadata ?? {},
 				customMetadata: session?.options.customMetadata ?? {},
-				...stamp(),
+				...stamp(multipartEtag(chunks)),
 			});
 			return { size: bytes.byteLength };
 		},
@@ -90,11 +113,12 @@ export function memoryBucket({ now = () => new Date(0) }: MemoryBucketOptions = 
 		objects,
 		put: async (key: string, value: ArrayBuffer | Uint8Array | string, options: PutOptions = {}) => {
 			if (failsCondition(options.onlyIf, objects.get(key))) return null;
+			const bytes = toBytes(value);
 			objects.set(key, {
-				bytes: toBytes(value),
+				bytes,
 				httpMetadata: options.httpMetadata ?? {},
 				customMetadata: options.customMetadata ?? {},
-				...stamp(),
+				...stamp(md5(bytes)),
 			});
 			return { key };
 		},
@@ -107,8 +131,8 @@ export function memoryBucket({ now = () => new Date(0) }: MemoryBucketOptions = 
 		head: async (key: string) => {
 			const stored = objects.get(key);
 			if (!stored) return null;
-			const { size, etag, httpEtag, uploaded, httpMetadata, customMetadata } = r2Body(key, stored);
-			return { key, size, etag, httpEtag, uploaded, httpMetadata, customMetadata };
+			const { size, etag, httpEtag, uploaded, version, httpMetadata, customMetadata } = r2Body(key, stored);
+			return { key, size, etag, httpEtag, uploaded, version, httpMetadata, customMetadata };
 		},
 		list: async ({ prefix = "", limit = 1000, cursor }: { prefix?: string; limit?: number; cursor?: string }) => {
 			const start = Number(cursor ?? "0");
@@ -119,8 +143,9 @@ export function memoryBucket({ now = () => new Date(0) }: MemoryBucketOptions = 
 				objects: page.map(([key, stored]) => ({
 					key,
 					size: stored.bytes.byteLength,
-					etag: stored.etag ?? "etag-0",
-					httpEtag: `"${stored.etag ?? "etag-0"}"`,
+					etag: etagOf(stored),
+					httpEtag: `"${etagOf(stored)}"`,
+					version: stored.version ?? "v0",
 					uploaded: stored.uploaded ?? new Date(0),
 					httpMetadata: stored.httpMetadata,
 					customMetadata: stored.customMetadata,

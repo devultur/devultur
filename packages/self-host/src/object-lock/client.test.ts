@@ -117,12 +117,10 @@ describe("upload options", () => {
 		expect(token).toMatchObject({ lock: { hold: true } });
 	});
 
-	it("refuses an expiry before the lock ends, and a token minimum the upload loosens", async () => {
+	it("accepts a lock longer than the file's expiry, and refuses a token minimum the upload loosens", async () => {
 		const { client } = clientWith();
-		const conflict = await rejection(
-			client.uploads.uploadAsset(new Blob(["d"]), { path: "docs/d.pdf", hold: true, expiresIn: 60 }),
-		);
-		expect(conflict).toMatchObject({ status: 400, code: "lock_conflicts_expiry" });
+		const shared = await client.uploads.uploadAsset(new Blob(["d"]), { path: "docs/d.pdf", hold: true, expiresIn: 60 });
+		expect(await client.lock.get(shared.key)).toMatchObject({ hold: true });
 
 		const { token } = await client.uploads.createToken({ prefix: "docs/", lock: { hold: true } });
 		const withToken = createWorkerClient(token, BASE);

@@ -10,7 +10,7 @@ import type { WorkerApp } from "../types";
 import { recordLockAudit } from "./audit";
 import { classifyChange, type LockChangeBody, nextLock, timingOf } from "./change";
 import { handleHold } from "./hold";
-import { type EffectiveLock, effectiveLock, type LockSidecar, writeSidecar } from "./sidecar";
+import { type EffectiveLock, effectiveLock, type LockSidecar, objectVersionOf, writeSidecar } from "./sidecar";
 import type { LockState } from "./state";
 
 type LockContext = Context<WorkerApp>;
@@ -83,7 +83,7 @@ lockRoute.put("/:key{.+}", async (context) => {
 		return refusal(context, key, change.reason);
 	}
 
-	const sidecar = nextSidecar(effective, object.etag, next.lock, now);
+	const sidecar = nextSidecar(effective, objectVersionOf(object), next.lock, now);
 	if (!(await writeSidecar(context.env.MEDIA_BUCKET, root, key, sidecar, effective.stored))) {
 		await recordLockAudit(context, { ...audit, outcome: "rejected", reason: "lock_conflict" });
 		return context.json({ error: `The lock of ${key} changed meanwhile; retry`, code: "lock_conflict", key }, 409);
@@ -93,11 +93,11 @@ lockRoute.put("/:key{.+}", async (context) => {
 	return context.json(lockView(key, { state, source: "sidecar", stored: { sidecar, etag: "" } }));
 });
 
-function nextSidecar(effective: EffectiveLock, objectEtag: string, lock: ObjectLock, now: Date): LockSidecar {
+function nextSidecar(effective: EffectiveLock, objectVersion: string, lock: ObjectLock, now: Date): LockSidecar {
 	const previous = effective.source === "sidecar" ? effective.stored?.sidecar : undefined;
 	return {
 		revision: (effective.stored?.sidecar.revision ?? 0) + 1,
-		objectEtag,
+		objectVersion,
 		lock,
 		...(previous?.holdReleasedAt ? { holdReleasedAt: previous.holdReleasedAt } : {}),
 		updatedAt: now.toISOString(),

@@ -71,8 +71,11 @@ function earliestEndMs(end: RetentionEnd, nowMs: number): number {
 	return end.kind === "at" ? end.ms : nowMs + end.period * 1000;
 }
 
-function isShortened(beforeEnd: RetentionEnd, afterEnd: RetentionEnd, nowMs: number): boolean {
+function isShortened(beforeEnd: RetentionEnd, afterEnd: RetentionEnd, nowMs: number, isStillHeld: boolean): boolean {
 	if (afterEnd.kind === "none") return true;
+	// A held period ends `period` after a release that hasn't happened: any fixed date may come before that, so while
+	// the hold stays, a period can't become a date. Releasing the hold in the same change starts the period now.
+	if (beforeEnd.kind === "pending" && afterEnd.kind === "at" && isStillHeld) return true;
 	return earliestEndMs(afterEnd, nowMs) < earliestEndMs(beforeEnd, nowMs);
 }
 
@@ -99,7 +102,8 @@ export function canChange(before: ObjectLock, after: ObjectLock, options: LockCh
 	if (!before.retention || !isRetentionActive(beforeEnd, nowMs)) return { ok: true, bypass: false };
 
 	const afterEnd = retentionEnd(after, afterTiming(before, after, options));
-	const isWeakened = isShortened(beforeEnd, afterEnd, nowMs) || isWeakerSetting(before.retention, after.retention);
+	const isShortenedEnd = isShortened(beforeEnd, afterEnd, nowMs, after.hold === true);
+	const isWeakened = isShortenedEnd || isWeakerSetting(before.retention, after.retention);
 	if (!isWeakened) return { ok: true, bypass: false };
 	if (before.retention.mode === "compliance") return { ok: false, reason: "compliance_extend_only" };
 	if (!options.privileged) return { ok: false, reason: "lock_privilege_required" };
