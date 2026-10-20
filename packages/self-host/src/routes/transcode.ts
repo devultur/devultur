@@ -23,6 +23,7 @@ import {
 	signViewerToken,
 	storageKey,
 } from "../helpers";
+import { isKeysBucketMissing, keysBucketMissing } from "../keys-bucket";
 import { assertRetranscodable } from "../object-lock/overwrite";
 import { cappedExpiry, decideCredential, withPluginClaims } from "../plugin-hooks";
 import { getRequestState } from "../request-state";
@@ -129,7 +130,9 @@ transcode.post("/", async (context) => {
 	const keyMetadata = rawOverride ? { security: resourceSecurityHeader } : undefined;
 
 	const policy = resolveSecurity(rawOverride, scope.config?.security);
-	const shouldEncrypt = policy.encrypt && visibility === "private" && Boolean(context.env.KEYS_BUCKET);
+	const shouldEncrypt = Boolean(policy.encrypt) && visibility === "private";
+	// Fail closed before launching: without the keys bucket the segments would be stored unencrypted (keys-bucket.ts).
+	if (isKeysBucketMissing(shouldEncrypt, context.env)) return keysBucketMissing(context);
 	let encryptKeyB64 = "";
 	let encryptKeyId = "";
 	if (shouldEncrypt && context.env.KEYS_BUCKET) {

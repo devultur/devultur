@@ -49,8 +49,9 @@ export { DownloadLink } from "@devultur/self-host";
 export default createWorker();
 ```
 
-Bind an R2 bucket as `MEDIA_BUCKET`, a KV namespace as `MEDIA_KV` (pending uploads, transcode job
-state) and the `DownloadLink` Durable Object (single-use download links) in `wrangler.toml`:
+Bind an R2 bucket as `MEDIA_BUCKET`, a second R2 bucket as `KEYS_BUCKET` (encryption keys), a KV namespace as
+`MEDIA_KV` (pending uploads, transcode job state) and the `DownloadLink` Durable Object (single-use download links)
+in `wrangler.toml`:
 
 ```toml
 name = "media"
@@ -60,6 +61,11 @@ compatibility_date = "2026-10-01"
 [[r2_buckets]]
 binding = "MEDIA_BUCKET"
 bucket_name = "media"
+
+# Per-object key material for encryption at rest. Required when `security.encrypt` is on.
+[[r2_buckets]]
+binding = "KEYS_BUCKET"
+bucket_name = "media-keys"
 
 [[kv_namespaces]]
 binding = "MEDIA_KV"
@@ -73,6 +79,19 @@ class_name = "DownloadLink"
 tag = "v1"
 new_sqlite_classes = ["DownloadLink"]
 ```
+
+Create both buckets and the KV namespace:
+
+```bash
+wrangler r2 bucket create media
+wrangler r2 bucket create media-keys
+wrangler kv namespace create media-state   # put the id it prints in `MEDIA_KV`
+```
+
+`KEYS_BUCKET` holds the key of every file encrypted at rest ([L4 encryption](security.md#l4--encryption)). With
+`security.encrypt` on, the Worker fails closed without it: a private upload, transcode or captions request answers
+`503 keys_bucket_missing` and nothing is stored, instead of storing the file unencrypted. Keep it a separate
+bucket, never public, and back it up: losing a key loses its file for good.
 
 Without the `DOWNLOAD_LINKS` binding, `POST /v1/token/download` answers `501`. For captions, also set
 `GROQ_API_KEY` (transcription) and `MISTRAL_API_KEY` (translation) as secrets.
@@ -137,7 +156,7 @@ import { createWorker, defaultPlugins } from "@devultur/self-host";
 
 export default createWorker({
   plugins: defaultPlugins({
-    security: { sessionBinding: true, ipBinding: false, encrypt: false },
+    security: { sessionBinding: true, ipBinding: false, encrypt: true }, // encrypt needs KEYS_BUCKET
     uploadRules: { image: { maxSizeBytes: 10_000_000, accept: ["image/*"] } },
     captionsLocales: ["en", "es"],
     transcode: { maxResolution: "1080p", deleteOriginalOnSuccess: true },

@@ -10,6 +10,7 @@ import {
 	storageKey,
 	UPLOAD_TOKEN_TTL_SECONDS,
 } from "../helpers";
+import { isKeysBucketMissing, keysBucketMissing } from "../keys-bucket";
 import { resolveUploadLock } from "../object-lock/upload-lock";
 import {
 	afterUploadWrite,
@@ -130,6 +131,14 @@ upload.post("/", async (context) => {
 
 	const virtualKey = target.key;
 	const fullKey = storageKey(context, virtualKey);
+	// The PUT that uploads the bytes is credential-less (capability URL) → it has NO config policy in context. We resolve
+	// it here (upload override ⊕ config default) and persist it in the pending, so the PUT applies the right
+	// `encrypt`/binding instead of falling back to the default (encrypt off) and storing plaintext.
+	const resolvedSecurity = resolveSecurity(body.security, scope.config?.security);
+	// Fail closed before the client sends any bytes or a token's file slot is spent (see keys-bucket.ts).
+	if (isKeysBucketMissing(shouldEncryptAtRest(resolvedSecurity, virtualKey), context.env)) {
+		return keysBucketMissing(context);
+	}
 	const shouldOverwrite = body.overwrite === true;
 	// Fail-fast (taken asset, locked object): the PUT/complete re-check anyway (the single PUT is conditional in R2).
 	const conflict = target.isAsset ? await assetUploadConflict(context, virtualKey, fullKey, shouldOverwrite) : null;
@@ -138,13 +147,6 @@ upload.post("/", async (context) => {
 		const exhausted = await claimTokenFileSlot(context.env.MEDIA_KV, grant);
 		if (exhausted) return targetFailure(context, exhausted);
 	}
-
-	// The PUT that uploads the bytes is credential-less (capability URL) → it has NO config policy in
-	// context. We resolve it here (upload override ⊕ config default) and
-	// persist it in the pending record, so the PUT applies the right `encrypt`/binding. Without
-	// this the PUT would fall back to the default (encrypt off) → storing plaintext even if the config had
-	// "encryption at rest" ON (encrypt is decided in the PUT, not in delivery like the binding is).
-	const resolvedSecurity = resolveSecurity(body.security, scope.config?.security);
 
 	const pending: UploadPending = {
 		contentType: body.contentType,
@@ -252,7 +254,9 @@ upload.put("/:key{.+}", async (context) => {
 	// (`.ts`/`.m3u8`): those are already AES-128 encrypted by the transcode and hls.js decrypts them client-side —
 	// re-encrypting them would break playback. This covers image/file + the video raw and thumbnail.
 	const policy = resolveSecurity(resourceSecurity, getRequestState(context).config?.security);
-	const shouldEncrypt = shouldEncryptAtRest(policy, key, Boolean(context.env.KEYS_BUCKET));
+	const shouldEncrypt = shouldEncryptAtRest(policy, key);
+	// Backstop of the POST's check (a PUT without a pending, a binding removed in between): never plaintext.
+	if (isKeysBucketMissing(shouldEncrypt, context.env)) return keysBucketMissing(context);
 
 	const customMetadata: Record<string, string> = {
 		...allowedUploadMetadata(pending?.uploadMetadata ?? getRequestState(context).config?.uploadMetadata),

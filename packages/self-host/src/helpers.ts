@@ -178,11 +178,12 @@ export async function encryptForStorage(
 /**
  * Is this object encrypted at-rest? Any private asset EXCEPT HLS segments/playlists (`.ts`/`.m3u8`):
  * those are already AES-128 encrypted by the transcode and hls.js decrypts them client-side — re-encrypting them would break
- * playback. Pure → testable.
+ * playback. Pure → testable. Whether the Worker CAN encrypt (`KEYS_BUCKET` bound) is a separate check that fails
+ * closed: see keys-bucket.ts.
  */
-export function shouldEncryptAtRest(policy: SecurityPolicy, key: string, hasKeysBucket: boolean): boolean {
+export function shouldEncryptAtRest(policy: SecurityPolicy, key: string): boolean {
 	const isHlsAsset = key.endsWith(".ts") || key.endsWith(".m3u8");
-	return Boolean(policy.encrypt) && visibilityFromKey(key) === "private" && !isHlsAsset && hasKeysBucket;
+	return Boolean(policy.encrypt) && visibilityFromKey(key) === "private" && !isHlsAsset;
 }
 
 /**

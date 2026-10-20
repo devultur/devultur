@@ -17,6 +17,7 @@ import {
 	parseSecurityHeader,
 	storageKey,
 } from "../helpers";
+import { isKeysBucketMissing, keysBucketMissing } from "../keys-bucket";
 import { captionConflictResponse, prepareCaptionWrites } from "../object-lock/caption-writes";
 import { getRequestState } from "../request-state";
 import type {
@@ -247,15 +248,16 @@ captions.post("/", async (context) => {
 	// Without this prefix they'd get written to `video/{id}/…` and delivery looks them up with visibility → 404.
 	const visibility = visibilityFromKey(body.key) ?? "private";
 	const captionVirtualKey = (locale: string) => `${visibility}/${captionPath(videoId, locale)}`;
-	const writes = await prepareCaptionWrites(context, body.locales, captionVirtualKey);
-	if ("blocked" in writes) return writes.blocked;
-
 	// The .vtt files are private assets of the video → encrypted at rest if the policy asks for it (same criterion
 	// as the raw/thumbnail). The video's binding override (audio/raw metadata) propagates to the
 	// .vtt's metadata so the gate ties it per-resource. The key lives at `${captionKey}/${keyId}`.
 	const resourceOverride = parseSecurityHeader(file.customMetadata?.security);
 	const captionPolicy = resolveSecurity(resourceOverride, scope.config?.security);
-	const encryptCaptions = captionPolicy.encrypt && visibility === "private" && Boolean(context.env.KEYS_BUCKET);
+	const encryptCaptions = Boolean(captionPolicy.encrypt) && visibility === "private";
+	// Fail closed before transcribing: never a plaintext .vtt of a video that must be encrypted (keys-bucket.ts).
+	if (isKeysBucketMissing(encryptCaptions, context.env)) return keysBucketMissing(context);
+	const writes = await prepareCaptionWrites(context, body.locales, captionVirtualKey);
+	if ("blocked" in writes) return writes.blocked;
 	const putCaption = async (locale: string, vtt: string) => {
 		const objectKey = writes.storageKeyOf(locale);
 		const metadata: Record<string, string> = {};

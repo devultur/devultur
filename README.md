@@ -50,6 +50,10 @@ compatibility_date = "2026-10-01"
 binding = "MEDIA_BUCKET"
 bucket_name = "my-media"
 
+[[r2_buckets]]
+binding = "KEYS_BUCKET"   # per-object encryption keys: required when security.encrypt is on
+bucket_name = "my-media-keys"
+
 [[kv_namespaces]]
 binding = "MEDIA_KV"   # the Worker's state store: pending uploads, transcode jobs
 id = "<your KV namespace id>"
@@ -65,6 +69,7 @@ new_sqlite_classes = ["DownloadLink"]
 
 ```bash
 wrangler r2 bucket create my-media
+wrangler r2 bucket create my-media-keys   # keep it private and backed up
 wrangler kv namespace create media-state
 wrangler secret put DELIVERY_SIGN_SECRET       # openssl rand -base64 32, signs viewer tokens and links
 wrangler secret put WORKER_AUTH_SECRET         # openssl rand -base64 32, your backend's bearer
@@ -72,7 +77,9 @@ wrangler secret put TRANSCODE_WEBHOOK_SECRET   # openssl rand -base64 32, signs 
 wrangler deploy
 ```
 
-Without its secrets the Worker fails closed: control routes answer `503`, never open access. To transcode video,
+Without its secrets the Worker fails closed: control routes answer `503`, never open access. Likewise, with
+encryption at rest on and no `KEYS_BUCKET`, private writes answer `503 keys_bucket_missing` instead of storing
+plaintext. To transcode video,
 pick a runner (Cloudflare Containers is the simplest); see the [self-host guide](docs/guides/self-host.md).
 
 ### 2. Call it from your backend

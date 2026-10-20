@@ -58,22 +58,35 @@ an additive change, not a breaking one.
 
 ## Configuring it
 
-Pass the policy to the Worker, and provision the keys bucket if you use `encrypt`:
+Pass the policy to the Worker's [rules](self-host.md#rules), and provision the keys bucket if you use `encrypt`:
 
 ```typescript
-import { createWorker } from "@devultur/self-host";
+import { createWorker, defaultPlugins } from "@devultur/self-host";
 
 export default createWorker({
-  config: { security: { sessionBinding: true, ipBinding: false, encrypt: true } },
+  plugins: defaultPlugins({ security: { sessionBinding: true, ipBinding: false, encrypt: true } }),
 });
 ```
 
 ```toml
-# wrangler.toml
+# wrangler.toml: a separate bucket, never public
 [[r2_buckets]]
 binding = "KEYS_BUCKET"
-bucket_name = "devultur-media-keys"
+bucket_name = "media-keys"
 ```
+
+```bash
+wrangler r2 bucket create media-keys
+```
+
+Back the keys bucket up and restrict who can reach it: without its key, an encrypted file can't be read again.
+
+Encryption **fails closed**. When the effective policy (Worker default or a resource override) requires encrypting a
+private file and `KEYS_BUCKET` isn't bound, the Worker refuses the write with `503 keys_bucket_missing` and stores
+nothing, instead of storing it unencrypted. It refuses as early as it can: `POST /v1/upload` before the client sends
+any bytes, the upload `PUT` and the multipart create as a backstop, `POST /v1/transcode` before launching, and
+`POST /v1/captions` before transcribing. Public files and HLS segments aren't affected. Reading an encrypted file
+whose key can't be loaded answers `500`: the Worker never serves ciphertext.
 
 Per-resource overrides travel in the object metadata (set on upload, read on delivery) and resolve
 against the Worker default — exactly like `visibility`.

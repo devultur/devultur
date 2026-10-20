@@ -35,7 +35,8 @@ export const JwtType = {
 export interface WorkerEnv {
 	MEDIA_BUCKET: R2Bucket;
 	// Bucket dedicated to L4 encryption material (separate from media, dev/prod). Only touched when a
-	// resource is encrypted (`encrypt`); optional for self-hosts that don't use encryption. See crypto.ts.
+	// resource is encrypted (`encrypt`); optional for self-hosts that don't use encryption. With `encrypt` on and no
+	// bucket, private writes fail closed (`503 keys_bucket_missing`, see keys-bucket.ts).
 	KEYS_BUCKET?: R2Bucket;
 	MEDIA_KV: KVNamespace;
 	DELIVERY_SIGN_SECRET: string;
