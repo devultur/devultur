@@ -40,18 +40,24 @@ vi.mock("../src/component/_generated/server", () => {
 		mutation: definition,
 		query: definition,
 		internalMutation: definition,
+		internalAction: definition,
 		httpAction: (handler: unknown) => handler,
 	};
 });
 vi.mock("../src/component/_generated/api", () => {
-	const references = new Proxy({}, { get: (_target, name) => `public.${String(name)}` });
-	return { api: { public: references }, internal: { public: references } };
+	// `api.<module>.<name>` is the string "<module>.<name>".
+	const modules = new Proxy(
+		{},
+		{ get: (_target, module) => new Proxy({}, { get: (_inner, name) => `${String(module)}.${String(name)}` }) },
+	);
+	return { api: modules, internal: modules };
 });
 
-// The public module plus the lock module (lock.ts), by function name: no name repeats across them.
+// The component's modules (public.ts, lock.ts, uploads.ts), by function name: no name repeats across them.
 const component = {
 	...(await import("../src/component/public")),
 	...(await import("../src/component/lock")),
+	...(await import("../src/component/uploads")),
 } as unknown as Record<string, FunctionDefinition>;
 const { default: http } = await import("../src/component/http");
 
@@ -126,9 +132,9 @@ function setup() {
 	const workerCalls: WorkerCall[] = [];
 	const webhookDeliveries: WebhookDelivery[] = [];
 	const db = memoryDb();
-	// `api.public.x` / `internal.public.x` are the strings "public.x" here (see the `_generated/api` mock).
+	// `api.<module>.x` / `internal.<module>.x` are the strings "<module>.x" here (see the `_generated/api` mock).
 	const runFunction = async (reference: string, args: unknown) => {
-		const fn = component[reference.replace(/^public\./, "")];
+		const fn = component[reference.replace(/^\w+\./, "")];
 		if (!fn) throw new Error(`component function ${reference} not found`);
 		return fn.handler({ db }, args);
 	};
@@ -170,10 +176,15 @@ function setup() {
 		throw new Error(`Unexpected fetch to ${request.url}`);
 	});
 
+	const scheduled: Array<{ delayMs: number; reference: string; args: unknown }> = [];
 	const ctx = {
 		runQuery: vi.fn(runFunction),
 		runMutation,
-		scheduler: { runAfter: vi.fn(async () => {}) },
+		scheduler: {
+			runAfter: vi.fn(async (delayMs: number, reference: string, args: unknown) => {
+				scheduled.push({ delayMs, reference, args });
+			}),
+		},
 	};
 	const run = (name: string, args: unknown) => {
 		const fn = component[name];
@@ -185,6 +196,9 @@ function setup() {
 
 	/** The component's media record for `key`, as the app's queries read it. */
 	const mediaRecord = (key: string) => runFunction("public.getMediaByKey", { key }) as Promise<Record<string, unknown>>;
+	/** The component's media library, as `listMedia` returns it. */
+	const listMedia = (args: { type?: string } = {}) =>
+		runFunction("public.listMedia", args) as Promise<Record<string, unknown>[]>;
 
 	return {
 		run,
@@ -196,6 +210,9 @@ function setup() {
 		webhookDeliveries,
 		runMutation,
 		mediaRecord,
+		listMedia,
+		scheduled,
+		db,
 		transcription,
 	};
 }
@@ -468,5 +485,110 @@ describe("@devultur/convex against a self-hosted Worker", () => {
 		for (const call of contract.workerCalls) {
 			expect(call.status, `${call.method} ${call.path}`).not.toBe(404);
 		}
+	});
+});
+
+describe("the media library (confirmed uploads in listMedia)", () => {
+	it("records an image and a file once their bytes are stored, and filters them by type", async () => {
+		const contract = setup();
+		const image = await uploadThroughComponent(contract, { filename: "Cover photo.png", contentType: "image/png" });
+		const file = await uploadThroughComponent(contract, { filename: "doc.pdf", contentType: "application/pdf" });
+
+		const record = await contract.run("confirmUpload", {
+			key: image.key,
+			filename: "Cover photo.png",
+			width: 640,
+			height: 480,
+		});
+		await contract.run("confirmUpload", { key: file.key, filename: "doc.pdf" });
+
+		expect(record).toMatchObject({
+			key: image.key.split("/")[2],
+			objectKey: image.key,
+			type: "image",
+			visibility: "private",
+			// The original name: it sanitizes to the one in the key.
+			filename: "Cover photo.png",
+			contentType: "image/png",
+			sizeBytes: image.bytes.byteLength,
+			width: 640,
+			height: 480,
+		});
+		expect(await contract.listMedia()).toHaveLength(2);
+		expect(await contract.listMedia({ type: "file" })).toEqual([
+			expect.objectContaining({ objectKey: file.key, type: "file", filename: "doc.pdf" }),
+		]);
+	});
+
+	it("records nothing for an upload URL whose PUT never happened", async () => {
+		const contract = setup();
+		const created = (await contract.run("createUploadUrl", {
+			filename: "doc.pdf",
+			contentType: "application/pdf",
+		})) as { key: string };
+
+		expect(await contract.run("confirmUpload", { key: created.key })).toBeNull();
+		expect(await contract.listMedia()).toEqual([]);
+	});
+
+	it("records an upload nobody confirmed when the scheduled check finds its bytes", async () => {
+		const contract = setup();
+		const { key } = await uploadThroughComponent(contract, { filename: "doc.pdf", contentType: "application/pdf" });
+
+		const [check] = contract.scheduled;
+		expect(check).toEqual({
+			delayMs: 25 * 60 * 60 * 1000,
+			reference: "uploads.confirmUploadLater",
+			args: { key, filename: "doc.pdf" },
+		});
+		await contract.run("confirmUploadLater", check?.args);
+		expect(await contract.listMedia()).toEqual([expect.objectContaining({ objectKey: key, type: "file" })]);
+	});
+
+	it("keeps one record per video, with the upload's fields and the transcode state", async () => {
+		const contract = setup();
+		const { key, bytes } = await uploadThroughComponent(contract, { filename: "clip.mp4", contentType: "video/mp4" });
+		const videoId = key.split("/")[2] ?? "";
+
+		await contract.run("confirmUpload", { key, filename: "clip.mp4" });
+		await contract.run("processVideo", { key });
+		// Confirming again (the scheduled check) leaves the transcode state alone.
+		await contract.run("confirmUploadLater", { key, filename: "clip.mp4" });
+
+		expect(await contract.listMedia({ type: "video" })).toEqual([
+			expect.objectContaining({
+				key: videoId,
+				objectKey: key,
+				sizeBytes: bytes.byteLength,
+				visibility: "private",
+				transcodeStatus: "queued",
+			}),
+		]);
+	});
+
+	it("drops a deleted file from the library, but keeps one whose delete a hold refused", async () => {
+		const contract = setup();
+		const free = await uploadThroughComponent(contract, { filename: "doc.pdf", contentType: "application/pdf" });
+		const held = await uploadThroughComponent(contract, {
+			filename: "deed.pdf",
+			contentType: "application/pdf",
+			hold: true,
+		});
+		await contract.run("confirmUpload", { key: free.key });
+		await contract.run("confirmUpload", { key: held.key });
+
+		await contract.run("deleteMediaAction", { key: free.key });
+		await expect(contract.run("deleteMediaAction", { key: held.key })).rejects.toMatchObject({
+			data: { code: "retention_active" },
+		});
+
+		expect(await contract.listMedia()).toEqual([expect.objectContaining({ objectKey: held.key })]);
+	});
+
+	it("refuses to record a key that isn't an upload's", async () => {
+		const contract = setup();
+		await expect(contract.run("confirmUpload", { key: "asset/exports/pkg.zip" })).rejects.toMatchObject({
+			data: { code: "invalid_upload_key" },
+		});
 	});
 });

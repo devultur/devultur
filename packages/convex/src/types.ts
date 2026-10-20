@@ -11,11 +11,18 @@ export interface DevulturComponentConfig {
 }
 
 export interface MediaRecord {
+	/** The media id (the `id` of its `DevulturMedia`), for every kind. */
 	key: string;
 	type: "video" | "image" | "file";
 	filename: string;
 	contentType: string;
 	sizeBytes: number;
+	/** Set by a confirmed upload; unset on records from before 1.1.1. */
+	visibility?: "public" | "private";
+	/** Key of the uploaded object (a video's raw file). Set by a confirmed upload. */
+	objectKey?: string;
+	width?: number;
+	height?: number;
 	transcodeStatus?: "queued" | "transcoding" | "captioning" | "ready" | "failed";
 	transcodeProgress?: { current: number; total: number };
 	transcodeError?: string;

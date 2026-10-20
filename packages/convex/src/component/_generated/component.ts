@@ -222,4 +222,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         Name
       >;
     };
+    uploads: {
+      confirmUpload: FunctionReference<
+        "action",
+        "internal",
+        { filename?: string; height?: number; key: string; width?: number },
+        any,
+        Name
+      >;
+    };
   };

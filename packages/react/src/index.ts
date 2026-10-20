@@ -37,7 +37,7 @@ export type {
 	VideoPlayerRef,
 	VideoPlayerRenderProps,
 } from "./types";
-export { UploadHttpError, uploadFileWithProgress } from "./upload-file";
+export { type UploadFileOptions, UploadHttpError, type UploadProgress, uploadFileWithProgress } from "./upload-file";
 export { UploadZone } from "./upload-zone";
 export { useCourseProgress } from "./use-course-progress";
 export { useProgress } from "./use-progress";

@@ -90,6 +90,7 @@ import { components } from "./_generated/api";
 export const {
 	issueViewerToken,
 	createUploadUrl,
+	confirmUpload,
 	deleteMedia,
 	deleteVideo,
 	processVideo,

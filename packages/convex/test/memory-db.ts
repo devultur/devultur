@@ -1,10 +1,16 @@
 // A minimal in-memory stand-in for a Convex `ctx.db`: enough of insert / get / patch / delete and
-// `query(table).withIndex(name, (q) => q.eq(...)).first() | .collect()` to run the component's mutations for real.
+// `query(table).withIndex(name, (q) => q.eq(...)).first() | .collect()` (plus `.filter()` and `.collect()` on a whole
+// table) to run the component's functions for real.
 
 type Document = Record<string, unknown> & { _id: string };
 
 interface IndexRange {
 	eq(field: string, value: unknown): IndexRange;
+}
+
+interface FieldFilter {
+	field(name: string): string;
+	eq(field: string, value: unknown): [string, unknown];
 }
 
 export function memoryDb() {
@@ -60,6 +66,12 @@ export function memoryDb() {
 					select(range);
 					return { first: async () => matches()[0] ?? null, collect: async () => matches() };
 				},
+				// Only `filter((q) => q.eq(q.field(name), value))`, the one filter the component uses.
+				filter(select: (q: FieldFilter) => [string, unknown]) {
+					conditions.push(select({ field: (name) => name, eq: (field, value) => [field, value] }));
+					return { collect: async () => matches() };
+				},
+				collect: async () => matches(),
 			};
 		},
 	};

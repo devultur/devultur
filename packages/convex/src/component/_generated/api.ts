@@ -13,6 +13,8 @@ import type * as lock from "../lock.js";
 import type * as lockValidators from "../lockValidators.js";
 import type * as mediaClient from "../mediaClient.js";
 import type * as public_ from "../public.js";
+import type * as uploadKeys from "../uploadKeys.js";
+import type * as uploads from "../uploads.js";
 import type * as workerErrors from "../workerErrors.js";
 
 import type {
@@ -28,6 +30,8 @@ const fullApi: ApiFromModules<{
   lockValidators: typeof lockValidators;
   mediaClient: typeof mediaClient;
   public: typeof public_;
+  uploadKeys: typeof uploadKeys;
+  uploads: typeof uploads;
   workerErrors: typeof workerErrors;
 }> = anyApi as any;
 

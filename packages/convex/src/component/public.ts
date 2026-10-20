@@ -7,6 +7,7 @@ import { internalMutation, mutation, query } from "./_generated/server";
 import { objectLockValidator } from "./lockValidators";
 import { getMediaClient } from "./mediaClient";
 import { transcodeOutputFields } from "./schema";
+import { UPLOAD_CONFIRM_BACKSTOP_MS } from "./uploads";
 import { workerAction } from "./workerErrors";
 
 // Webhook path RELATIVE to the component. Convex gives the component a `CONVEX_SITE_URL` that ALREADY
@@ -52,18 +53,26 @@ export const createUploadUrl = workerAction({
 		lock: v.optional(objectLockValidator),
 		hold: v.optional(v.boolean()),
 	},
-	handler: async (_ctx, args) => {
+	handler: async (ctx, args) => {
 		const media = getMediaClient();
 		// Returns { url, key, id, kind, visibility } → the client assembles the DevulturMedia after the PUT.
-		return media.createUploadUrl(args);
+		const upload = await media.createUploadUrl(args);
+		// Backstop for a client that never confirms: records the upload later if its bytes were stored (uploads.ts).
+		await ctx.scheduler.runAfter(UPLOAD_CONFIRM_BACKSTOP_MS, internal.uploads.confirmUploadLater, {
+			key: upload.key,
+			filename: args.filename,
+		});
+		return upload;
 	},
 });
 
 export const deleteMediaAction = workerAction({
 	args: { key: v.string() },
-	handler: async (_ctx, args) => {
+	handler: async (ctx, args) => {
 		const media = getMediaClient();
 		await media.delete(args.key);
+		// Only once the Worker deleted it: a refused delete (a lock) keeps the file in the library.
+		await ctx.runMutation(internal.uploads.forgetUpload, { key: args.key });
 	},
 });
 
@@ -247,6 +256,12 @@ export const createMedia = mutation({
 		sizeBytes: v.number(),
 	},
 	handler: async (ctx, args) => {
+		// One record per key: `processVideo` and a confirmed upload can both get here first.
+		const existing = await ctx.db
+			.query("media")
+			.withIndex("by_key", (q) => q.eq("key", args.key))
+			.first();
+		if (existing) return existing._id;
 		return ctx.db.insert("media", { ...args, createdAt: Date.now() });
 	},
 });
