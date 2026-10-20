@@ -9,13 +9,12 @@ import type { UploadPending, WorkerApp } from "../types";
 import { recordLockAudit } from "./audit";
 import { lockSubjectOf } from "./guard";
 import { isInProgressJobOutput } from "./job-outputs";
-import { checkWrite, type WriteCondition, writeConflict } from "./overwrite";
-import { forgetLock } from "./sidecar";
+import { type AllowedWrite, checkWrite, deleteReplacedKey, writeConflict } from "./overwrite";
 
 type UploadContext = Context<WorkerApp>;
 
-/** `exists`: the write replaces an object (an overwrite). */
-export type UploadWrite = { blocked: Response } | { onlyIf: WriteCondition; exists: boolean };
+/** `exists`: the write replaces an object (an overwrite), whose `enc` is `replacedEnc`. */
+export type UploadWrite = { blocked: Response } | AllowedWrite;
 
 /**
  * Before the bytes (and before any encryption key is created): an asset without `overwrite` must not exist yet, and an
@@ -32,7 +31,7 @@ export async function prepareUploadWrite(
 	if ("blocked" in check) return check;
 	const isCreateOnly = Boolean(pending?.isAsset && !pending.overwrite);
 	if (isCreateOnly && check.exists) return { blocked: alreadyExists(context, key) };
-	return { onlyIf: check.onlyIf, exists: check.exists };
+	return check;
 }
 
 /**
@@ -91,20 +90,22 @@ export function uploadLockOf(
 
 /**
  * After the bytes landed (single PUT or multipart complete):
- * - an overwrite drops the stale image variants and the replaced object's lock record (the new object brings its own);
+ * - an overwrite drops the stale image variants and the replaced object's encryption key (the new object has its own);
  * - a file stored with a lock gets its first audit record (`set`, from nothing), so its protection is provable from its
  *   first write. The actor is the uploader: the POST's plugin context, since the PUT may carry no credential.
+ * The replaced object's lock record stays: it's bound to that object's version, so it never applies to the new one,
+ * and deleting it here could delete a record a lock change just wrote for the new object.
  */
 export async function afterUploadWrite(
 	context: UploadContext,
 	key: string,
 	pending: UploadPending | null,
-	isReplacement: boolean,
+	write: Pick<AllowedWrite, "exists" | "replacedEnc">,
 ): Promise<void> {
 	const fullKey = pending?.storageKey ?? storageKey(context, key);
 	const root = fullKey.endsWith(key) ? fullKey.slice(0, -key.length) : getRequestState(context).storagePrefix;
 	if (pending) await discardStaleVariants(context.env.MEDIA_BUCKET, pending);
-	if (isReplacement) await forgetLock(context.env.MEDIA_BUCKET, root, key);
+	if (write.exists) await deleteReplacedKey(context, fullKey, write.replacedEnc);
 	const lock = uploadLockOf(context, key, pending);
 	if (!lock) return;
 	await recordLockAudit(context, {

@@ -72,7 +72,7 @@ export {
 	type WorkerConfig,
 } from "./request-state";
 export { type DownloadLinkInfo, getRouteResult, type RouteResult, type TranscodeJob } from "./route-result";
-export { type AssetListEntry, MAX_ASSET_LIST_LIMIT } from "./routes/assets";
+export { type AssetListEntry, MAX_ASSET_LIST_LIMIT, MAX_EXPIRED_LOOKUPS } from "./routes/assets";
 export { edgeCacheTag } from "./routes/edge-cache";
 export { servedCacheControl } from "./routes/media";
 export { isObjectExpired } from "./routes/object-response";

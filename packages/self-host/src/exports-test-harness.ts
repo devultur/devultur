@@ -37,6 +37,14 @@ export interface PutOptions {
 	onlyIf?: Headers | { etagMatches?: string; uploadedBefore?: Date };
 }
 
+export interface MemoryListOptions {
+	prefix?: string;
+	limit?: number;
+	cursor?: string;
+	delimiter?: string;
+	startAfter?: string;
+}
+
 export interface MemoryBucketOptions {
 	/** `uploaded` of each write. Default: one millisecond after the epoch per write, so tests stay deterministic. */
 	now?: () => Date;
@@ -134,9 +142,14 @@ export function memoryBucket({ now }: MemoryBucketOptions = {}) {
 			const { size, etag, httpEtag, uploaded, version, httpMetadata, customMetadata } = r2Body(key, stored);
 			return { key, size, etag, httpEtag, uploaded, version, httpMetadata, customMetadata };
 		},
-		list: async ({ prefix = "", limit = 1000, cursor }: { prefix?: string; limit?: number; cursor?: string }) => {
+		list: async ({ prefix = "", limit = 1000, cursor, delimiter, startAfter }: MemoryListOptions) => {
 			const start = Number(cursor ?? "0");
-			const matching = [...objects.entries()].filter(([key]) => key.startsWith(prefix)).sort();
+			// `delimiter` only drops the keys it would roll up (R2 returns those as `delimitedPrefixes`).
+			const isListed = (key: string) =>
+				key.startsWith(prefix) &&
+				(startAfter === undefined || key > startAfter) &&
+				(!delimiter || !key.slice(prefix.length).includes(delimiter));
+			const matching = [...objects.entries()].filter(([key]) => isListed(key)).sort();
 			const page = matching.slice(start, start + limit);
 			const truncated = start + limit < matching.length;
 			return {

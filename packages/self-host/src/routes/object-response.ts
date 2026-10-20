@@ -14,10 +14,16 @@ import {
 import { loadStorageKey } from "../helpers";
 import { ObjectMeta } from "./upload-integrity";
 
+/** The object's `expiresAt` (epoch ms), or `undefined` when it has none. Pure. */
+export function objectExpiresAt(customMetadata: Record<string, string> | undefined): number | undefined {
+	const expiresAt = Number(customMetadata?.[ObjectMeta.EXPIRES_AT]);
+	return Number.isFinite(expiresAt) && expiresAt > 0 ? expiresAt : undefined;
+}
+
 /** Has the object expired (TTL)? From then on we respond 410 even if the sweeper hasn't deleted it yet. Pure. */
 export function isObjectExpired(customMetadata: Record<string, string> | undefined, now = Date.now()): boolean {
-	const expiresAt = Number(customMetadata?.[ObjectMeta.EXPIRES_AT]);
-	return Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= now;
+	const expiresAt = objectExpiresAt(customMetadata);
+	return expiresAt !== undefined && expiresAt <= now;
 }
 
 export function expiredResponse(): Response {

@@ -12,7 +12,7 @@ import {
 	isReservedLockKey,
 	reservedKeyResponse,
 } from "../object-lock/guard";
-import { forgetLock } from "../object-lock/sidecar";
+import { forgetTranscodeCompleted } from "../object-lock/transcode-marker";
 import { getRequestState } from "../request-state";
 import type { WorkerApp } from "../types";
 
@@ -44,6 +44,10 @@ export async function handleVideoDelete(context: Context<WorkerApp>): Promise<Re
 		const deleted = await guardedDeletePrefix(context, `${folder}/`);
 		if ("blocked" in deleted) return deleted.blocked;
 		deletedCount += deleted.deletedCount;
+		// The video's outputs are gone, so a new transcode of the folder is a first one again.
+		if (deleted.deletedCount > 0) {
+			await forgetTranscodeCompleted(context.env.MEDIA_BUCKET, getRequestState(context).storagePrefix, folder);
+		}
 		// L4: a private object's encryption material (HLS key at `hls/{keyId}`, at-rest keys for the raw, MP4, poster,
 		// storyboard… at `{object}/{keyId}`) lives under the SAME prefix in the keys bucket. Public never encrypts
 		// (shouldEncryptAtRest), so there's nothing to sweep there.
@@ -78,10 +82,10 @@ export async function handleKeyDelete(context: Context<WorkerApp>): Promise<Resp
 	// could touch another object whose name starts the same way.
 	const variants = await guardedDeletePrefix(context, variantPrefix(key));
 	if ("blocked" in variants) return variants.blocked;
-	// Its own L4 key (`${fullKey}/{keyId}`) and its variants' keys: not the keys of an asset nested under its path.
+	// Its own L4 keys (`${fullKey}/{keyId}`) and its variants' keys: not the keys of an asset nested under its path.
 	const keys = await deleteKeysFor(context, key, exists.customMetadata?.enc);
 	if ("blocked" in keys) return keys.blocked;
-	// Its lock record goes with it: a file uploaded later at this key starts from its own upload lock.
-	await forgetLock(context.env.MEDIA_BUCKET, getRequestState(context).storagePrefix, key);
+	// Its lock record stays, inert: it's bound to the deleted version, so a file uploaded later at this key starts from
+	// its own upload lock. Deleting it here could delete a record a lock change just wrote for that new file.
 	return new Response(null, { status: 204 });
 }

@@ -9,7 +9,7 @@ import { isVariantKey, variantPrefix } from "../image/transform-plan";
 import { getRequestState } from "../request-state";
 import type { WorkerApp } from "../types";
 import { recordLockAudit } from "./audit";
-import { effectiveLock, sidecarKey } from "./sidecar";
+import { effectiveLock } from "./sidecar";
 import { isStateLocked, type LockState } from "./state";
 
 type GuardContext = Context<WorkerApp>;
@@ -191,16 +191,32 @@ export async function guardedDeletePrefix(context: GuardContext, prefix: string)
 	for (let start = 0; start < storageKeys.length; start += DELETE_BATCH_SIZE) {
 		await context.env.MEDIA_BUCKET.delete(storageKeys.slice(start, start + DELETE_BATCH_SIZE));
 	}
-	// The lock records of what was deleted (sidecars, a video's transcode marker) go with it.
-	if (storageKeys.length > 0) await deletePrefix(context.env.MEDIA_BUCKET, sidecarKey(root, prefix));
+	// The lock records of what was deleted stay, inert (bound to the deleted versions): deleting them could delete a
+	// record a lock change just wrote for a file uploaded again at one of these keys.
 	return { deletedCount: storageKeys.length };
 }
 
 /**
- * Deletes one object's encryption material from the keys bucket: its own key (`{storageKey}/{keyId}`, named by its
- * `enc` metadata) and its variants' (`{storageKey}/__variants/…`). Never a bare `{storageKey}/`: an asset nested under
- * this one's path (`asset/a` and `asset/a/b.pdf` are both valid) keeps its keys there. Destroying the keys destroys the
- * object (crypto-shredding), so the object must be writable.
+ * The object's own keys in the keys bucket: the direct children of `{storageKey}/` (`{storageKey}/{keyId}`; a key id
+ * has no `/`). The current `enc`'s and any a replaced version left behind. Never deeper: an asset nested under this
+ * one's path (`asset/a` and `asset/a/b.pdf` are both valid) keeps its keys at `{storageKey}/b.pdf/{keyId}`.
+ */
+async function ownKeysOf(keysBucket: R2Bucket, fullKey: string): Promise<string[]> {
+	const keys: string[] = [];
+	let cursor: string | undefined;
+	do {
+		const listing = await keysBucket.list({ prefix: `${fullKey}/`, delimiter: "/", cursor });
+		keys.push(...listing.objects.map((object) => object.key));
+		cursor = listing.truncated ? listing.cursor : undefined;
+	} while (cursor);
+	return keys;
+}
+
+/**
+ * Deletes one object's encryption material from the keys bucket: its own keys (`{storageKey}/{keyId}`, see
+ * `ownKeysOf`) and its variants' (`{storageKey}/__variants/…`). Never a bare `{storageKey}/` prefix: the keys of an
+ * asset nested under this one's path live there. Destroying the keys destroys the object (crypto-shredding), so the
+ * object must be writable.
  */
 export async function deleteKeysFor(
 	context: GuardContext,
@@ -213,9 +229,14 @@ export async function deleteKeysFor(
 	if (!keysBucket) return { deletedCount: 0 };
 	const fullKey = storageKey(context, objectKey);
 	const meta = decodeEncryptionMeta(enc);
-	if (meta) await keysBucket.delete(`${fullKey}/${meta.keyId}`);
+	const ownKeys = new Set(await ownKeysOf(keysBucket, fullKey));
+	if (meta) ownKeys.add(`${fullKey}/${meta.keyId}`);
+	// A file uploaded again at this key meanwhile keeps its own key (the sweep would otherwise shred it).
+	const reuploaded = decodeEncryptionMeta((await context.env.MEDIA_BUCKET.head(fullKey))?.customMetadata?.enc);
+	if (reuploaded && reuploaded.keyId !== meta?.keyId) ownKeys.delete(`${fullKey}/${reuploaded.keyId}`);
+	if (ownKeys.size > 0) await keysBucket.delete([...ownKeys]);
 	const variantKeyCount = await deletePrefix(keysBucket, variantPrefix(fullKey));
-	return { deletedCount: variantKeyCount + (meta ? 1 : 0) };
+	return { deletedCount: variantKeyCount + ownKeys.size };
 }
 
 /** Deletes every key of a video folder (virtual `{visibility}/video/{id}`): all of it belongs to that one video. */

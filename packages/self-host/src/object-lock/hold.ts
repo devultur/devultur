@@ -33,8 +33,11 @@ type HoldTargets = { keys: string[]; prefix?: string; cursor?: string } | { erro
 
 export interface HoldSkip {
 	key: string;
-	/** `not_found`, `unchanged` (already in that state) or `lock_conflict` (changed concurrently: retry it). */
-	reason: "not_found" | "unchanged" | "lock_conflict";
+	/**
+	 * `not_found`, `unchanged` (already in that state), `lock_conflict` (changed concurrently: retry it) or
+	 * `lock_record_unreadable` (a release of a lock record that can't be read: an operator must repair it).
+	 */
+	reason: "not_found" | "unchanged" | "lock_conflict" | "lock_record_unreadable";
 }
 
 const isKeyList = (value: unknown): value is string[] =>
@@ -74,6 +77,18 @@ async function applyHold(context: HoldContext, key: string, hold: boolean, now: 
 	const effective = await effectiveLock(context.env.MEDIA_BUCKET, root, key, object);
 	const before: ObjectLock = effective.state?.lock ?? { hold: false };
 	if ((before.hold === true) === hold) return { updated: false, reason: "unchanged" };
+	// Its hold is a stand-in for a record nobody can read, which may hold a compliance retention: never released here.
+	if (effective.state?.isUnreadable) {
+		await recordLockAudit(context, {
+			action: "release",
+			keys: [key],
+			before,
+			after: { ...before, hold },
+			outcome: "rejected",
+			reason: "lock_record_unreadable",
+		});
+		return { updated: false, reason: "lock_record_unreadable" };
+	}
 
 	const validated = validateLock({ ...before, hold });
 	const after: ObjectLock = validated.ok ? validated.lock : { ...before, hold };

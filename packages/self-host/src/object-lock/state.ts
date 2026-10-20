@@ -12,6 +12,11 @@ export interface LockState {
 	uploadedAt?: Date;
 	/** When the hold was released (from the sidecar): the period counts from here instead. */
 	holdReleasedAt?: Date;
+	/**
+	 * The stored lock couldn't be read, so `lock` is a stand-in hold (fail closed). What it really said is unknown, so
+	 * the API can't change it: the hold can't be released, nor the retention set, until an operator repairs the record.
+	 */
+	isUnreadable?: true;
 }
 
 /** The lock to store, or `undefined` when there is nothing to enforce (no retention and no hold). */
@@ -25,21 +30,29 @@ export function encodeLockMetadata(lock: ResolvedLock | undefined): string | und
  * key and an unreadable one must never free the object.
  */
 export function parseLockMetadata(raw: string | undefined): ObjectLock | undefined {
+	return readLockMetadata(raw)?.lock;
+}
+
+function readLockMetadata(raw: string | undefined): { lock: ObjectLock; isUnreadable: boolean } | undefined {
 	if (raw === undefined) return undefined;
 	try {
 		const validation = validateLock(JSON.parse(raw));
-		if (validation.ok) return validation.lock;
+		if (validation.ok) return { lock: validation.lock, isUnreadable: false };
 	} catch {}
-	return { hold: true };
+	return { lock: { hold: true }, isUnreadable: true };
 }
 
 type LockedObject = Pick<R2Object, "customMetadata"> & { uploaded?: Date };
 
 /** Lock state of an object already read (`head`/`list` with metadata). `null` if it carries no lock. */
 export function lockStateOf(object: LockedObject): LockState | null {
-	const lock = parseLockMetadata(object.customMetadata?.[LOCK_METADATA_KEY]);
-	if (!lock) return null;
-	return { lock, ...(object.uploaded ? { uploadedAt: object.uploaded } : {}) };
+	const stored = readLockMetadata(object.customMetadata?.[LOCK_METADATA_KEY]);
+	if (!stored) return null;
+	return {
+		lock: stored.lock,
+		...(object.uploaded ? { uploadedAt: object.uploaded } : {}),
+		...(stored.isUnreadable ? { isUnreadable: true as const } : {}),
+	};
 }
 
 /** True while the state forbids delete and overwrite. A period with no known start fails closed (locked). */

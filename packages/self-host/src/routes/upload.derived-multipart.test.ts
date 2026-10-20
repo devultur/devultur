@@ -38,6 +38,7 @@ function setup(security?: SecurityPolicy) {
 		MEDIA_BUCKET: {
 			// Empty bucket: the lock check finds nothing to overwrite.
 			head: async () => null,
+			list: async () => ({ objects: [], truncated: false }),
 			createMultipartUpload: async (key: string, options?: R2MultipartOptions) => {
 				created.push({ key, options });
 				return { uploadId: "up-1", key, ...resume(key) };

@@ -40,3 +40,8 @@ async function rememberedLocation(env: WorkerEnv, videoId: string): Promise<JobL
 export async function hasCompletedTranscode(bucket: R2Bucket, root: string, videoFolder: string): Promise<boolean> {
 	return (await bucket.head(markerKey(root, videoFolder))) !== null;
 }
+
+/** Deletes the marker of `videoFolder`: its video was deleted (with every output the marker vouched for). */
+export async function forgetTranscodeCompleted(bucket: R2Bucket, root: string, videoFolder: string): Promise<void> {
+	await bucket.delete(markerKey(root, videoFolder));
+}
