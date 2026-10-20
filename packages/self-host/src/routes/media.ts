@@ -23,17 +23,9 @@ import { resolveWorkerVariant, workerVariantKey } from "../image/worker-transfor
 import { expiredRefusal, lockHeaders } from "../object-lock/delivery";
 import { getRequestState } from "../request-state";
 import type { WorkerApp } from "../types";
-import {
-	type EdgeCopyTarget,
-	edgeTtlFor,
-	fillEdgeCache,
-	MAX_EDGE_CACHE_FILL_BYTES,
-	publicEdgeCache,
-	putEdgeCopy,
-	responseFromEdgeHit,
-} from "./edge-cache";
+import { cacheDelivered, type EdgeCopyTarget, matchEdgeCopy, publicEdgeCache } from "./edge-cache";
 import { handleKeyDelete, handleVideoDelete } from "./media-delete";
-import { streamObject } from "./object-response";
+import { objectExpiresAt, streamObject } from "./object-response";
 import { isStoryboardVttKey, storyboardVttResponse } from "./storyboard-vtt";
 import { viewerTokenClaimRejection } from "./viewer-token-claims";
 
@@ -113,7 +105,8 @@ media.get("/:key{.+}", async (context) => {
 	// the request's `Range` against the full cached object (native 206). Private media never leaves the
 	// viewer's session. The Worker variant is just another R2 object → it also goes to the edge cache, with
 	// cache key = its variant key (format already resolved from `Accept`, so `format=auto` doesn't mix avif/webp).
-	// Cloudflare Images' fallback has its own cache.
+	// Cloudflare Images' fallback has its own cache. An owner read never touches it: it may read an expired file and
+	// gets owner-only lock headers, neither of which may reach (or come from) a public copy.
 	const transformParams = isOriginRequest ? null : parseTransformParams(requestUrl);
 	const isFormatNegotiated = transformParams?.format === "auto";
 	const workerParams =
@@ -123,13 +116,14 @@ media.get("/:key{.+}", async (context) => {
 		? `${requestUrl.origin}/__variant/${workerVariantKey(fullKey, workerParams, accept)}`
 		: requestUrl.toString();
 	const isUncachedTransform = hasTransformQuery(requestUrl) && !workerParams;
-	const edgeCache = isPrivate || isOriginRequest || isUncachedTransform ? null : publicEdgeCache();
+	const isEdgeCached = !isPrivate && !isOriginRequest && !isUncachedTransform && !isOwnerAccess;
+	const edgeCache = isEdgeCached ? publicEdgeCache() : null;
 	if (edgeCache) {
 		// With the request's headers: `match` resolves the `Range` against the cached object (native 206).
 		const cacheRequest = workerParams ? new Request(edgeCacheKey, context.req.raw) : context.req.raw;
-		const hit = await edgeCache.match(cacheRequest);
-		// The copy lives as long as the object says (see edge-cache.ts); the client gets the object's `Cache-Control`.
-		if (hit) return responseFromEdgeHit(hit, { isFormatNegotiated });
+		// The copy lives as long as the object says, never past its `expiresAt` (see edge-cache.ts).
+		const hit = await matchEdgeCopy(edgeCache, cacheRequest, { isFormatNegotiated });
+		if (hit) return hit;
 	}
 
 	let object = await context.env.MEDIA_BUCKET.get(fullKey);
@@ -141,6 +135,8 @@ media.get("/:key{.+}", async (context) => {
 	const location = { root: getRequestState(context).storagePrefix, key };
 	const expired = await expiredRefusal(context.env.MEDIA_BUCKET, location, object, isOwnerAccess);
 	if (expired) return expired;
+	// Read before a Worker variant replaces `object`: a variant's edge copy ends with its original.
+	const expiresAt = objectExpiresAt(object.customMetadata);
 
 	// L3: verify the session/IP binding against the request (after the fetch, to read the per-resource
 	// override from the metadata). Mismatch → 401 `session_mismatch` → the provider re-issues the token.
@@ -152,7 +148,9 @@ media.get("/:key{.+}", async (context) => {
 	const isPlaylist = key.endsWith(".m3u8");
 	// The `Cache-Control` set at upload time (preset/config rule); previous objects don't have it → fall back to
 	// the one for a generated id. Private: only the browser cache (`private`), never shared/CDN.
-	const cacheControl = servedCacheControl(object.httpMetadata?.cacheControl, isPrivate);
+	// An owner read carries lock headers and may be of an expired file: served like private media, which no shared
+	// cache stores.
+	const cacheControl = servedCacheControl(object.httpMetadata?.cacheControl, isPrivate || isOwnerAccess);
 
 	// `?download` (optionally `?download=<name>`) → attachment. `.get` returns "" with no value, null if absent.
 	const downloadParam = requestUrl.searchParams.get("download");
@@ -242,23 +240,18 @@ media.get("/:key{.+}", async (context) => {
 		headers,
 		range: context.req.header("Range"),
 	});
-	// No freshness lifetime for a shared cache (`no-cache`, `no-store`) means no copy at the edge.
-	if (!edgeCache || edgeTtlFor(cacheControl) <= 0) return response;
+	if (!edgeCache) return response;
+	// No freshness lifetime for a shared cache (`no-cache`, `no-store`), or an object about to expire: no copy.
 	const target: EdgeCopyTarget = {
 		cache: edgeCache,
 		cacheKey: edgeCacheKey,
 		storagePrefix: getRequestState(context).storagePrefix,
 		virtualKey: key,
 		cacheControl,
+		expiresAt,
 	};
-	// Miss with Range (the typical first request for a `<video>`): the full object is cached separately so that
-	// later ranges come from the edge. Bounded so we don't pull huge videos all at once.
-	if (kind === "plain-range" && object.size <= MAX_EDGE_CACHE_FILL_BYTES) {
-		context.executionCtx.waitUntil(fillEdgeCache(target, context.env.MEDIA_BUCKET, servedKey, response.headers));
-	}
-	if (kind === "plain-full") {
-		context.executionCtx.waitUntil(putEdgeCopy(target, response.clone().body, headers));
-	}
+	const delivered = { bucket: context.env.MEDIA_BUCKET, servedKey, size: object.size, kind, response, headers };
+	cacheDelivered((task) => context.executionCtx.waitUntil(task), target, delivered);
 	return response;
 });
 

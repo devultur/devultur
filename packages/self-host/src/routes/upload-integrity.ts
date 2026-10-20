@@ -104,6 +104,12 @@ export function integrityMetadata(
 	};
 }
 
+/** The `expiresAt` entry of `customMetadata`, to copy onto what's derived from that object (`{}` when it has none). */
+export function expiryMetadataOf(customMetadata: Record<string, string> | undefined): Record<string, string> {
+	const expiresAt = customMetadata?.[ObjectMeta.EXPIRES_AT];
+	return expiresAt ? { [ObjectMeta.EXPIRES_AT]: expiresAt } : {};
+}
+
 /**
  * An overwrite changes the original's bytes: its image variants (`{storageKey}/__variants/`, generated from the
  * old bytes) stop being valid and get regenerated on the next request.

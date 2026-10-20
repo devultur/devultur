@@ -3,8 +3,9 @@
 // (R2 metadata is fixed per write), so the sidecar takes over once it exists. It's bound to the object version it was
 // written for (`objectVersion`, R2's per-write `version`; never the etag, which is the content's MD5 and repeats when
 // the same bytes are uploaded again): an object replaced after its lock ended starts fresh from its own upload lock,
-// and a stale sidecar is ignored. Deleting or overwriting an object also deletes its sidecar (`forgetLock`). Writes are compare-and-swap on the sidecar's etag, so two concurrent changes can't both
-// land on the same revision.
+// and a stale sidecar is ignored. That binding is what retires a sidecar: deleting or overwriting the object leaves it
+// in place, inert (deleting it then could delete one a lock change just wrote for the new object). Writes are
+// compare-and-swap on the sidecar's etag, so two concurrent changes can't both land on the same revision.
 import { isIsoInstant, type ObjectLock, validateLock } from "@devultur/core";
 import { type LockState, lockStateOf } from "./state";
 
@@ -26,6 +27,8 @@ export interface StoredSidecar {
 	sidecar: LockSidecar;
 	/** The sidecar object's own etag, for the next compare-and-swap. */
 	etag: string;
+	/** The record couldn't be read: `sidecar` is a stand-in hold bound to any version (see `readSidecar`). */
+	isUnreadable?: true;
 }
 
 export type LockSource = "sidecar" | "upload" | "none";
@@ -58,14 +61,17 @@ function parseSidecar(raw: string): LockSidecar | null {
 	}
 }
 
-/** The sidecar of `key`. An unreadable one fails closed: read as a hold bound to any version (`objectVersion: "*"`). */
+/**
+ * The sidecar of `key`. An unreadable one fails closed: read as a hold bound to any version (`objectVersion: "*"`),
+ * which the API can't release or change (it might stand for a compliance retention): `lock_record_unreadable`.
+ */
 export async function readSidecar(bucket: R2Bucket, root: string, key: string): Promise<StoredSidecar | null> {
 	const object = await bucket.get(sidecarKey(root, key));
 	if (!object) return null;
 	const sidecar = parseSidecar(await object.text());
 	if (sidecar) return { sidecar, etag: object.etag };
 	const unreadable: LockSidecar = { revision: 0, objectVersion: "*", lock: { hold: true }, updatedAt: "" };
-	return { sidecar: unreadable, etag: object.etag };
+	return { sidecar: unreadable, etag: object.etag, isUnreadable: true };
 }
 
 /**
@@ -105,6 +111,7 @@ export async function effectiveLock(
 			lock,
 			...(object.uploaded ? { uploadedAt: object.uploaded } : {}),
 			...(holdReleasedAt ? { holdReleasedAt: new Date(holdReleasedAt) } : {}),
+			...(stored.isUnreadable ? { isUnreadable: true as const } : {}),
 		};
 		return { state, source: "sidecar", stored };
 	}
@@ -112,9 +119,20 @@ export async function effectiveLock(
 	return { state, source: state ? "upload" : "none", stored };
 }
 
-/** Deletes `key`'s sidecar: the object it described is gone (deleted) or replaced (a new upload brings its own lock). */
-export async function forgetLock(bucket: R2Bucket, root: string, key: string): Promise<void> {
-	await bucket.delete(sidecarKey(root, key));
+/**
+ * `409 lock_record_unreadable` when `state`'s lock record can't be read: its stand-in hold can't be released and its
+ * retention can't be set through the API, since the real record might hold a compliance retention. `null` otherwise.
+ */
+export function unreadableLockRefusal(state: LockState | null, key: string): Response | null {
+	if (!state?.isUnreadable) return null;
+	return Response.json(
+		{
+			error: `The lock record of ${key} can't be read; it stays held until an operator repairs it`,
+			code: "lock_record_unreadable",
+			key,
+		},
+		{ status: 409 },
+	);
 }
 
 const VIDEO_STORAGE_KEY = /^(.*?)((?:public|private)\/video\/[^/]+\/.+)$/;

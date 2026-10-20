@@ -21,6 +21,7 @@ import {
 } from "../object-lock/upload-write";
 import { getRequestState, isAuthenticated } from "../request-state";
 import type { RawStorageClass, UploadPending, UploadRequest, WorkerApp } from "../types";
+import { inheritedExpiresAt } from "./derived-upload";
 import {
 	allowedUploadMetadata,
 	digestBody,
@@ -260,7 +261,8 @@ upload.put("/:key{.+}", async (context) => {
 
 	const customMetadata: Record<string, string> = {
 		...allowedUploadMetadata(pending?.uploadMetadata ?? getRequestState(context).config?.uploadMetadata),
-		...integrityMetadata(digest.sha256, true, pending?.expiresAt),
+		// A transcode output (no pending) expires with its video's raw.
+		...integrityMetadata(digest.sha256, true, pending?.expiresAt ?? (await inheritedExpiresAt(context, key))),
 		...lockMetadata(uploadLockOf(context, key, pending)),
 	};
 	// The binding override travels in the metadata → the delivery gate resolves it per-resource.
@@ -295,7 +297,7 @@ upload.put("/:key{.+}", async (context) => {
 
 	if (stored === null) return failedWrite(context, key, pending, customMetadata.enc);
 	if (resolved) await context.env.MEDIA_KV.delete(resolved.kvKey);
-	await afterUploadWrite(context, key, pending, write.exists);
+	await afterUploadWrite(context, key, pending, write);
 
 	return context.json({ key, size: body.byteLength, sha256: digest.sha256, sha256Verified: true });
 });

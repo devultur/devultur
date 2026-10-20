@@ -1,7 +1,8 @@
 // Object lock client of a media worker: read and change an object's retention (`/v1/lock/:key`) and set or release
 // holds (`/v1/lock/hold`). Refusals surface as `DevulturApiError` with the worker's `code` and `details`:
 // `retention_active` (409, `details: { key, mode, until, hold }`), `compliance_extend_only` (409), `lock_conflict`
-// (409, retry), `lock_privilege_required` (403), `invalid_lock` / `reserved_key` (400).
+// (409, retry), `lock_record_unreadable` (409, an operator must repair the record), `lock_privilege_required` (403),
+// `invalid_lock` / `reserved_key` (400).
 import type { RetentionDerivatives, RetentionMode } from "./lock";
 
 /** The lock in force on an object. */
@@ -36,8 +37,11 @@ export type HoldTarget = string[] | { prefix: string };
 
 export interface HoldSkip {
 	key: string;
-	/** `not_found`, `unchanged` (already in that state) or `lock_conflict` (changed concurrently: retry it). */
-	reason: "not_found" | "unchanged" | "lock_conflict";
+	/**
+	 * `not_found`, `unchanged` (already in that state), `lock_conflict` (changed concurrently: retry it) or
+	 * `lock_record_unreadable` (a release of a lock record the worker can't read: an operator must repair it).
+	 */
+	reason: "not_found" | "unchanged" | "lock_conflict" | "lock_record_unreadable";
 }
 
 export interface HoldPage {

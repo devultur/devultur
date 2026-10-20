@@ -2,7 +2,7 @@
 // transcode outputs and new caption locales, decision 3 of #3); a write to an existing key is an overwrite and goes
 // through `assertWritable`. The returned condition pins the write to the object the check saw, so a lock set (or an
 // object written) in between makes R2 refuse the put instead of silently replacing it.
-import { TranscodeStatus } from "@devultur/core";
+import { decodeEncryptionMeta, TranscodeStatus } from "@devultur/core";
 import type { Context } from "hono";
 import { storageKey } from "../helpers";
 import { getRequestState } from "../request-state";
@@ -16,7 +16,8 @@ type OverwriteContext = Context<WorkerApp>;
 
 export type WriteCondition = Headers | R2Conditional;
 
-export type WriteCheck = { blocked: Response } | { onlyIf: WriteCondition; exists: boolean };
+/** `replacedEnc`: the `enc` metadata of the object an overwrite replaces (its encryption key goes once it's replaced). */
+export type WriteCheck = { blocked: Response } | { onlyIf: WriteCondition; exists: boolean; replacedEnc?: string };
 
 /**
  * `onlyIf` for a write over exactly `object`. The etag is the content's MD5, so the same bytes written again (with
@@ -25,8 +26,15 @@ export type WriteCheck = { blocked: Response } | { onlyIf: WriteCondition; exist
 function sameObject(object: Pick<R2Object, "etag"> & { uploaded?: Date }): R2Conditional {
 	return {
 		etagMatches: object.etag,
+		// R2 keeps `uploaded` to the millisecond, so "before uploaded + 1 ms" matches exactly this write and refuses
+		// any later one. Real R2 only: the in-memory bucket of the tests can't prove the precision.
 		...(object.uploaded ? { uploadedBefore: new Date(object.uploaded.getTime() + 1) } : {}),
 	};
+}
+
+function overwriteOf(object: R2Object): { onlyIf: WriteCondition; exists: true; replacedEnc?: string } {
+	const replacedEnc = object.customMetadata?.enc;
+	return { onlyIf: sameObject(object), exists: true, ...(replacedEnc ? { replacedEnc } : {}) };
 }
 
 /** `onlyIf` for a create-only put (R2 returns null if the key already exists). */
@@ -49,11 +57,26 @@ export async function checkWrite(
 	const object = await context.env.MEDIA_BUCKET.head(fullKey);
 	if (!object) return { onlyIf: createOnlyCondition(), exists: false };
 	// Still conditional: an exempt write may replace the object, but not one written since this check.
-	if (options.isLockExempt) return { onlyIf: sameObject(object), exists: true };
+	if (options.isLockExempt) return overwriteOf(object);
 	const root = fullKey.endsWith(key) ? fullKey.slice(0, fullKey.length - key.length) : undefined;
 	const blocked = await assertWritable(context, [key], "overwrite", root);
 	if (blocked) return { blocked };
-	return { onlyIf: sameObject(object), exists: true };
+	return overwriteOf(object);
+}
+
+/**
+ * After an overwrite landed: deletes the replaced object's own encryption key (`{fullKey}/{keyId}`, named by its
+ * `enc`). The new object has a key of its own, and the replaced one was writable (the check allowed the overwrite), so
+ * the old key protects nothing any more. Left behind, it would stay forever: a delete only knows the current `enc`.
+ */
+export async function deleteReplacedKey(
+	context: OverwriteContext,
+	fullKey: string,
+	replacedEnc: string | undefined,
+): Promise<void> {
+	const meta = decodeEncryptionMeta(replacedEnc);
+	if (!meta || !context.env.KEYS_BUCKET) return;
+	await context.env.KEYS_BUCKET.delete(`${fullKey}/${meta.keyId}`);
 }
 
 /**
@@ -93,18 +116,20 @@ export async function assertRetranscodable(
 	return assertWritable(context, [video.folder], "overwrite");
 }
 
-export type BatchWriteCheck = { blocked: Response } | { conditions: Map<string, WriteCondition> };
+export type AllowedWrite = Exclude<WriteCheck, { blocked: Response }>;
+
+export type BatchWriteCheck = { blocked: Response } | { checks: Map<string, AllowedWrite> };
 
 /**
  * Checks every virtual key a job will write before it starts (fail-fast: nothing is spent on a job whose output can't
- * be stored). Returns each key's `onlyIf`, to pass to its put.
+ * be stored). Returns each key's check: the `onlyIf` to pass to its put, and what it replaces.
  */
 export async function checkWrites(context: OverwriteContext, keys: string[]): Promise<BatchWriteCheck> {
-	const conditions = new Map<string, WriteCondition>();
+	const checks = new Map<string, AllowedWrite>();
 	for (const key of keys) {
 		const check = await checkWrite(context, key);
 		if ("blocked" in check) return check;
-		conditions.set(key, check.onlyIf);
+		checks.set(key, check);
 	}
-	return { conditions };
+	return { checks };
 }

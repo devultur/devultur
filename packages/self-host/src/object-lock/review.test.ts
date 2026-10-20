@@ -67,7 +67,8 @@ describe("2. a stale lock record never applies to a new upload of the same bytes
 		const key = await uploadPdf(fixture.send, { path, hold: true });
 		await fixture.send("/v1/lock/hold", { method: "POST", body: JSON.stringify({ hold: false, keys: [key] }) });
 		expect((await fixture.send(`/v1/media/${key}`, { method: "DELETE" })).status).toBe(204);
-		expect(fixture.mediaBucket.objects.has(`__lock/${key}`)).toBe(false);
+		// The record stays, bound to the deleted version: inert for whatever is uploaded next.
+		expect(fixture.mediaBucket.objects.has(`__lock/${key}`)).toBe(true);
 
 		// The same Worker, now with a compliance default: the new object's own lock must hold.
 		const strict = createWorker({ plugins: defaultPlugins(COMPLIANCE_DEFAULT) });
@@ -83,14 +84,14 @@ describe("2. a stale lock record never applies to a new upload of the same bytes
 		expect((await send(`/v1/media/${key}`, { method: "DELETE" })).status).toBe(409);
 	});
 
-	it("an overwrite drops the replaced object's lock record", async () => {
+	it("an overwrite leaves the replaced object's lock record inert", async () => {
 		quiet();
 		const { send, mediaBucket } = lockedFixture();
 		const key = await uploadPdf(send, { path: "docs/over.pdf", hold: true });
 		await send("/v1/lock/hold", { method: "POST", body: JSON.stringify({ hold: false, keys: [key] }) });
 		expect(mediaBucket.objects.has(`__lock/${key}`)).toBe(true);
-		await uploadPdf(send, { path: "docs/over.pdf", overwrite: true });
-		expect(mediaBucket.objects.has(`__lock/${key}`)).toBe(false);
+		await uploadPdf(send, { path: "docs/over.pdf", overwrite: true, hold: true });
+		expect(await (await send(`/v1/lock/${key}`)).json()).toMatchObject({ hold: true, source: "upload" });
 	});
 });
 

@@ -10,7 +10,14 @@ import type { WorkerApp } from "../types";
 import { recordLockAudit } from "./audit";
 import { classifyChange, type LockChangeBody, nextLock, timingOf } from "./change";
 import { handleHold } from "./hold";
-import { type EffectiveLock, effectiveLock, type LockSidecar, objectVersionOf, writeSidecar } from "./sidecar";
+import {
+	type EffectiveLock,
+	effectiveLock,
+	type LockSidecar,
+	objectVersionOf,
+	unreadableLockRefusal,
+	writeSidecar,
+} from "./sidecar";
 import type { LockState } from "./state";
 
 type LockContext = Context<WorkerApp>;
@@ -67,6 +74,11 @@ lockRoute.put("/:key{.+}", async (context) => {
 	const now = new Date();
 	const action = classifyChange(effective.state, next.lock, now);
 	const audit = { action, keys: [key], before, after: next.lock, root };
+	const unreadable = unreadableLockRefusal(effective.state, key);
+	if (unreadable) {
+		await recordLockAudit(context, { ...audit, outcome: "rejected", reason: "lock_record_unreadable" });
+		return unreadable;
+	}
 	const decision = await decideLockChange(context, { action, keys: [key], before, after: next.lock });
 	if (!decision.allow) {
 		await recordLockAudit(context, { ...audit, outcome: "rejected", reason: "hook_refused" });

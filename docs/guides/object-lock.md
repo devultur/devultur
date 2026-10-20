@@ -114,13 +114,16 @@ All the lock error codes:
 | `409` | `write_conflict` | The file changed between the check and the write: retry |
 | `409` | `compliance_extend_only` | A change that would weaken a compliance retention |
 | `409` | `lock_conflict` | Another lock change landed first: retry |
+| `409` | `lock_record_unreadable` | A change to a file whose lock record can't be read (see [Caveats](#caveats)) |
 | `403` | `lock_privilege_required` | Shortening or removing a governance retention without an approved bypass |
 | `403` | `lock_below_minimum` | An upload asks for a looser lock than its upload token requires |
 | `400` | `invalid_lock`, `invalid_hold` | A malformed lock or hold request |
 | `400` | `reserved_key` | A key under `__lock/` or `__lock-audit/`, which the Worker keeps for itself |
 
 Owner reads (the Worker secret on `GET /v1/media/<key>`) also get `x-devultur-lock-until` and, while a hold is set,
-`x-devultur-lock-hold: true`.
+`x-devultur-lock-hold: true`. An owner read never goes through the edge cache: it isn't answered from a public copy
+and doesn't store one. Its `Cache-Control` is the private form of the file's own, so no shared cache keeps the lock
+headers either.
 
 ## Derived files
 
@@ -133,6 +136,13 @@ A video's transcode outputs and captions live under its folder (`{visibility}/vi
   freely. Deleting the whole video is still refused, since the original is in it.
 
 Image variants and mezzanines are regenerable caches. They're never retained.
+
+Derived files also expire with their original. An HLS playlist or segment, an MP4, a thumbnail, poster or storyboard
+written by the transcode runner gets the earliest `expiresAt` of the video's raws, and a caption gets the one of the
+file it was made from. Past it, they answer `410` like the original. The value is copied when the output is written
+(the raw is deleted by `deleteOriginalOnSuccess` only after the transcode completes), so changing a raw's expiry
+later doesn't reach outputs already written. The HLS encryption key (`.key`) has no expiry of its own: it's useless
+without the segments.
 
 ## Transcoding a locked video
 
@@ -194,22 +204,31 @@ because a presigned PUT to the bucket can't enforce one.
 ## Retention vs expiry
 
 Retention and expiry are separate, as in S3 Object Lock. **Retention preserves** the object: it can't be deleted or
-overwritten. **Expiry ends access** to it: past `expiresAt`, nobody but the owner reads it. A lock doesn't extend
-access, and an expiry doesn't shorten a lock. A file can be shared for 30 days and kept for 10 years.
+overwritten. **Expiry ends access** to it: past `expiresAt`, nobody but the owner reads it, and that covers a video's
+transcode outputs and captions (see [Derived files](#derived-files)). A lock doesn't extend access, and an expiry
+doesn't shorten a lock. A file can be shared for 30 days and kept for 10 years.
 
 | State | Viewers, public requests, download links | The owner (Worker secret) | The object |
 | --- | --- | --- | --- |
 | Before `expiresAt` | Normal access | Normal access | Kept (and protected while locked) |
 | After `expiresAt`, still retained | `410` | Can read it, to export or audit | Not deleted: delete and overwrite answer `409 retention_active` |
-| After `expiresAt`, free | `410` | `410` | Deleted by the expiry cleanup |
+| After `expiresAt`, free | `410` | `410` | Stays in the bucket until your expiry cleanup deletes it |
 
 - **Download links are access.** A link never outlives the file's `expiresAt`, even for a retained file. Creating one
   for an expired file answers `410`, and redeeming one after the file expired does too.
+- **Edge copies.** A public file's edge copy never outlives its `expiresAt`: its TTL is capped there, and a copy found
+  past it is ignored, so the request reaches the Worker and gets `410`.
 - **Listings.** `GET /v1/assets` (an owner route) includes an expired file that's still retained, marked
   `expired: true` with `retainedUntil` (its retention's end) or `hold: true`. An expired free file isn't listed.
-- **The expiry cleanup** deletes expired files through the Worker (`DELETE /v1/media/<key>`), so it goes through the
-  lock check: a retained file is skipped with `409` until its lock ends. An R2 lifecycle rule doesn't go through the
-  Worker (see [Caveats](#caveats)).
+  Telling them apart reads each expired file's lock record (one subrequest each), so a page reads at most 32
+  (`MAX_EXPIRED_LOOKUPS`): past that, it ends early with a `cursor` that resumes right after its last entry. A page
+  can hold fewer entries than `limit` while more remain; keep following the `cursor` until it's `null`.
+- **The expiry cleanup is yours to run.** Nothing in `@devultur/self-host` deletes expired files: the Worker only
+  refuses access to them. Run your own job (a cron Worker, a script) that deletes them through the Worker
+  (`DELETE /v1/media/<key>`, or `/v1/media/videos/<id>` for a video), so each delete goes through the lock check: a
+  retained file answers `409 retention_active` and is kept until its lock ends, then the job's next run deletes it.
+  Don't use an R2 lifecycle rule for it: it doesn't go through the Worker and deletes retained files too (see
+  [Caveats](#caveats)).
 
 ## Changing a lock
 
@@ -230,9 +249,12 @@ only. Holds have [their own route](#holds).
 
 R2 can't edit an object's metadata in place, so a change goes to a small record at `{storagePrefix}__lock/<key>`. The
 record is bound to the object version it was written for (R2's per-write `version`, never the etag, which repeats when
-the same bytes are uploaded again). Deleting or overwriting the file deletes the record, and a file uploaded again at
-the same key starts from its own upload lock. Two concurrent changes can't both land: the second gets
-`409 lock_conflict`.
+the same bytes are uploaded again). Deleting or overwriting the file leaves the record in place, inert: it never
+applies to another version, so a file uploaded again at the same key starts from its own upload lock, and a lock
+change made on the new file right after it landed can't be lost to a cleanup of the old record. A record of a deleted
+file is a few hundred bytes and stays as evidence of its last lock. To reclaim them, delete only records whose file no
+longer exists: deleting the record of an existing file drops every change made to its lock. Two concurrent changes
+can't both land: the second gets `409 lock_conflict`.
 
 ## Holds
 
@@ -252,7 +274,8 @@ for await (const page of client.lock.holdAll({ prefix: "private/asset/case-17/" 
   `cursor`. Each object costs about four subrequests, so a page stays well under the Workers limit. `holdAll` and
   `releaseAll` follow the cursor and split long key lists for you.
 - The answer is `{ updated: string[], skipped: { key, reason }[], cursor? }`. The `reason` is `not_found`,
-  `unchanged` (already in that state) or `lock_conflict` (changed concurrently: retry it).
+  `unchanged` (already in that state), `lock_conflict` (changed concurrently: retry it) or `lock_record_unreadable`
+  (a release of a file whose lock record can't be read, see [Caveats](#caveats)).
 - A hold never touches the retention, so it can only add protection. A hold on a compliance file is allowed, and its
   date stays.
 - **Releasing:** with a `retention.period`, the period starts now. With a fixed `until`, that date still applies.
@@ -307,6 +330,20 @@ access log: reads aren't recorded.
   them.
 - **`deletePrefix`**, exported by `@devultur/self-host`, deletes everything under a prefix and bypasses locks. Use it
   only for regenerable data. The routes delete through the guarded helpers.
+- **Listings show retention.** An expired, retained entry of `GET /v1/assets` carries `retainedUntil` and `hold`:
+  whoever can list a prefix learns what's retained in it. With `workerSecretAuth()`, listing takes the Worker secret,
+  the same credential as `GET /v1/lock`. An auth plugin of your own that lets a narrower credential list (a sync
+  script's, say) gives it that view too. If that credential shouldn't see what's retained, keep it off
+  `GET /v1/assets`.
+- **An unreadable lock record** (the record at `__lock/<key>`, or the upload's `lock` metadata, isn't valid JSON or
+  isn't a valid lock) fails closed: the file reads as held, for whatever version is stored at the key. Since nobody can
+  tell what it really said (it might be a compliance retention), the API never weakens it: a release is skipped with
+  `lock_record_unreadable`, `PUT /v1/lock/<key>` answers `409 lock_record_unreadable`, and deletes and overwrites
+  answer `409 retention_active`. Recovery is an operator's job, outside the Worker: find the record's last good
+  content in the audit (the `after` of the key's last `applied` record under `__lock-audit/`), write it back to
+  `__lock/<key>` as `{ revision, objectVersion, lock, updatedAt }` with the current object's R2 `version` as
+  `objectVersion` (for bad upload metadata, `lock` is the lock it was uploaded with), and check it with
+  `GET /v1/lock/<key>`.
 
 ## Recipes
 
@@ -348,8 +385,8 @@ await client.createUploadUrl({
 ```
 
 After 30 days, viewers and download links get `410`. Your backend can still read the file with the Worker secret,
-and `GET /v1/assets` lists it with `expired: true` and `retainedUntil`. Once the 10 years pass, the expiry cleanup
-deletes it.
+and `GET /v1/assets` lists it with `expired: true` and `retainedUntil`. Until the 10 years pass, your
+[expiry cleanup](#retention-vs-expiry) gets `409 retention_active` for it; its first run after that deletes it.
 
 ### Compliance retention for N years from upload
 

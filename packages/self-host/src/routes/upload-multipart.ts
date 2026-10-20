@@ -243,7 +243,7 @@ async function handleMultipartComplete(context: UploadContext, key: string): Pro
 	const multipartUpload = context.env.MEDIA_BUCKET.resumeMultipartUpload(pending.storageKey, multipart.uploadId);
 	const object = await multipartUpload.complete(parts);
 	await context.env.MEDIA_KV.delete(kvKey);
-	await afterUploadWrite(context, key, pending, write.exists);
+	await afterUploadWrite(context, key, pending, write);
 	const integrity = multipart.sha256 ? { sha256: multipart.sha256, sha256Verified: false } : {};
 	return context.json({ key, size: object.size, ...integrity });
 }

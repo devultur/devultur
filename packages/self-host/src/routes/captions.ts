@@ -256,7 +256,8 @@ captions.post("/", async (context) => {
 	const encryptCaptions = Boolean(captionPolicy.encrypt) && visibility === "private";
 	// Fail closed before transcribing: never a plaintext .vtt of a video that must be encrypted (keys-bucket.ts).
 	if (isKeysBucketMissing(encryptCaptions, context.env)) return keysBucketMissing(context);
-	const writes = await prepareCaptionWrites(context, body.locales, captionVirtualKey);
+	// The captions expire with the media they're made from (same `410` past its `expiresAt`).
+	const writes = await prepareCaptionWrites(context, body.locales, captionVirtualKey, file);
 	if ("blocked" in writes) return writes.blocked;
 	const putCaption = async (locale: string, vtt: string) => {
 		const objectKey = writes.storageKeyOf(locale);
