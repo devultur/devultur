@@ -44,13 +44,18 @@ export type BeforeLinkRedeemHook = (
 	link: DownloadLinkInfo,
 ) => Response | null | Promise<Response | null>;
 
-/** What a lock change does: `set` a first (or expired) retention, `extend` it, `shorten` or `remove` it. */
-export type LockChangeAction = "set" | "extend" | "shorten" | "remove";
+/**
+ * What a lock change does: `set` a first (or expired) retention, `extend` it, `shorten` or `remove` it; `hold` or
+ * `release` a hold.
+ */
+export type LockChangeAction = "set" | "extend" | "shorten" | "remove" | "hold" | "release";
 
 export interface LockChangeRequest {
 	action: LockChangeAction;
-	/** The virtual keys it changes. */
+	/** The virtual keys it changes (for a bulk hold by prefix: this page of them). */
 	keys: string[];
+	/** A bulk hold by prefix: the prefix the request named. */
+	prefix?: string;
 	before: ObjectLock | null;
 	after: ObjectLock | null;
 }

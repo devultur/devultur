@@ -11,13 +11,12 @@ import {
 	UPLOAD_TOKEN_TTL_SECONDS,
 } from "../helpers";
 import { resolveUploadLock } from "../object-lock/upload-lock";
-import { assetUploadConflict, failedWrite, prepareUploadWrite } from "../object-lock/upload-write";
+import { afterUploadWrite, assetUploadConflict, failedWrite, prepareUploadWrite } from "../object-lock/upload-write";
 import { getRequestState, isAuthenticated } from "../request-state";
 import type { RawStorageClass, UploadPending, UploadRequest, WorkerApp } from "../types";
 import {
 	allowedUploadMetadata,
 	digestBody,
-	discardStaleVariants,
 	headerSha256,
 	integrityMetadata,
 	lockMetadata,
@@ -290,7 +289,7 @@ upload.put("/:key{.+}", async (context) => {
 	if (stored === null) return failedWrite(context, key, pending, customMetadata.enc);
 
 	if (resolved) await context.env.MEDIA_KV.delete(resolved.kvKey);
-	await discardStaleVariants(context.env.MEDIA_BUCKET, pending);
+	await afterUploadWrite(context, key, pending);
 
 	return context.json({ key, size: body.byteLength, sha256: digest.sha256, sha256Verified: true });
 });

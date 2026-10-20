@@ -15,6 +15,8 @@ export type LockAuditAction =
 	| "extend"
 	| "shorten"
 	| "remove"
+	| "hold"
+	| "release"
 	| "delete_rejected"
 	| "overwrite_rejected"
 	| "original_retained";
@@ -40,6 +42,8 @@ export interface LockAuditRecord {
 export type LockAuditInput = Omit<LockAuditRecord, "at" | "actor"> & {
 	/** Storage prefix the keys live under. Default: the request's (a webhook has none of its own). */
 	root?: string;
+	/** Who acted. Default: the request's plugin context (a credential-less upload PUT carries the POST's instead). */
+	actor?: LockAuditRecord["actor"];
 };
 
 type AuditContext = Context<WorkerApp>;
@@ -73,11 +77,11 @@ async function inBackground(context: AuditContext, task: Promise<void>): Promise
 }
 
 export async function recordLockAudit(context: AuditContext, input: LockAuditInput): Promise<void> {
-	const { root = getRequestState(context).storagePrefix, ...event } = input;
+	const { root = getRequestState(context).storagePrefix, actor, ...event } = input;
 	const record: LockAuditRecord = {
 		at: new Date().toISOString(),
 		...event,
-		actor: getRequestState(context).context ?? null,
+		actor: actor === undefined ? (getRequestState(context).context ?? null) : actor,
 	};
 	console.log(JSON.stringify({ event: "lock.audit", ...record }));
 	await inBackground(context, deliver(context, root, record));

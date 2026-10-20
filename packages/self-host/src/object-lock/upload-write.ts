@@ -3,8 +3,9 @@
 import { decodeEncryptionMeta } from "@devultur/core";
 import type { Context } from "hono";
 import { storageKey } from "../helpers";
-import { alreadyExists } from "../routes/upload-integrity";
+import { alreadyExists, discardStaleVariants } from "../routes/upload-integrity";
 import type { UploadPending, WorkerApp } from "../types";
+import { recordLockAudit } from "./audit";
 import { isInProgressJobOutput } from "./job-outputs";
 import { checkWrite, type WriteCondition, writeConflict } from "./overwrite";
 
@@ -60,4 +61,29 @@ export async function failedWrite(
 	const fullKey = pending?.storageKey ?? storageKey(context, key);
 	if (context.env.KEYS_BUCKET && meta) await context.env.KEYS_BUCKET.delete(`${fullKey}/${meta.keyId}`);
 	return pending?.isAsset && !pending.overwrite ? alreadyExists(context, key) : writeConflict(context, key);
+}
+
+/**
+ * After the bytes landed (single PUT or multipart complete): an overwrite drops the stale image variants, and a file
+ * uploaded with a lock gets its first audit record (`set`, from nothing), so its protection is provable from its first
+ * write. The actor is the uploader: the POST's plugin context, since the PUT may carry no credential.
+ */
+export async function afterUploadWrite(
+	context: UploadContext,
+	key: string,
+	pending: UploadPending | null,
+): Promise<void> {
+	if (!pending) return;
+	await discardStaleVariants(context.env.MEDIA_BUCKET, pending);
+	if (!pending.lock) return;
+	const root = pending.storageKey.endsWith(key) ? pending.storageKey.slice(0, -key.length) : undefined;
+	await recordLockAudit(context, {
+		action: "set",
+		keys: [key],
+		before: null,
+		after: pending.lock,
+		outcome: "applied",
+		actor: pending.context ?? null,
+		...(root !== undefined ? { root } : {}),
+	});
 }

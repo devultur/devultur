@@ -26,14 +26,13 @@ import {
 } from "@devultur/core";
 import type { Context } from "hono";
 import { contentDispositionInline, createObjectEncryption, loadStorageKey, shouldEncryptAtRest } from "../helpers";
-import { prepareUploadWrite } from "../object-lock/upload-write";
+import { afterUploadWrite, prepareUploadWrite } from "../object-lock/upload-write";
 import { getRequestState } from "../request-state";
 import type { MultipartPending, UploadPending, WorkerApp } from "../types";
 import { derivedAssetPending } from "./derived-upload";
 import {
 	allowedUploadMetadata,
 	digestBody,
-	discardStaleVariants,
 	headerSha256,
 	integrityMetadata,
 	lockMetadata,
@@ -240,7 +239,7 @@ async function handleMultipartComplete(context: UploadContext, key: string): Pro
 	const multipartUpload = context.env.MEDIA_BUCKET.resumeMultipartUpload(pending.storageKey, multipart.uploadId);
 	const object = await multipartUpload.complete(parts);
 	await context.env.MEDIA_KV.delete(kvKey);
-	await discardStaleVariants(context.env.MEDIA_BUCKET, pending);
+	await afterUploadWrite(context, key, pending);
 	const integrity = multipart.sha256 ? { sha256: multipart.sha256, sha256Verified: false } : {};
 	return context.json({ key, size: object.size, ...integrity });
 }
