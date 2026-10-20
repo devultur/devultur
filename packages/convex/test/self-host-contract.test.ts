@@ -1,8 +1,10 @@
 import { MediaEventName, sha256Hex } from "@devultur/core";
+import { ConvexError } from "convex/values";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { memoryBucket, SIGN_SECRET } from "../../self-host/src/exports-test-harness";
 import { createWorker } from "../../self-host/src/index";
 import type { TranscodeContainerNamespace } from "../../self-host/src/transcode/cloudflare";
+import { devulturErrorOf, isDevulturError } from "../src/errors";
 import { memoryDb } from "./memory-db";
 
 // Contract test: the component's REAL action handlers (public.ts) and webhook route (http.ts) against an in-memory
@@ -46,7 +48,11 @@ vi.mock("../src/component/_generated/api", () => {
 	return { api: { public: references }, internal: { public: references } };
 });
 
-const component = (await import("../src/component/public")) as unknown as Record<string, FunctionDefinition>;
+// The public module plus the lock module (lock.ts), by function name: no name repeats across them.
+const component = {
+	...(await import("../src/component/public")),
+	...(await import("../src/component/lock")),
+} as unknown as Record<string, FunctionDefinition>;
 const { default: http } = await import("../src/component/http");
 
 function memoryKv() {
@@ -196,7 +202,10 @@ function setup() {
 
 type Contract = ReturnType<typeof setup>;
 
-async function uploadThroughComponent(contract: Contract, file: { filename: string; contentType: string }) {
+async function uploadThroughComponent(
+	contract: Contract,
+	file: { filename: string; contentType: string; hold?: boolean },
+) {
 	const created = (await contract.run("createUploadUrl", { ...file, visibility: "private" })) as {
 		url: string;
 		key: string;
@@ -380,6 +389,57 @@ describe("@devultur/convex against a self-hosted Worker", () => {
 		const owner = { headers: { Authorization: `Bearer ${WORKER_AUTH_SECRET}` } };
 		expect((await contract.send(`/v1/media/${file.key}`, owner)).status).toBe(404);
 		expect((await contract.send(`/v1/media/${video.key}`, owner)).status).toBe(404);
+	});
+
+	it("keeps a file uploaded with a hold until the component releases it", async () => {
+		const contract = setup();
+		const { key, put } = await uploadThroughComponent(contract, {
+			filename: "deed.pdf",
+			contentType: "application/pdf",
+			hold: true,
+		});
+		expect(put.status).toBe(200);
+		expect(await contract.run("getLock", { key })).toMatchObject({ key, hold: true, source: "upload" });
+
+		// A ConvexError keeps its data across the component boundary: the app reads the Worker's code and details.
+		const refusal = await contract.run("deleteMediaAction", { key }).catch((error: unknown) => error);
+		expect(refusal).toBeInstanceOf(ConvexError);
+		expect(isDevulturError(refusal)).toBe(true);
+		expect(devulturErrorOf(refusal)).toMatchObject({
+			code: "retention_active",
+			status: 409,
+			details: { key, hold: true },
+		});
+		expect((refusal as ConvexError<{ code: string }>).data.code).toBe("retention_active");
+		expect(contract.mediaBucket.objects.has(key)).toBe(true);
+
+		expect(await contract.run("releaseHold", { keys: [key] })).toMatchObject({ updated: [key], skipped: [] });
+		await contract.run("deleteMediaAction", { key });
+		expect(contract.mediaBucket.objects.has(key)).toBe(false);
+	});
+
+	it("sets and extends a retention through the component", async () => {
+		const contract = setup();
+		const { key } = await uploadThroughComponent(contract, { filename: "deed.pdf", contentType: "application/pdf" });
+		await contract.run("setLock", { key, mode: "compliance", until: "2999-01-01T00:00:00Z" });
+		await expect(contract.run("setLock", { key, until: "2998-01-01T00:00:00Z" })).rejects.toMatchObject({
+			data: { status: 409, code: "compliance_extend_only" },
+		});
+		expect(await contract.run("setHold", { keys: [key] })).toMatchObject({ updated: [key] });
+		expect(await contract.run("getLock", { key })).toMatchObject({ mode: "compliance", hold: true, source: "sidecar" });
+	});
+
+	it("rethrows every Worker refusal as a ConvexError, not only the lock ones", async () => {
+		const contract = setup();
+		// A delete of a missing file: the Worker answers 404 without a code.
+		const missing = await contract.run("deleteMediaAction", { key: "private/file/none/x.pdf" }).catch((error) => error);
+		expect(devulturErrorOf(missing)).toEqual({ code: "worker_error", message: "Not found", status: 404 });
+		// Anything that isn't a Worker refusal passes through untouched.
+		componentEnv.DEVULTUR_API_URL = "https://elsewhere.example";
+		const network = await contract
+			.run("deleteMediaAction", { key: "private/file/a/b.pdf" })
+			.catch((error: unknown) => error);
+		expect(isDevulturError(network)).toBe(false);
 	});
 
 	it("only calls routes the Worker serves", async () => {

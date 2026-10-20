@@ -1,7 +1,13 @@
-import type { VideoModuleConfig } from "@devultur/core";
+import type { ObjectLock, VideoModuleConfig } from "@devultur/core";
 
 export interface DevulturComponentConfig {
 	video?: VideoModuleConfig;
+	/**
+	 * Lock every upload through the exposed `createUploadUrl` gets (retention and/or hold). Set here, on your server:
+	 * the browser never chooses a lock. To lock per upload, call `devultur.createUploadUrl(ctx, { lock })` from your
+	 * own function.
+	 */
+	upload?: { lock?: ObjectLock };
 }
 
 export interface MediaRecord {

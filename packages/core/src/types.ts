@@ -1,3 +1,4 @@
+import type { ObjectLock } from "./lock";
 import type { DevulturMedia, Visibility } from "./media";
 import type { MediaUrlOptions, PosterUrls } from "./media-url";
 import type {
@@ -103,6 +104,10 @@ export interface CreateUploadUrlOptions {
 	/** Intrinsic dimensions (captured client-side for images) → carried into the reference. */
 	width?: number;
 	height?: number;
+	/** Lock of the new file (retention and/or hold), written with its bytes. Needs a media worker. */
+	lock?: ObjectLock;
+	/** Shorthand for `lock.hold`: retain the file indefinitely from the moment it exists. */
+	hold?: boolean;
 }
 
 export interface UploadUrlResult {

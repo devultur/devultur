@@ -93,6 +93,9 @@ export function createMediaRouter(config: MediaRouterConfig): MediaRouter {
 			if (!isDirectStorageConfig(config) || !storage) {
 				throw new Error("No storage client or worker client available.");
 			}
+			// A presigned PUT goes straight to the bucket: nothing would enforce the lock, so refuse instead of ignoring it.
+			if (options.lock || options.hold)
+				throw new Error("Object lock needs a media worker; direct storage can't enforce it.");
 
 			const mediaType = resolveMediaType(options.contentType, config);
 			if (!mediaType) {

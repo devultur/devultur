@@ -9,7 +9,11 @@
  */
 
 import type * as http from "../http.js";
+import type * as lock from "../lock.js";
+import type * as lockValidators from "../lockValidators.js";
+import type * as mediaClient from "../mediaClient.js";
 import type * as public_ from "../public.js";
+import type * as workerErrors from "../workerErrors.js";
 
 import type {
   ApiFromModules,
@@ -20,7 +24,11 @@ import { anyApi, componentsGeneric } from "convex/server";
 
 const fullApi: ApiFromModules<{
   http: typeof http;
+  lock: typeof lock;
+  lockValidators: typeof lockValidators;
+  mediaClient: typeof mediaClient;
   public: typeof public_;
+  workerErrors: typeof workerErrors;
 }> = anyApi as any;
 
 /**

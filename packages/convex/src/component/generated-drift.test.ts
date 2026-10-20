@@ -4,7 +4,7 @@ import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
 
 // Drift check: `_generated/component.ts` (the `ComponentApi` apps type `components.devultur` with) must describe
-// exactly the public functions of `public.ts`, with the same kind and arguments. It fails when a function or an
+// exactly the public functions of each module (`public.ts`, `lock.ts`), with the same kind and arguments. It fails when a function or an
 // argument changes without regenerating. Fix it with `pnpm --filter @devultur/convex codegen`.
 
 type Visibility = "public" | "internal";
@@ -44,6 +44,10 @@ vi.mock("./_generated/server", () => {
 vi.mock("./_generated/api", () => ({ api: {}, internal: {} }));
 
 const publicModule = (await import("./public")) as unknown as Record<string, Registered>;
+const MODULES: Record<string, Record<string, Registered>> = {
+	public: publicModule,
+	lock: (await import("./lock")) as unknown as Record<string, Registered>,
+};
 
 function objectType(fields: [name: string, isOptional: boolean, type: string][]): string {
 	const properties = fields
@@ -114,8 +118,8 @@ interface GeneratedFunction {
 	args: string;
 }
 
-/** The `public` module of the generated `ComponentApi`: each function's kind and canonical args type. */
-function generatedPublicApi(): Record<string, GeneratedFunction> {
+/** A module of the generated `ComponentApi`: each function's kind and canonical args type. */
+function generatedApi(moduleName: string): Record<string, GeneratedFunction> {
 	const path = join(import.meta.dirname, "_generated", "component.ts");
 	const source = ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true);
 	const componentApi = source.statements.find(
@@ -125,8 +129,10 @@ function generatedPublicApi(): Record<string, GeneratedFunction> {
 	if (!componentApi || !ts.isTypeLiteralNode(componentApi.type)) throw new Error("ComponentApi type not found");
 	const publicModuleType = componentApi.type.members
 		.filter(ts.isPropertySignature)
-		.find((member) => member.name.getText(source) === "public")?.type;
-	if (!publicModuleType || !ts.isTypeLiteralNode(publicModuleType)) throw new Error("ComponentApi.public not found");
+		.find((member) => member.name.getText(source) === moduleName)?.type;
+	if (!publicModuleType || !ts.isTypeLiteralNode(publicModuleType)) {
+		throw new Error(`ComponentApi.${moduleName} not found`);
+	}
 
 	const functions: Record<string, GeneratedFunction> = {};
 	for (const member of publicModuleType.members.filter(ts.isPropertySignature)) {
@@ -142,9 +148,9 @@ function generatedPublicApi(): Record<string, GeneratedFunction> {
 	return functions;
 }
 
-function sourcePublicApi(): Record<string, GeneratedFunction> {
+function sourceApi(module: Record<string, Registered>): Record<string, GeneratedFunction> {
 	const functions: Record<string, GeneratedFunction> = {};
-	for (const [name, registered] of Object.entries(publicModule)) {
+	for (const [name, registered] of Object.entries(module)) {
 		if (registered?.visibility !== "public") continue;
 		functions[name] = { kind: registered.kind, args: argsType(registered.args) };
 	}
@@ -152,12 +158,14 @@ function sourcePublicApi(): Record<string, GeneratedFunction> {
 }
 
 describe("generated ComponentApi", () => {
-	it("lists exactly the public functions of public.ts, with their kinds and arguments", () => {
-		expect(generatedPublicApi()).toEqual(sourcePublicApi());
+	it.each(
+		Object.keys(MODULES),
+	)("lists exactly the public functions of %s.ts, with their kinds and arguments", (name) => {
+		expect(generatedApi(name)).toEqual(sourceApi(MODULES[name] ?? {}));
 	});
 
 	it("leaves internal functions out, as Convex codegen does", () => {
-		const generated = generatedPublicApi();
+		const generated = generatedApi("public");
 		expect(publicModule.handleWebhookEvent?.visibility).toBe("internal");
 		expect(generated).not.toHaveProperty("handleWebhookEvent");
 	});

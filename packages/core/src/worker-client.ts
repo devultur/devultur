@@ -8,13 +8,14 @@ import type { TranscodeSpec } from "./transcode-spec";
 import type { CreateUploadUrlOptions, UploadUrlResult } from "./types";
 import { type AssetsClient, createAssetsClient } from "./worker-assets";
 import { createFilesClient, createUploadsClient, type FilesClient, type UploadsClient } from "./worker-exports";
+import { createLockClient, type LockClient } from "./worker-lock";
 
 export { DevulturApiError };
 
 // HTTP client of a media worker (`createWorker()` from @devultur/self-host or compatible): Bearer credential + base URL.
 
 export interface WorkerClient {
-	uploadFile(file: File, options?: { metadata?: Record<string, string> }): Promise<UploadFileResult>;
+	uploadFile(file: File, options?: UploadFileOptions): Promise<UploadFileResult>;
 	createUploadUrl(options: CreateUploadUrlOptions): Promise<WorkerUploadResult>;
 	getMediaUrl(media: DevulturMedia, options?: MediaUrlOptions): string;
 	extractKey(url: string): string | null;
@@ -31,6 +32,12 @@ export interface WorkerClient {
 	files: FilesClient;
 	/** Paginated listing of the `asset/` namespace. */
 	assets: AssetsClient;
+	/** Object lock: retention (read, set, extend) and holds. */
+	lock: LockClient;
+}
+
+export interface UploadFileOptions extends Pick<CreateUploadUrlOptions, "lock" | "hold"> {
+	metadata?: Record<string, string>;
 }
 
 export interface UploadFileResult {
@@ -159,14 +166,17 @@ export function createWorkerClient(credential: string, baseUrl: string): WorkerC
 		uploads: createUploadsClient(base, request),
 		files: createFilesClient(fetchApi, request),
 		assets: createAssetsClient(request),
+		lock: createLockClient(request),
 
-		async uploadFile(file: File, options?: { metadata?: Record<string, string> }): Promise<UploadFileResult> {
+		async uploadFile(file: File, options?: UploadFileOptions): Promise<UploadFileResult> {
 			const result = await request<WorkerUploadResult>("/v1/upload", {
 				method: "POST",
 				body: JSON.stringify({
 					filename: file.name,
 					contentType: file.type,
 					metadata: options?.metadata,
+					lock: options?.lock,
+					hold: options?.hold,
 				}),
 			});
 
@@ -189,6 +199,8 @@ export function createWorkerClient(credential: string, baseUrl: string): WorkerC
 					contentType: options.contentType,
 					metadata: options.metadata,
 					visibility: options.visibility,
+					lock: options.lock,
+					hold: options.hold,
 				}),
 			});
 
