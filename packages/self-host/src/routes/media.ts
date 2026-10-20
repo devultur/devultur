@@ -11,14 +11,7 @@ import {
 	visibilityFromKey,
 } from "@devultur/core";
 import { type Context, Hono } from "hono";
-import {
-	contentDispositionAttachment,
-	deletePrefix,
-	loadStorageKey,
-	storageKey,
-	storagePrefix,
-	verifyViewerToken,
-} from "../helpers";
+import { contentDispositionAttachment, loadStorageKey, storageKey, storagePrefix, verifyViewerToken } from "../helpers";
 import { imageOriginUrl, readImageOriginScope, serveCloudflareTransform } from "../image/cloudflare";
 import {
 	hasTransformQuery,
@@ -28,6 +21,13 @@ import {
 } from "../image/params";
 import { ImageTransformsMode, isVariantKey, resolveTransformsMode, variantPrefix } from "../image/transform-plan";
 import { resolveWorkerVariant, workerVariantKey } from "../image/worker-transform";
+import {
+	assertWritable,
+	deleteKeysFor,
+	guardedDeletePrefix,
+	isReservedLockKey,
+	reservedKeyResponse,
+} from "../object-lock/guard";
 import { getRequestState } from "../request-state";
 import type { WorkerApp } from "../types";
 import {
@@ -288,17 +288,24 @@ media.delete("/videos/:videoId", async (context) => {
 	// A video's L4 keys (raw/thumbnail/captions at `${objectKey}/{keyId}`, HLS at `hls/{keyId}`) hang off
 	// the SAME prefix in KEYS_BUCKET → they're swept together with the media; otherwise they'd be orphaned forever.
 	// A thumbnail's variants (`{thumbKey}/__variants/…`) and their keys also fall under this prefix.
+	// Locks first, for every visibility: a video with a retained raw (or a held one) loses nothing.
+	const folders = visibilities.map((visibility) => `${visibility}/${videoBasePath(videoId)}`);
+	const blocked = await assertWritable(context, folders, "delete");
+	if (blocked) return blocked;
+
 	let deletedCount = 0;
 	let deletedKeyCount = 0;
-	for (const visibility of visibilities) {
-		const prefix = storagePrefix(context, `${visibility}/${videoBasePath(videoId)}/`);
-		deletedCount += await deletePrefix(context.env.MEDIA_BUCKET, prefix);
+	for (const folder of folders) {
+		const deleted = await guardedDeletePrefix(context, `${folder}/`);
+		if ("blocked" in deleted) return deleted.blocked;
+		deletedCount += deleted.deletedCount;
 		// L4: a private object's encryption material (HLS key at `hls/{keyId}`, at-rest keys for the raw, MP4, poster,
 		// storyboard… at `{object}/{keyId}`) lives under the SAME prefix in the keys bucket. Public never encrypts
 		// (shouldEncryptAtRest), so there's nothing to sweep there.
-		if (visibility === "private" && context.env.KEYS_BUCKET) {
-			deletedKeyCount += await deletePrefix(context.env.KEYS_BUCKET, prefix);
-		}
+		if (!folder.startsWith("private/")) continue;
+		const deletedKeys = await deleteKeysFor(context, folder);
+		if ("blocked" in deletedKeys) return deletedKeys.blocked;
+		deletedKeyCount += deletedKeys.deletedCount;
 	}
 
 	return context.json({ videoId, deletedCount, deletedKeyCount });
@@ -311,20 +318,25 @@ media.delete("/:key{.+}", async (context) => {
 	if (isVariantKey(key)) {
 		return context.json({ error: "Not found" }, 404);
 	}
+	if (isReservedLockKey(key)) return reservedKeyResponse(context, key);
 
 	const exists = await context.env.MEDIA_BUCKET.head(fullKey);
 	if (!exists) {
 		return context.json({ error: "Not found" }, 404);
 	}
+	const blocked = await assertWritable(context, [key], "delete");
+	if (blocked) return blocked;
 
 	await context.env.MEDIA_BUCKET.delete(fullKey);
-	// Variants and the mezzanine live under `{fullKey}/__variants/`. Always swept (even with the kill switch on
-	// `cloudflare`, some may be left over from before). In MEDIA_BUCKET, only that sub-prefix: a bare `{fullKey}/`
+	// Variants and the mezzanine live under `{key}/__variants/`. Always swept (even with the kill switch on
+	// `cloudflare`, some may be left over from before). In MEDIA_BUCKET, only that sub-prefix: a bare `{key}/`
 	// could touch another object whose name starts the same way.
-	await deletePrefix(context.env.MEDIA_BUCKET, variantPrefix(fullKey));
+	const variants = await guardedDeletePrefix(context, variantPrefix(key));
+	if ("blocked" in variants) return variants.blocked;
 	// The object's L4 key lives at `${fullKey}/{keyId}` (see createObjectEncryption) and derived ones at
 	// `${fullKey}/__variants/…/{keyId}` → everything falls under `${fullKey}/` in KEYS_BUCKET, which only holds keys.
-	if (context.env.KEYS_BUCKET) await deletePrefix(context.env.KEYS_BUCKET, `${fullKey}/`);
+	const keys = await deleteKeysFor(context, key);
+	if ("blocked" in keys) return keys.blocked;
 	return new Response(null, { status: 204 });
 });
 

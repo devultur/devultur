@@ -1,7 +1,7 @@
 // Types for private exports (upload tokens scoped to a prefix).
-import type { Visibility } from "@devultur/core";
+import type { ObjectLock, Visibility } from "@devultur/core";
 
-/** What an upload token allows (claims `res`, `visibility`, `max_bytes`, `max_files`, `file_ttl`). */
+/** What an upload token allows (claims `res`, `visibility`, `max_bytes`, `max_files`, `file_ttl`, `lock`). */
 export interface UploadGrant {
 	/** Token's `jti`: best-effort counter for `maxFiles`. */
 	tokenId: string;
@@ -12,4 +12,6 @@ export interface UploadGrant {
 	maxFiles?: number;
 	/** TTL (seconds) of each file uploaded with the token. */
 	fileExpiresIn?: number;
+	/** Lock every file uploaded with the token gets at least (a request can make it stricter, never looser). */
+	lock?: ObjectLock;
 }

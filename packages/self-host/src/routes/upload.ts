@@ -17,6 +17,7 @@ import {
 	storageKey,
 	UPLOAD_TOKEN_TTL_SECONDS,
 } from "../helpers";
+import { resolveUploadLock } from "../object-lock/upload-lock";
 import { getRequestState, isAuthenticated } from "../request-state";
 import type { RawStorageClass, UploadPending, UploadRequest, WorkerApp } from "../types";
 import {
@@ -27,6 +28,7 @@ import {
 	discardStaleVariants,
 	headerSha256,
 	integrityMetadata,
+	lockMetadata,
 	sha256Mismatch,
 	targetFailure,
 } from "./upload-integrity";
@@ -114,6 +116,15 @@ upload.post("/", async (context) => {
 	if (isUploadTargetError(sha256)) return targetFailure(context, sha256);
 	const cacheControl = resolveObjectCacheControl(body.cacheControl, target, scope.config?.cacheRules);
 	if (isUploadTargetError(cacheControl)) return targetFailure(context, cacheControl);
+	const lock = resolveUploadLock({
+		lock: body.lock,
+		hold: body.hold,
+		grant,
+		appDefault: scope.config?.lock,
+		now: Date.now(),
+		expiresAt,
+	});
+	if (isUploadTargetError(lock)) return targetFailure(context, lock);
 
 	const maxSizeBytes = effectiveMaxBytes(uploadRule?.maxSizeBytes, grant);
 	const declaredSize = Number(body.size);
@@ -157,6 +168,7 @@ upload.post("/", async (context) => {
 		...(target.isAsset ? { isAsset: true, overwrite: shouldOverwrite } : {}),
 		...(cacheControl ? { cacheControl } : {}),
 		...(scope.config?.uploadMetadata ? { uploadMetadata: scope.config.uploadMetadata } : {}),
+		...(lock ? { lock } : {}),
 	};
 	// Keyed by a random id that only the returned URL carries (see upload-pending.ts), never by the key itself.
 	const pendingId = newUploadPendingId();
@@ -250,6 +262,7 @@ upload.put("/:key{.+}", async (context) => {
 	const customMetadata: Record<string, string> = {
 		...allowedUploadMetadata(pending?.uploadMetadata ?? getRequestState(context).config?.uploadMetadata),
 		...integrityMetadata(digest.sha256, true, pending?.expiresAt),
+		...lockMetadata(pending?.lock),
 	};
 	// The binding override travels in the metadata → the delivery gate resolves it per-resource.
 	if (resourceSecurity) customMetadata.security = JSON.stringify(resourceSecurity);

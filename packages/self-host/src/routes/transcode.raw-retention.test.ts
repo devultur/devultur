@@ -13,11 +13,13 @@ const MP4_KEY = "private/video/vid1/mp4/main-720p.mp4";
 const POSTER_KEY = "private/video/vid1/thumbnails/poster.jpg";
 const RAW_L4_KEY = `${RAW_KEY}/key-1`;
 
-function memoryBucket(keys: string[]) {
+function memoryBucket(keys: string[], lockedKeys: string[] = []) {
 	const objects = new Set(keys);
+	const lock = JSON.stringify({ hold: true });
 	return {
 		objects,
-		head: async (key: string) => (objects.has(key) ? { size: 10, customMetadata: {} } : null),
+		head: async (key: string) =>
+			objects.has(key) ? { size: 10, customMetadata: lockedKeys.includes(key) ? { lock } : {} } : null,
 		delete: async (key: string | string[]) => {
 			for (const each of Array.isArray(key) ? key : [key]) objects.delete(each);
 		},
@@ -28,13 +30,13 @@ function memoryBucket(keys: string[]) {
 	};
 }
 
-function setup(options: { deleteRaw?: boolean; objects?: string[] } = {}) {
+function setup(options: { deleteRaw?: boolean; objects?: string[]; lockedKeys?: string[] } = {}) {
 	const kv = new Map<string, string>();
 	const namespace: TranscodeContainerNamespace = {
 		idFromName: (name) => name as unknown as DurableObjectId,
 		get: () => ({ launch: async () => ({ alreadyRunning: false }), cancel: async () => {} }),
 	};
-	const mediaBucket = memoryBucket(options.objects ?? [RAW_KEY]);
+	const mediaBucket = memoryBucket(options.objects ?? [RAW_KEY], options.lockedKeys);
 	const keysBucket = memoryBucket([RAW_L4_KEY, "private/video/vid1/hls/key-2"]);
 	const env = {
 		...WORKER_SECRETS,
@@ -79,6 +81,21 @@ describe("original retention after transcode", () => {
 
 		expect(mediaBucket.objects.has(RAW_KEY)).toBe(false);
 		expect([...keysBucket.objects]).toEqual(["private/video/vid1/hls/key-2"]);
+	});
+
+	it("keeps a locked raw even when asked to delete it, and the webhook still succeeds", async () => {
+		const log = vi.spyOn(console, "log").mockImplementation(() => {});
+		const { transcode, webhook, mediaBucket, keysBucket } = setup({ deleteRaw: true, lockedKeys: [RAW_KEY] });
+		await transcode();
+
+		const res = await webhook({ event: "transcode.complete", duration: 42 });
+
+		expect(res.status).toBe(200);
+		expect(mediaBucket.objects.has(RAW_KEY)).toBe(true);
+		expect(keysBucket.objects.has(RAW_L4_KEY)).toBe(true);
+		expect(log).toHaveBeenCalledWith(
+			JSON.stringify({ event: "lock.original_retained", videoId: "vid1", key: RAW_KEY }),
+		);
 	});
 
 	it("keeps the raw when retention is on", async () => {

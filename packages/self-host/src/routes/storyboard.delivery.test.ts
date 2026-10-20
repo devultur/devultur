@@ -43,7 +43,8 @@ interface StoredObject {
 	customMetadata?: Record<string, string>;
 }
 
-// In-memory MEDIA_BUCKET/KEYS_BUCKET: `get`, `list` by prefix, and batch `delete` (what delivery and DELETE use).
+// In-memory MEDIA_BUCKET/KEYS_BUCKET: `get`, `head`, `list` by prefix, and batch `delete` (what delivery and DELETE
+// use; the delete heads the raws for a lock).
 function memoryBucket(objects: Map<string, StoredObject>) {
 	return {
 		get: async (key: string) => {
@@ -57,6 +58,10 @@ function memoryBucket(objects: Map<string, StoredObject>) {
 				body: streamOf(stored.bytes),
 				arrayBuffer: async () => stored.bytes.slice().buffer,
 			};
+		},
+		head: async (key: string) => {
+			const stored = objects.get(key);
+			return stored ? { key, customMetadata: stored.customMetadata } : null;
 		},
 		list: async ({ prefix }: { prefix: string }) => ({
 			objects: [...objects.keys()].filter((key) => key.startsWith(prefix)).map((key) => ({ key })),

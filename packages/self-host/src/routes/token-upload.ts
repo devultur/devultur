@@ -1,7 +1,13 @@
 // `POST /v1/token/upload`: an upload token scoped to a prefix under the `asset/` namespace, for a CI runner. It only
 // works to CREATE uploads (single or multipart) under its prefix, with its visibility and its limits; never to read
 // or delete. The `issueCredential` hook can narrow it to whatever the requesting credential is allowed to delegate.
-import { assetRelativePath, normalizeAssetPrefix, type Visibility } from "@devultur/core";
+import {
+	assetRelativePath,
+	normalizeAssetPrefix,
+	type ObjectLock,
+	type Visibility,
+	validateLock,
+} from "@devultur/core";
 import type { Context } from "hono";
 import type { UploadGrant } from "../export-types";
 import { signViewerToken } from "../helpers";
@@ -24,6 +30,7 @@ interface UploadTokenRequest {
 	maxFiles?: unknown;
 	fileExpiresIn?: unknown;
 	visibility?: unknown;
+	lock?: unknown;
 }
 
 const isPositiveInteger = (value: unknown): value is number =>
@@ -40,12 +47,21 @@ function parseVisibility(value: unknown): Visibility | null {
 	return value === "public" || value === "private" ? value : null;
 }
 
+/** The token's `lock` claim: `undefined` if absent, `null` if present but not a valid lock (the token is refused). */
+function lockClaim(value: unknown): ObjectLock | undefined | null {
+	if (value === undefined) return undefined;
+	const validation = validateLock(value);
+	return validation.ok ? validation.lock : null;
+}
+
 /** Grant of the claims of a verified upload token. `null` if it isn't a valid upload token. Pure. */
 export function uploadGrantFromClaims(payload: Record<string, unknown>): UploadGrant | null {
 	if (payload.typ !== UPLOAD_TOKEN_TYPE || typeof payload.res !== "string" || typeof payload.jti !== "string") {
 		return null;
 	}
 	if (payload.visibility !== "public" && payload.visibility !== "private") return null;
+	const lock = lockClaim(payload.lock);
+	if (lock === null) return null;
 	return {
 		tokenId: payload.jti,
 		pathPrefix: payload.res,
@@ -53,6 +69,7 @@ export function uploadGrantFromClaims(payload: Record<string, unknown>): UploadG
 		...(isPositiveInteger(payload.max_bytes) ? { maxBytes: payload.max_bytes } : {}),
 		...(isPositiveInteger(payload.max_files) ? { maxFiles: payload.max_files } : {}),
 		...(isPositiveInteger(payload.file_ttl) ? { fileExpiresIn: payload.file_ttl } : {}),
+		...(lock ? { lock } : {}),
 	};
 }
 
@@ -75,6 +92,8 @@ export async function handleUploadToken(context: Context<WorkerApp>): Promise<Re
 	if (fileExpiresIn === null) {
 		return badRequest(context, "invalid_file_expires_in", "fileExpiresIn must be a positive number of seconds");
 	}
+	const lock = body.lock === undefined ? { ok: true as const, lock: undefined } : validateLock(body.lock);
+	if (!lock.ok) return badRequest(context, "invalid_lock", lock.errors.join("; "));
 
 	const pathPrefix = assetRelativePath(prefix);
 	const now = Math.floor(Date.now() / 1000);
@@ -101,6 +120,7 @@ export async function handleUploadToken(context: Context<WorkerApp>): Promise<Re
 			...(maxBytes ? { max_bytes: maxBytes } : {}),
 			...(maxFiles ? { max_files: maxFiles } : {}),
 			...(fileExpiresIn ? { file_ttl: fileExpiresIn } : {}),
+			...(lock.lock ? { lock: lock.lock } : {}),
 		},
 		decision,
 	);
@@ -113,5 +133,6 @@ export async function handleUploadToken(context: Context<WorkerApp>): Promise<Re
 		...(maxBytes ? { maxBytes } : {}),
 		...(maxFiles ? { maxFiles } : {}),
 		...(fileExpiresIn ? { fileExpiresIn } : {}),
+		...(lock.lock ? { lock: lock.lock } : {}),
 	});
 }
