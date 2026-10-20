@@ -5,6 +5,7 @@ import type { Context } from "hono";
 import { storageKey } from "../helpers";
 import { alreadyExists } from "../routes/upload-integrity";
 import type { UploadPending, WorkerApp } from "../types";
+import { isInProgressJobOutput } from "./job-outputs";
 import { checkWrite, type WriteCondition, writeConflict } from "./overwrite";
 
 type UploadContext = Context<WorkerApp>;
@@ -21,7 +22,8 @@ export async function prepareUploadWrite(
 	pending: Pick<UploadPending, "storageKey" | "isAsset" | "overwrite"> | null,
 	fullKey: string,
 ): Promise<UploadWrite> {
-	const check = await checkWrite(context, key, fullKey);
+	const isLockExempt = await isInProgressJobOutput(context, key);
+	const check = await checkWrite(context, key, fullKey, { isLockExempt });
 	if ("blocked" in check) return check;
 	const isCreateOnly = Boolean(pending?.isAsset && !pending.overwrite);
 	if (isCreateOnly && check.exists) return { blocked: alreadyExists(context, key) };

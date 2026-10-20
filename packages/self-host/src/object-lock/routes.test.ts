@@ -198,3 +198,44 @@ describe("reserved lock prefixes", () => {
 		expect(await response.json()).toMatchObject({ code: "reserved_key" });
 	});
 });
+
+describe("outputs of an in-progress transcode job", () => {
+	const putMp4 = (send: Fixture["send"]) =>
+		send(`/v1/upload/${MP4_KEY}`, { method: "PUT", body: "retry", headers: { "Content-Type": "video/mp4" } });
+	const startJob = (kv: Fixture["kv"]) =>
+		kv.set(`${KvPrefix.TRANSCODE_STATUS}:vid1`, JSON.stringify({ status: "running", jobRef: "job-1", updatedAt: 0 }));
+
+	it("lets the runner rewrite its own output while the job runs (an upload retry)", async () => {
+		const { send, kv, mediaBucket } = lockedFixture();
+		startJob(kv);
+
+		const retry = await putMp4(send);
+		expect(retry.status).toBe(200);
+		expect(new TextDecoder().decode(mediaBucket.objects.get(MP4_KEY)?.bytes)).toBe("retry");
+		// Only the job's own output prefixes: an existing caption of the locked video stays protected.
+		const caption = await send(`/v1/upload/${CAPTION_KEY}`, {
+			method: "PUT",
+			body: "x",
+			headers: { "Content-Type": "text/vtt" },
+		});
+		expect(caption.status).toBe(409);
+	});
+
+	it("protects the outputs once the job completes", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const { send, kv } = lockedFixture();
+		startJob(kv);
+		const complete = await send("/v1/webhooks/transcode", {
+			method: "POST",
+			body: JSON.stringify({ event: "transcode.complete", videoId: "vid1", duration: 1 }),
+		});
+		expect(complete.status).toBe(200);
+
+		await expectRetentionActive(await putMp4(send), "overwritten");
+	});
+
+	it("protects them with no job record at all", async () => {
+		const { send } = lockedFixture();
+		await expectRetentionActive(await putMp4(send), "overwritten");
+	});
+});

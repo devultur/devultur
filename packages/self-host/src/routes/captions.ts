@@ -17,7 +17,7 @@ import {
 	parseSecurityHeader,
 	storageKey,
 } from "../helpers";
-import { checkWrites, WriteConflictError, writeConflict } from "../object-lock/overwrite";
+import { captionConflictResponse, prepareCaptionWrites } from "../object-lock/caption-writes";
 import { getRequestState } from "../request-state";
 import type {
 	CaptionJobMeta,
@@ -247,9 +247,7 @@ captions.post("/", async (context) => {
 	// Without this prefix they'd get written to `video/{id}/…` and delivery looks them up with visibility → 404.
 	const visibility = visibilityFromKey(body.key) ?? "private";
 	const captionVirtualKey = (locale: string) => `${visibility}/${captionPath(videoId, locale)}`;
-	const captionKey = (locale: string) => storageKey(context, captionVirtualKey(locale));
-	// A locked video (`derivatives: "inherit"`) keeps its existing locales; new ones can still be added.
-	const writes = await checkWrites(context, body.locales.map(captionVirtualKey));
+	const writes = await prepareCaptionWrites(context, body.locales, captionVirtualKey);
 	if ("blocked" in writes) return writes.blocked;
 
 	// The .vtt files are private assets of the video → encrypted at rest if the policy asks for it (same criterion
@@ -259,7 +257,7 @@ captions.post("/", async (context) => {
 	const captionPolicy = resolveSecurity(resourceOverride, scope.config?.security);
 	const encryptCaptions = captionPolicy.encrypt && visibility === "private" && Boolean(context.env.KEYS_BUCKET);
 	const putCaption = async (locale: string, vtt: string) => {
-		const objectKey = captionKey(locale);
+		const objectKey = writes.storageKeyOf(locale);
 		const metadata: Record<string, string> = {};
 		if (resourceOverride) metadata.security = JSON.stringify(resourceOverride);
 		let bodyToStore: string | Uint8Array = vtt;
@@ -273,12 +271,10 @@ captions.post("/", async (context) => {
 			bodyToStore = result.body;
 			metadata.enc = result.enc;
 		}
-		const stored = await context.env.MEDIA_BUCKET.put(objectKey, bodyToStore, {
-			onlyIf: writes.conditions.get(captionVirtualKey(locale)),
+		await writes.put(locale, bodyToStore, {
 			httpMetadata: { contentType: "text/vtt" },
 			...(Object.keys(metadata).length > 0 ? { customMetadata: metadata } : {}),
 		});
-		if (stored === null) throw new WriteConflictError(captionVirtualKey(locale));
 	};
 
 	try {
@@ -358,8 +354,8 @@ captions.post("/", async (context) => {
 			} satisfies MediaEvent,
 			webhookData,
 		);
-		if (err instanceof WriteConflictError) return writeConflict(context, err.key);
-		return context.json({ error: failure.error, code: failure.code }, failure.status);
+		const conflict = captionConflictResponse(context, err);
+		return conflict ?? context.json({ error: failure.error, code: failure.code }, failure.status);
 	}
 });
 

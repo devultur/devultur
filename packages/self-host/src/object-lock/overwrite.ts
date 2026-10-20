@@ -22,16 +22,20 @@ export function createOnlyCondition(): Headers {
 
 /**
  * Checks a write to the virtual `key` and returns the `onlyIf` that keeps it honest. `fullKey` is where it's stored
- * (a pending upload records it; default: under the request's storage prefix).
+ * (a pending upload records it; default: under the request's storage prefix). `isLockExempt` skips the lock check
+ * (an in-progress transcode job rewriting its own output, see job-outputs.ts) but keeps the condition.
  */
 export async function checkWrite(
 	context: OverwriteContext,
 	key: string,
 	fullKey = storageKey(context, key),
+	options: { isLockExempt?: boolean } = {},
 ): Promise<WriteCheck> {
 	if (isReservedLockKey(key)) return { blocked: reservedKeyResponse(context, key) };
 	const object = await context.env.MEDIA_BUCKET.head(fullKey);
 	if (!object) return { onlyIf: createOnlyCondition(), exists: false };
+	// Still conditional: an exempt write may replace the object, but not one written since this check.
+	if (options.isLockExempt) return { onlyIf: { etagMatches: object.etag }, exists: true };
 	const root = fullKey.endsWith(key) ? fullKey.slice(0, fullKey.length - key.length) : undefined;
 	const blocked = await assertWritable(context, [key], "overwrite", root);
 	if (blocked) return { blocked };

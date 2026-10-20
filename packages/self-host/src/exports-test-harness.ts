@@ -40,7 +40,7 @@ function failsCondition(onlyIf: PutOptions["onlyIf"], existing: StoredObject | u
 	if (!onlyIf) return false;
 	if (onlyIf instanceof Headers) return onlyIf.get("If-None-Match") === "*" && existing !== undefined;
 	if (onlyIf.etagMatches === undefined) return false;
-	return existing?.etag !== onlyIf.etagMatches.replaceAll('"', "");
+	return !existing || (existing.etag ?? "etag-0") !== onlyIf.etagMatches.replaceAll('"', "");
 }
 
 function toBytes(value: ArrayBuffer | Uint8Array | string): Uint8Array {
