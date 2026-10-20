@@ -1,11 +1,4 @@
-import {
-	decodeEncryptionMeta,
-	MediaType,
-	resolveSecurity,
-	resolveVisibility,
-	type SecurityPolicy,
-	UploadRequestKind,
-} from "@devultur/core";
+import { MediaType, resolveSecurity, resolveVisibility, type SecurityPolicy, UploadRequestKind } from "@devultur/core";
 import { Hono } from "hono";
 import {
 	contentDispositionInline,
@@ -18,12 +11,11 @@ import {
 	UPLOAD_TOKEN_TTL_SECONDS,
 } from "../helpers";
 import { resolveUploadLock } from "../object-lock/upload-lock";
+import { assetUploadConflict, failedWrite, prepareUploadWrite } from "../object-lock/upload-write";
 import { getRequestState, isAuthenticated } from "../request-state";
 import type { RawStorageClass, UploadPending, UploadRequest, WorkerApp } from "../types";
 import {
 	allowedUploadMetadata,
-	alreadyExists,
-	createOnlyCondition,
 	digestBody,
 	discardStaleVariants,
 	headerSha256,
@@ -135,10 +127,9 @@ upload.post("/", async (context) => {
 	const virtualKey = target.key;
 	const fullKey = storageKey(context, virtualKey);
 	const shouldOverwrite = body.overwrite === true;
-	// Fail-fast: the PUT/complete re-checks anyway (the single PUT is conditional in R2).
-	if (target.isAsset && !shouldOverwrite && (await context.env.MEDIA_BUCKET.head(fullKey))) {
-		return alreadyExists(context, virtualKey);
-	}
+	// Fail-fast (taken asset, locked object): the PUT/complete re-check anyway (the single PUT is conditional in R2).
+	const conflict = target.isAsset ? await assetUploadConflict(context, virtualKey, fullKey, shouldOverwrite) : null;
+	if (conflict) return conflict;
 	if (grant) {
 		const exhausted = await claimTokenFileSlot(context.env.MEDIA_KV, grant);
 		if (exhausted) return targetFailure(context, exhausted);
@@ -266,6 +257,9 @@ upload.put("/:key{.+}", async (context) => {
 	};
 	// The binding override travels in the metadata → the delivery gate resolves it per-resource.
 	if (resourceSecurity) customMetadata.security = JSON.stringify(resourceSecurity);
+	// Locks and create-only before any side effect (the encryption key below): the put is pinned to what this saw.
+	const write = await prepareUploadWrite(context, pending?.key ?? key, pending, finalStorageKey);
+	if ("blocked" in write) return write.blocked;
 
 	let storedBody: ArrayBuffer | Uint8Array = body;
 	if (shouldEncrypt && context.env.KEYS_BUCKET) {
@@ -277,10 +271,9 @@ upload.put("/:key{.+}", async (context) => {
 		customMetadata.enc = result.enc;
 	}
 
-	// An asset without `overwrite` doesn't clobber what already exists: conditional put (R2 returns null) → 409.
-	const isCreateOnly = Boolean(pending?.isAsset && !pending.overwrite);
+	// Conditional put (R2 returns null when the object changed or appeared since the check) → 409.
 	const stored = await context.env.MEDIA_BUCKET.put(finalStorageKey, storedBody, {
-		...(isCreateOnly ? { onlyIf: createOnlyCondition() } : {}),
+		onlyIf: write.onlyIf,
 		// Standard except for the video raw when the config retains it ≥30 days (Infrequent Access, see
 		// `RAW_STORAGE_CLASS`): IA has a 30-day minimum and charges retrieval ($0.01/GB) on every read — the
 		// transcode's read, and the direct MP4 delivery if it isn't transcoded. With retention `off` the raw lives
@@ -294,21 +287,12 @@ upload.put("/:key{.+}", async (context) => {
 		...(Object.keys(customMetadata).length > 0 ? { customMetadata } : {}),
 	});
 
-	if (isCreateOnly && !stored) {
-		await discardObjectKey(context.env.KEYS_BUCKET, finalStorageKey, customMetadata.enc);
-		return alreadyExists(context, key);
-	}
+	if (stored === null) return failedWrite(context, key, pending, customMetadata.enc);
 
 	if (resolved) await context.env.MEDIA_KV.delete(resolved.kvKey);
 	await discardStaleVariants(context.env.MEDIA_BUCKET, pending);
 
 	return context.json({ key, size: body.byteLength, sha256: digest.sha256, sha256Verified: true });
 });
-
-// The conditional put failed: the L4 key created for THIS attempt (its own keyId) protects nothing → delete it.
-async function discardObjectKey(keysBucket: R2Bucket | undefined, objectStorageKey: string, enc: string | undefined) {
-	const meta = decodeEncryptionMeta(enc);
-	if (keysBucket && meta) await keysBucket.delete(`${objectStorageKey}/${meta.keyId}`);
-}
 
 export { upload };

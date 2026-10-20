@@ -84,6 +84,8 @@ function setup(options: SetupOptions = {}) {
 			delete: async (key: string) => void kv.delete(key),
 		},
 		MEDIA_BUCKET: {
+			// Empty bucket: the lock check finds nothing to overwrite.
+			head: async () => null,
 			createMultipartUpload: async (key: string, multipartOptions?: R2MultipartOptions) => {
 				const uploadId = `up-${uploads.size + 1}`;
 				uploads.set(uploadId, { key, options: multipartOptions, parts: new Map(), isAborted: false });

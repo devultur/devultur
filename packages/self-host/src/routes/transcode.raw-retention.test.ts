@@ -98,6 +98,18 @@ describe("original retention after transcode", () => {
 		);
 	});
 
+	it("allows the first transcode of a locked raw (it only creates outputs)", async () => {
+		const { transcode } = setup({ lockedKeys: [RAW_KEY] });
+		expect((await transcode()).status).toBe(200);
+	});
+
+	it("refuses re-transcoding a locked video whose outputs already exist", async () => {
+		const { transcode } = setup({ objects: [RAW_KEY, PLAYLIST_KEY], lockedKeys: [RAW_KEY] });
+		const res = await transcode();
+		expect(res.status).toBe(409);
+		expect(await res.json()).toMatchObject({ code: "retention_active", key: RAW_KEY, hold: true });
+	});
+
 	it("keeps the raw when retention is on", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		const { transcode, webhook, mediaBucket, keysBucket } = setup({ deleteRaw: false });

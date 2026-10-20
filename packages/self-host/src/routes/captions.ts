@@ -17,6 +17,7 @@ import {
 	parseSecurityHeader,
 	storageKey,
 } from "../helpers";
+import { checkWrites, WriteConflictError, writeConflict } from "../object-lock/overwrite";
 import { getRequestState } from "../request-state";
 import type {
 	CaptionJobMeta,
@@ -245,7 +246,11 @@ captions.post("/", async (context) => {
 	// The .vtt files live in the same visibility folder as the video (`{visibility}/video/{id}/captions/…`).
 	// Without this prefix they'd get written to `video/{id}/…` and delivery looks them up with visibility → 404.
 	const visibility = visibilityFromKey(body.key) ?? "private";
-	const captionKey = (locale: string) => storageKey(context, `${visibility}/${captionPath(videoId, locale)}`);
+	const captionVirtualKey = (locale: string) => `${visibility}/${captionPath(videoId, locale)}`;
+	const captionKey = (locale: string) => storageKey(context, captionVirtualKey(locale));
+	// A locked video (`derivatives: "inherit"`) keeps its existing locales; new ones can still be added.
+	const writes = await checkWrites(context, body.locales.map(captionVirtualKey));
+	if ("blocked" in writes) return writes.blocked;
 
 	// The .vtt files are private assets of the video → encrypted at rest if the policy asks for it (same criterion
 	// as the raw/thumbnail). The video's binding override (audio/raw metadata) propagates to the
@@ -268,10 +273,12 @@ captions.post("/", async (context) => {
 			bodyToStore = result.body;
 			metadata.enc = result.enc;
 		}
-		await context.env.MEDIA_BUCKET.put(objectKey, bodyToStore, {
+		const stored = await context.env.MEDIA_BUCKET.put(objectKey, bodyToStore, {
+			onlyIf: writes.conditions.get(captionVirtualKey(locale)),
 			httpMetadata: { contentType: "text/vtt" },
 			...(Object.keys(metadata).length > 0 ? { customMetadata: metadata } : {}),
 		});
+		if (stored === null) throw new WriteConflictError(captionVirtualKey(locale));
 	};
 
 	try {
@@ -351,6 +358,7 @@ captions.post("/", async (context) => {
 			} satisfies MediaEvent,
 			webhookData,
 		);
+		if (err instanceof WriteConflictError) return writeConflict(context, err.key);
 		return context.json({ error: failure.error, code: failure.code }, failure.status);
 	}
 });

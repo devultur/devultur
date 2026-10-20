@@ -26,12 +26,12 @@ import {
 } from "@devultur/core";
 import type { Context } from "hono";
 import { contentDispositionInline, createObjectEncryption, loadStorageKey, shouldEncryptAtRest } from "../helpers";
+import { prepareUploadWrite } from "../object-lock/upload-write";
 import { getRequestState } from "../request-state";
 import type { MultipartPending, UploadPending, WorkerApp } from "../types";
 import { derivedAssetPending } from "./derived-upload";
 import {
 	allowedUploadMetadata,
-	alreadyExists,
 	digestBody,
 	discardStaleVariants,
 	headerSha256,
@@ -129,7 +129,9 @@ async function handleMultipartCreate(context: UploadContext, key: string, target
 	if (pending.multipart) {
 		return context.json({ uploadId: pending.multipart.uploadId, partSize: pending.multipart.partSize, partCount });
 	}
-	if (await isTakenAsset(context, pending)) return alreadyExists(context, key);
+	// Before the encryption key and the R2 session: a taken asset or a locked object gets nothing created.
+	const write = await prepareUploadWrite(context, pending.key ?? key, pending, pending.storageKey);
+	if ("blocked" in write) return write.blocked;
 
 	// A multipart's metadata gets fixed at create time: the sha256 is the DECLARED one (`sha256Verified: false`); the
 	// worker verifies each part against its own but never rehashes the complete object.
@@ -231,19 +233,16 @@ async function handleMultipartComplete(context: UploadContext, key: string): Pro
 	const parts = normalizeCompletedParts(multipart, body?.parts);
 	if (!parts) return context.json({ error: "parts must list every part exactly once", code: "invalid_parts" }, 400);
 
-	// R2 has no conditional complete: an asset that appeared after the create gets rejected here (best-effort).
-	if (await isTakenAsset(context, pending)) return alreadyExists(context, key);
+	// R2 has no conditional complete: an asset that appeared, or a lock set, after the create gets rejected here
+	// (best-effort: a lock set between this check and the complete isn't seen, the window decision 2 of #3 accepts).
+	const write = await prepareUploadWrite(context, pending.key ?? key, pending, pending.storageKey);
+	if ("blocked" in write) return write.blocked;
 	const multipartUpload = context.env.MEDIA_BUCKET.resumeMultipartUpload(pending.storageKey, multipart.uploadId);
 	const object = await multipartUpload.complete(parts);
 	await context.env.MEDIA_KV.delete(kvKey);
 	await discardStaleVariants(context.env.MEDIA_BUCKET, pending);
 	const integrity = multipart.sha256 ? { sha256: multipart.sha256, sha256Verified: false } : {};
 	return context.json({ key, size: object.size, ...integrity });
-}
-
-async function isTakenAsset(context: UploadContext, pending: UploadPending): Promise<boolean> {
-	if (!pending.isAsset || pending.overwrite) return false;
-	return Boolean(await context.env.MEDIA_BUCKET.head(pending.storageKey));
 }
 
 // With a declared sha256, each part carries its own (of the plaintext) and it's verified before storing it: the

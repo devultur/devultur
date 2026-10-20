@@ -1,0 +1,5 @@
+---
+"@devultur/self-host": minor
+---
+
+Refuse to overwrite locked files. The upload PUT, multipart create and complete, captions and re-transcodes answer `409 retention_active` when they would replace a locked file or a retained output of a locked video. New outputs and new caption locales are still allowed, and so is the first transcode of a locked video. `POST /v1/upload` with `overwrite: true` refuses a locked asset before any bytes are sent. Every upload write is conditional on the object the check saw. If it changed in between, the upload answers `409 write_conflict` and removes the encryption key it created, and the client retries.

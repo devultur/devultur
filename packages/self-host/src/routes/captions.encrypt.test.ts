@@ -41,6 +41,7 @@ describe("captions L4: decrypts the encrypted raw before transcribing", () => {
 
 		const mediaBucket = {
 			get: async () => ({ body: streamOf(ciphertext), customMetadata: { enc } }),
+			head: async () => null,
 			put: async () => {},
 		} as unknown as R2Bucket;
 

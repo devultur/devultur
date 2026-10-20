@@ -104,11 +104,6 @@ export function integrityMetadata(
 	};
 }
 
-/** `onlyIf` for a create-only put (R2 returns null if the key already exists → 409). */
-export function createOnlyCondition(): Headers {
-	return new Headers({ "If-None-Match": "*" });
-}
-
 /**
  * An overwrite changes the original's bytes: its image variants (`{storageKey}/__variants/`, generated from the
  * old bytes) stop being valid and get regenerated on the next request.

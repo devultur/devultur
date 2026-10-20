@@ -71,18 +71,27 @@ function protectsDerived(state: LockState): boolean {
 	return derivatives === "inherit";
 }
 
-async function lockedOriginal(context: GuardContext, key: string, now: Date): Promise<LockedOriginal | null> {
-	const object = await context.env.MEDIA_BUCKET.head(storageKey(context, key));
+async function lockedOriginal(
+	context: GuardContext,
+	root: string,
+	key: string,
+	now: Date,
+): Promise<LockedOriginal | null> {
+	const object = await context.env.MEDIA_BUCKET.head(`${root}${key}`);
 	const state = object ? lockStateOf(object) : null;
 	return state && isStateLocked(state, now) ? { key, state } : null;
 }
 
 // Heads each raw instead of trusting the listing's metadata (a list only carries it with `include`, per compat date).
-async function lockedRaw(context: GuardContext, rawPrefix: string, now: Date): Promise<LockedOriginal | null> {
-	const root = getRequestState(context).storagePrefix;
+async function lockedRaw(
+	context: GuardContext,
+	root: string,
+	rawPrefix: string,
+	now: Date,
+): Promise<LockedOriginal | null> {
 	let cursor: string | undefined;
 	do {
-		const listing = await context.env.MEDIA_BUCKET.list({ prefix: storageKey(context, rawPrefix), cursor });
+		const listing = await context.env.MEDIA_BUCKET.list({ prefix: `${root}${rawPrefix}`, cursor });
 		for (const listed of listing.objects) {
 			const object = await context.env.MEDIA_BUCKET.head(listed.key);
 			const state = object ? lockStateOf(object) : null;
@@ -118,9 +127,15 @@ function retentionActive(context: GuardContext, locked: LockedOriginal, op: Lock
 /**
  * `null` when every key (virtual, without the storage prefix) may be deleted or overwritten; otherwise the response to
  * send: `400 reserved_key`, or `409 retention_active` naming the locked original. All-or-nothing: check every key of a
- * bulk operation here before deleting any.
+ * bulk operation here before deleting any. `root` is the storage prefix the keys live under: the request's by default,
+ * or the one a pending upload recorded (a credential-less PUT has none of its own).
  */
-export async function assertWritable(context: GuardContext, keys: string[], op: LockOp): Promise<Response | null> {
+export async function assertWritable(
+	context: GuardContext,
+	keys: string[],
+	op: LockOp,
+	root = getRequestState(context).storagePrefix,
+): Promise<Response | null> {
 	const reserved = keys.find(isReservedLockKey);
 	if (reserved !== undefined) return reservedKeyResponse(context, reserved);
 
@@ -134,8 +149,8 @@ export async function assertWritable(context: GuardContext, keys: string[], op: 
 		checked.add(subjectId);
 		const locked =
 			subject.kind === "original"
-				? await lockedOriginal(context, subject.key, now)
-				: await lockedRaw(context, subject.rawPrefix, now);
+				? await lockedOriginal(context, root, subject.key, now)
+				: await lockedRaw(context, root, subject.rawPrefix, now);
 		if (!locked) continue;
 		await recordLockAudit({ type: "write_rejected", op, key: locked.key });
 		return retentionActive(context, locked, op);

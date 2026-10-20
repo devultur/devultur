@@ -36,6 +36,8 @@ function setup(security?: SecurityPolicy) {
 			delete: async (key: string) => void kv.delete(key),
 		},
 		MEDIA_BUCKET: {
+			// Empty bucket: the lock check finds nothing to overwrite.
+			head: async () => null,
 			createMultipartUpload: async (key: string, options?: R2MultipartOptions) => {
 				created.push({ key, options });
 				return { uploadId: "up-1", key, ...resume(key) };
