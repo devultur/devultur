@@ -2,9 +2,11 @@
 // transcode outputs and new caption locales, decision 3 of #3); a write to an existing key is an overwrite and goes
 // through `assertWritable`. The returned condition pins the write to the object the check saw, so a lock set (or an
 // object written) in between makes R2 refuse the put instead of silently replacing it.
+import { TranscodeStatus } from "@devultur/core";
 import type { Context } from "hono";
 import { storageKey } from "../helpers";
 import { hasPriorTranscodeOutputs } from "../transcode/raw-retention";
+import { readStatus } from "../transcode/status";
 import type { WorkerApp } from "../types";
 import { assertWritable, isReservedLockKey, reservedKeyResponse } from "./guard";
 import { lockStateOf } from "./state";
@@ -60,16 +62,21 @@ export class WriteConflictError extends Error {
 
 /**
  * A re-transcode overwrites the video's outputs, so it's refused while they're retained (the raw is locked with
- * `derivatives: "inherit"`). The first transcode only creates outputs and is allowed. `videoFolder` is virtual,
- * without a trailing slash (`{visibility}/video/{id}`).
+ * `derivatives: "inherit"`). Allowed: the first transcode (it only creates outputs), and a retry of one whose last
+ * job `failed`: its partial outputs were never a finished set, and the new job's runner may overwrite them (see
+ * job-outputs.ts). The status record lives 24 h, so without one the outputs are assumed complete (fail closed).
+ * `videoFolder` is virtual, without a trailing slash (`{visibility}/video/{id}`).
  */
 export async function assertRetranscodable(
 	context: OverwriteContext,
 	videoFolder: string,
+	videoId: string,
 	raw: Pick<R2Object, "customMetadata">,
 ): Promise<Response | null> {
 	// Common case first: an unlocked raw needs no listing.
 	if (!lockStateOf(raw)) return null;
+	const status = await readStatus(context.env.MEDIA_KV, videoId);
+	if (status?.status === TranscodeStatus.FAILED) return null;
 	const folder = storageKey(context, `${videoFolder}/`);
 	if (!(await hasPriorTranscodeOutputs(context.env.MEDIA_BUCKET, folder))) return null;
 	return assertWritable(context, [videoFolder], "overwrite");

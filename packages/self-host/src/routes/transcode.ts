@@ -93,7 +93,7 @@ transcode.post("/", async (context) => {
 	if (!isVideoId(videoId, body.key)) {
 		return context.json({ error: "Invalid key format" }, 400);
 	}
-	const retained = await assertRetranscodable(context, `${visibility}/${videoBasePath(videoId)}`, object);
+	const retained = await assertRetranscodable(context, `${visibility}/${videoBasePath(videoId)}`, videoId, object);
 	if (retained) return retained;
 
 	// Preset: the request's (name or inline spec, strictly validated) → the config's default → `hls-720p`.
