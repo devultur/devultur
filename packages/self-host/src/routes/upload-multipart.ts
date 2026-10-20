@@ -26,7 +26,7 @@ import {
 } from "@devultur/core";
 import type { Context } from "hono";
 import { contentDispositionInline, createObjectEncryption, loadStorageKey, shouldEncryptAtRest } from "../helpers";
-import { isKeysBucketMissing, keysBucketMissing } from "../keys-bucket";
+import { encryptionKeyMissing, hasEncryptionKey, isKeysBucketMissing, keysBucketMissing } from "../keys-bucket";
 import { afterUploadWrite, prepareUploadWrite } from "../object-lock/upload-write";
 import { getRequestState } from "../request-state";
 import type { MultipartPending, UploadPending, WorkerApp } from "../types";
@@ -241,9 +241,16 @@ async function handleMultipartComplete(context: UploadContext, key: string): Pro
 	const write = await prepareUploadWrite(context, pending.key ?? key, pending, pending.storageKey);
 	if ("blocked" in write) return write.blocked;
 	const multipartUpload = context.env.MEDIA_BUCKET.resumeMultipartUpload(pending.storageKey, multipart.uploadId);
+	// A delete of the object this replaces may have swept the upload's key: its parts can never be decrypted, so the
+	// session is dropped instead of completed (the client starts over).
+	if (!(await hasEncryptionKey(context.env.KEYS_BUCKET, pending.storageKey, multipart.enc))) {
+		await multipartUpload.abort();
+		await context.env.MEDIA_KV.delete(kvKey);
+		return encryptionKeyMissing(context, key);
+	}
 	const object = await multipartUpload.complete(parts);
 	await context.env.MEDIA_KV.delete(kvKey);
-	await afterUploadWrite(context, key, pending, write);
+	await afterUploadWrite(context, key, pending, write, multipart.enc);
 	const integrity = multipart.sha256 ? { sha256: multipart.sha256, sha256Verified: false } : {};
 	return context.json({ key, size: object.size, ...integrity });
 }

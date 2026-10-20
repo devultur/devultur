@@ -7,17 +7,22 @@ import { upload } from "./upload";
 
 // In-memory R2 with the surface upload + delete use (put/head/list/delete by key or batch).
 function memoryBucket() {
-	const objects = new Map<string, { body: unknown; customMetadata?: Record<string, string> }>();
+	const objects = new Map<string, { body: unknown; customMetadata?: Record<string, string>; uploaded: Date }>();
 	return {
 		objects,
 		put: async (key: string, body: unknown, options?: { customMetadata?: Record<string, string> }) => {
-			objects.set(key, { body, customMetadata: options?.customMetadata });
+			objects.set(key, { body, customMetadata: options?.customMetadata, uploaded: new Date() });
 		},
 		// Like R2's head: the object's metadata comes back (the delete reads its encryption key id from it).
-		head: async (key: string) => (objects.has(key) ? { key, customMetadata: objects.get(key)?.customMetadata } : null),
+		head: async (key: string) => {
+			const stored = objects.get(key);
+			return stored ? { key, uploaded: stored.uploaded, customMetadata: stored.customMetadata } : null;
+		},
 		get: async () => null,
 		list: async ({ prefix }: { prefix: string }) => ({
-			objects: [...objects.keys()].filter((key) => key.startsWith(prefix)).map((key) => ({ key })),
+			objects: [...objects.keys()]
+				.filter((key) => key.startsWith(prefix))
+				.map((key) => ({ key, uploaded: objects.get(key)?.uploaded })),
 			truncated: false,
 		}),
 		delete: async (keys: string | string[]) => {

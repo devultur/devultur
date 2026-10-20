@@ -30,13 +30,17 @@ function memoryBucket(keys: string[], lockedKeys: string[] = []) {
 		head: async (key: string) => {
 			if (!objects.has(key)) return null;
 			const enc = key === RAW_KEY ? { enc: encodeEncryptionMeta(new Uint8Array(16), "key-1") } : {};
-			return { size: 10, customMetadata: { ...enc, ...(lockedKeys.includes(key) ? { lock } : {}) } };
+			return {
+				size: 10,
+				uploaded: new Date(0),
+				customMetadata: { ...enc, ...(lockedKeys.includes(key) ? { lock } : {}) },
+			};
 		},
 		delete: async (key: string | string[]) => {
 			for (const each of Array.isArray(key) ? key : [key]) objects.delete(each);
 		},
 		list: async ({ prefix }: { prefix: string }) => ({
-			objects: [...objects].filter((key) => key.startsWith(prefix)).map((key) => ({ key })),
+			objects: [...objects].filter((key) => key.startsWith(prefix)).map((key) => ({ key, uploaded: new Date(0) })),
 			truncated: false,
 		}),
 	};

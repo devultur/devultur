@@ -41,7 +41,7 @@ export async function prepareCaptionWrites(
 				onlyIf: check?.onlyIf,
 			});
 			if (stored === null) throw new WriteConflictError(virtualKeyOf(locale));
-			await deleteReplacedKey(context, storageKeyOf(locale), check?.replacedEnc);
+			await deleteReplacedKey(context, storageKeyOf(locale), check?.replacedEnc, customMetadata.enc);
 		},
 	};
 }

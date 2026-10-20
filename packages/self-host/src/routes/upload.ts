@@ -10,7 +10,7 @@ import {
 	storageKey,
 	UPLOAD_TOKEN_TTL_SECONDS,
 } from "../helpers";
-import { isKeysBucketMissing, keysBucketMissing } from "../keys-bucket";
+import { encryptionKeyMissing, hasEncryptionKey, isKeysBucketMissing, keysBucketMissing } from "../keys-bucket";
 import { resolveUploadLock } from "../object-lock/upload-lock";
 import {
 	afterUploadWrite,
@@ -281,6 +281,11 @@ upload.put("/:key{.+}", async (context) => {
 		customMetadata.enc = result.enc;
 	}
 
+	// A delete of the object this replaces may have swept the key just written: never store what can't be decrypted.
+	if (!(await hasEncryptionKey(context.env.KEYS_BUCKET, finalStorageKey, customMetadata.enc))) {
+		return encryptionKeyMissing(context, key);
+	}
+
 	// Conditional put (R2 returns null when the object changed or appeared since the check) → 409.
 	const stored = await context.env.MEDIA_BUCKET.put(finalStorageKey, storedBody, {
 		onlyIf: write.onlyIf,
@@ -297,7 +302,7 @@ upload.put("/:key{.+}", async (context) => {
 
 	if (stored === null) return failedWrite(context, key, pending, customMetadata.enc);
 	if (resolved) await context.env.MEDIA_KV.delete(resolved.kvKey);
-	await afterUploadWrite(context, key, pending, write);
+	await afterUploadWrite(context, key, pending, write, customMetadata.enc);
 
 	return context.json({ key, size: body.byteLength, sha256: digest.sha256, sha256Verified: true });
 });

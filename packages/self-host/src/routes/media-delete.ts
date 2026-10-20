@@ -82,8 +82,9 @@ export async function handleKeyDelete(context: Context<WorkerApp>): Promise<Resp
 	// could touch another object whose name starts the same way.
 	const variants = await guardedDeletePrefix(context, variantPrefix(key));
 	if ("blocked" in variants) return variants.blocked;
-	// Its own L4 keys (`${fullKey}/{keyId}`) and its variants' keys: not the keys of an asset nested under its path.
-	const keys = await deleteKeysFor(context, key, exists.customMetadata?.enc);
+	// Its own L4 keys (`${fullKey}/{keyId}`) and its variants' keys: not the keys of an asset nested under its path, nor
+	// those of an upload in flight over it (newer than `exists`, the version read before the delete).
+	const keys = await deleteKeysFor(context, key, exists);
 	if ("blocked" in keys) return keys.blocked;
 	// Its lock record stays, inert: it's bound to the deleted version, so a file uploaded later at this key starts from
 	// its own upload lock. Deleting it here could delete a record a lock change just wrote for that new file.

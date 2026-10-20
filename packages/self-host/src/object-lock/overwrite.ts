@@ -68,14 +68,18 @@ export async function checkWrite(
  * After an overwrite landed: deletes the replaced object's own encryption key (`{fullKey}/{keyId}`, named by its
  * `enc`). The new object has a key of its own, and the replaced one was writable (the check allowed the overwrite), so
  * the old key protects nothing any more. Left behind, it would stay forever: a delete only knows the current `enc`.
+ * `writtenEnc` is the new object's: a retried (or concurrent) multipart complete "replaces" the object the first one
+ * wrote, under the same key, which must stay.
  */
 export async function deleteReplacedKey(
 	context: OverwriteContext,
 	fullKey: string,
 	replacedEnc: string | undefined,
+	writtenEnc: string | undefined,
 ): Promise<void> {
 	const meta = decodeEncryptionMeta(replacedEnc);
 	if (!meta || !context.env.KEYS_BUCKET) return;
+	if (decodeEncryptionMeta(writtenEnc)?.keyId === meta.keyId) return;
 	await context.env.KEYS_BUCKET.delete(`${fullKey}/${meta.keyId}`);
 }
 

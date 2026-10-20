@@ -27,7 +27,7 @@ export { deletePrefix, hashKey, isServiceToken, storageKey, verifyViewerToken } 
 export { imageOriginAuthorization, isImageOriginRequest, readImageOriginScope } from "./image/cloudflare";
 export { type ImageTransformParams, parseTransformParams } from "./image/params";
 export { isVariantKey, variantPrefix } from "./image/transform-plan";
-export { KEYS_BUCKET_MISSING_CODE } from "./keys-bucket";
+export { ENCRYPTION_KEY_MISSING_CODE, KEYS_BUCKET_MISSING_CODE } from "./keys-bucket";
 export { LOCK_AUDIT_PREFIX, type LockAuditAction, type LockAuditRecord } from "./object-lock/audit";
 export { LOCK_HOLD_HEADER, LOCK_UNTIL_HEADER } from "./object-lock/delivery";
 export { RESERVED_LOCK_PREFIXES } from "./object-lock/guard";
