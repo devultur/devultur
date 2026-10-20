@@ -25,19 +25,16 @@ Before you push, run `pnpm lint`, `pnpm typecheck` and `pnpm test`. CI runs the 
   file. The five published packages share one version.
 - Add or update tests with every behavior change.
 
-## Developer Certificate of Origin
+## Contributor License Agreement
 
 `@devultur/self-host` is AGPL-3.0-only and the SDKs are MIT. Your contribution is licensed under the license of the
-package it touches. Because the project may need to change or add licenses in the future, it keeps a clear record of
-where every change comes from: each commit must be signed off under the
-[Developer Certificate of Origin 1.1](https://developercertificate.org/).
+package it touches, and the project may also offer its code under other terms (for example, a commercial license
+of the AGPL Worker). To keep that possible, every contributor signs the [Contributor License Agreement](CLA.md)
+once: you keep the copyright of your work and grant a license to use it under the project's licenses or other
+terms.
 
-```bash
-git commit -s -m "fix(core): handle empty filenames"
-```
-
-`-s` adds a `Signed-off-by: Your Name <you@example.com>` line. It certifies that you wrote the change, or have the
-right to submit it, under the project's licenses. Pull requests with unsigned commits can't be merged.
+On your first pull request a bot asks you to sign by replying with a comment; it takes a minute and covers all your
+future contributions. Pull requests from authors who haven't signed can't be merged.
 
 ## Security
 
