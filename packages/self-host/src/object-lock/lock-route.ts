@@ -1,5 +1,6 @@
-// `GET|PUT /v1/lock/:key`: read and change an object's retention. Control routes: the default auth only lets the
-// Worker secret through, and the route itself refuses anything not authenticated. Holds come in a later change.
+// `GET|PUT /v1/lock/:key`: read and change an object's retention; `POST /v1/lock/hold`: set or release holds (hold.ts).
+// Control routes: the default auth only lets the Worker secret through, and the route itself refuses anything not
+// authenticated.
 import { canChange, effectiveUntil, type ObjectLock } from "@devultur/core";
 import { type Context, Hono } from "hono";
 import { storageKey } from "../helpers";
@@ -8,6 +9,7 @@ import { getRequestState, isAuthenticated } from "../request-state";
 import type { WorkerApp } from "../types";
 import { recordLockAudit } from "./audit";
 import { classifyChange, type LockChangeBody, nextLock, timingOf } from "./change";
+import { handleHold } from "./hold";
 import { type EffectiveLock, effectiveLock, type LockSidecar, writeSidecar } from "./sidecar";
 import type { LockState } from "./state";
 
@@ -45,6 +47,8 @@ lockRoute.use("*", async (context, next) => {
 	if (!isAuthenticated(context)) return context.json({ error: "Unauthorized" }, 401);
 	await next();
 });
+
+lockRoute.post("/hold", handleHold);
 
 lockRoute.get("/:key{.+}", async (context) => {
 	const { key, effective } = await loadTarget(context);

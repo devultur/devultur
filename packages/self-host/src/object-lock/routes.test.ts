@@ -134,6 +134,18 @@ const ROUTES: Record<string, Classification> = {
 			expect(await res.json()).toMatchObject({ code: "compliance_extend_only", key: RAW_KEY });
 		},
 	},
+	"POST /v1/lock/hold": {
+		guarded: async ({ send, isIntact }) => {
+			vi.spyOn(console, "log").mockImplementation(() => {});
+			// A hold only adds protection: holding and releasing a compliance object leaves its retention in force.
+			for (const hold of [true, false]) {
+				const res = await send("/v1/lock/hold", { method: "POST", body: JSON.stringify({ hold, keys: [RAW_KEY] }) });
+				expect(await res.json()).toEqual({ updated: [RAW_KEY], skipped: [] });
+			}
+			await expectRetentionActive(await send(`/v1/media/${RAW_KEY}`, { method: "DELETE" }));
+			expect(isIntact()).toBe(true);
+		},
+	},
 	"POST /v1/token": { nonDestructive: "signs a viewer token" },
 	"POST /v1/token/upload": { nonDestructive: "signs an upload token" },
 	"POST /v1/token/download": { nonDestructive: "issues a download link" },

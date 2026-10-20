@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { UploadGrant } from "../export-types";
 import { exportsWorker } from "../exports-test-harness";
+import { loggedAudits } from "./audit-test-support";
 
 // The lock is written with the bytes (single PUT and multipart create) and enforced on delete.
 const BYTES = new TextEncoder().encode("pdf bytes");
@@ -87,6 +88,30 @@ describe("lock at upload", () => {
 		});
 		const { key } = await upload(worker, { path: "exports/b.pdf" });
 		expect(storedLock(worker, key)).toBe('{"hold":true}');
+	});
+});
+
+describe("audit of the lock set at upload", () => {
+	it("records who uploaded it, from the POST's plugin context, even on the credential-less PUT", async () => {
+		const log = vi.spyOn(console, "log").mockImplementation(() => {});
+		const worker = exportsWorker({ context: { owner: "a" } });
+		const { key } = await upload(worker, { lock: COMPLIANCE });
+		await worker.settle();
+		expect(loggedAudits(log)).toEqual([
+			expect.objectContaining({ action: "set", keys: [key], before: null, actor: { owner: "a" }, outcome: "applied" }),
+		]);
+		const records = [...worker.mediaBucket.objects.keys()].filter((stored) =>
+			stored.startsWith("prefix-a/__lock-audit/"),
+		);
+		expect(records).toHaveLength(1);
+		log.mockRestore();
+	});
+
+	it("records nothing for an unlocked upload", async () => {
+		const log = vi.spyOn(console, "log").mockImplementation(() => {});
+		await upload(exportsWorker(), {});
+		expect(loggedAudits(log)).toEqual([]);
+		log.mockRestore();
 	});
 });
 

@@ -30,6 +30,7 @@ export { isVariantKey, variantPrefix } from "./image/transform-plan";
 export { LOCK_AUDIT_PREFIX, type LockAuditAction, type LockAuditRecord } from "./object-lock/audit";
 export { LOCK_HOLD_HEADER, LOCK_UNTIL_HEADER } from "./object-lock/delivery";
 export { RESERVED_LOCK_PREFIXES } from "./object-lock/guard";
+export { HOLD_PAGE_SIZE, type HoldSkip } from "./object-lock/hold";
 export { LOCK_SIDECAR_PREFIX, type LockSidecar, type LockSource } from "./object-lock/sidecar";
 export { LOCK_METADATA_KEY } from "./object-lock/state";
 export type { ComposedPlugins, PluginMiddleware, PluginRoute, WorkerPlugin } from "./plugin";
