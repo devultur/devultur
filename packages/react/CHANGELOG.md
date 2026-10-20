@@ -1,5 +1,12 @@
 # @devultur/react
 
+## 1.2.0
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @devultur/core@1.2.0
+
 ## 1.1.0
 
 ### Patch Changes
