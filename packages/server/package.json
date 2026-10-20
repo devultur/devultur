@@ -1,6 +1,6 @@
 {
 	"name": "@devultur/server",
-	"version": "1.0.3",
+	"version": "1.1.0",
 	"description": "Server SDK for Devultur media: upload URLs, viewer tokens, signed delivery URLs, transcodes, captions and webhooks",
 	"keywords": [
 		"media",
