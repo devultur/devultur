@@ -182,6 +182,14 @@ const auditToD1: WorkerPlugin = {
 - `parseEncodeMetrics(body)` reads the encode measurement of a runner's `transcode.complete`
   (see [Measuring encode cost](self-host.md#measuring-encode-cost)).
 
+## Deleting from a plugin
+
+A plugin route (or a scheduled handler next to the Worker) that deletes from `MEDIA_BUCKET` directly skips the
+routes' lock checks. Delete a prefix with `deletePrefixRespectingLocks` instead, and read one object's lock with
+`readObjectLock`: they keep retained files, their keys and their lock records, and stay within a subrequest bound
+(see [Deleting a prefix from your own code](object-lock.md#deleting-a-prefix-from-your-own-code)). The storage
+prefix of the request is `getRequestState(context).storagePrefix`.
+
 ## Example plugins
 
 Three small plugins in [`examples/plugins`](../../examples/plugins/src), typechecked and tested with the packages:

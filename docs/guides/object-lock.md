@@ -13,6 +13,7 @@ enforces it on every route that deletes or replaces stored bytes.
 - [Changing a lock](#changing-a-lock)
 - [Holds](#holds)
 - [Audit](#audit)
+- [Deleting a prefix from your own code](#deleting-a-prefix-from-your-own-code)
 - [Caveats](#caveats)
 - [Recipes](#recipes)
 
@@ -312,6 +313,57 @@ Each record goes to three places:
 The object and the hooks run after the response. A failure there is logged, never surfaced. The audit isn't a general
 access log: reads aren't recorded.
 
+## Deleting a prefix from your own code
+
+Code that runs in your Worker and deletes whole prefixes straight from the R2 binding (an app's teardown, a user's
+data export cleanup, a sweeper for expired files) bypasses the routes' checks. `@devultur/self-host` exports the
+guard's lock resolution for it, so it can skip retained files:
+
+```typescript
+import { deletePrefixRespectingLocks, readObjectLock, retainedSummary } from "@devultur/self-host";
+
+// The lock in force on one stored object (its full R2 key), or null when there's no such object.
+const lock = await readObjectLock({ mediaBucket: env.MEDIA_BUCKET }, "apps/a1/private/file/f1/deed.pdf");
+// { locked: true, hold: false, until: "2031-01-01T00:00:00.000Z", mode: "compliance" }
+
+// Delete what's free under a storage prefix, keep what's retained. Call again with `cursor` until it's gone.
+let cursor: string | undefined;
+do {
+  const result = await deletePrefixRespectingLocks({
+    mediaBucket: env.MEDIA_BUCKET,
+    keysBucket: env.KEYS_BUCKET,
+    prefix: "apps/a1/",
+    cursor,
+  });
+  // result: { deletedCount, deletedBytes, deletedKeyCount, retainedCount, retainedBytes, retained, cursor?, subrequests }
+  cursor = result.cursor;
+} while (cursor);
+```
+
+- **Keys are storage keys**: the full R2 keys, your storage prefix included. Nothing needs a request. The storage
+  prefix each key lives under (where its lock record is) is read from the key: everything before its first `public/`
+  or `private/` segment. Pass `root` when you walk a single storage prefix that has a segment named `public` or
+  `private`. One prefix can span several storage prefixes, each read on its own.
+- **Same resolution as the routes.** The upload's lock, or the lock record bound to the stored version (a record left
+  by a replaced version is ignored). An unreadable record counts as held (`unreadable: true`). A video's files inherit
+  from its raws unless they're `original-only`, and an image's variants follow it, as `DELETE /v1/media/<key>` keeps
+  them. `lockedBy` names the original whose lock it is.
+- **What goes.** A free object goes the way `DELETE /v1/media/<key>` deletes it: with its encryption keys in
+  `KEYS_BUCKET` (except those of an upload in flight over it) and its variants'. A video folder left empty also loses
+  the rest of its keys (the HLS key) and its transcode-completed marker, as with `DELETE /v1/media/videos/<id>`.
+- **What stays.** Retained files, with their variants, keys and lock records. The lock records of deleted files stay
+  too, inert, as with the routes. Nothing under `__lock/` or `__lock-audit/` is touched: once a storage prefix has
+  nothing retained left, delete those yourself if you're tearing it down.
+- **Bounded.** A Worker invocation has a subrequest limit. Each call stops before `maxSubrequests` bucket calls
+  (default 500) and returns a `cursor` to go on from. `batchSize` (default 100, at most 1000) sets how many objects it
+  lists at a time. Run a large prefix over several invocations (a queue, or a cron that keeps the cursor).
+- **Not audited.** The call is your code, not a request, so no audit record or hook runs: log `retained` if you need a
+  trail. The [check/delete window](#caveats) applies.
+
+`retainedSummary({ mediaBucket, prefix, cursor? })` answers "can this be deleted?" without deleting anything:
+`{ scannedCount, retainedCount, retainedBytes, latestUntil?, hasHold, cursor?, subrequests }`, with the same bounds.
+Add up the counts of each call. With `hasHold`, something stays until it's released, not until `latestUntil`.
+
 ## Caveats
 
 - **The check/delete window.** R2 deletes aren't conditional, so a lock set in the milliseconds between the Worker's
@@ -329,7 +381,8 @@ access log: reads aren't recorded.
 - **Direct storage** (`createMediaRouter` with your own bucket and no Worker) refuses locks: nothing would enforce
   them.
 - **`deletePrefix`**, exported by `@devultur/self-host`, deletes everything under a prefix and bypasses locks. Use it
-  only for regenerable data. The routes delete through the guarded helpers.
+  only for regenerable data. The routes delete through the guarded helpers; your own code can use
+  [`deletePrefixRespectingLocks`](#deleting-a-prefix-from-your-own-code).
 - **Listings show retention.** An expired, retained entry of `GET /v1/assets` carries `retainedUntil` and `hold`:
   whoever can list a prefix learns what's retained in it. With `workerSecretAuth()`, listing takes the Worker secret,
   the same credential as `GET /v1/lock`. An auth plugin of your own that lets a narrower credential list (a sync

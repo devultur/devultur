@@ -1,7 +1,7 @@
 // The lock an object was uploaded with: its own R2 `customMetadata.lock`, written in the same `put` (or multipart
 // create) as the bytes, so an object never exists unprotected. Later changes live in a sidecar (sidecar.ts), and
 // `effectiveLock` there picks whichever is in force.
-import { isLocked, type ObjectLock, type ResolvedLock, validateLock } from "@devultur/core";
+import { effectiveUntil, isLocked, type ObjectLock, type ResolvedLock, validateLock } from "@devultur/core";
 
 /** `customMetadata` key holding the lock set at upload (JSON `{ retention?, hold }`). Owned by the Worker. */
 export const LOCK_METADATA_KEY = "lock";
@@ -61,5 +61,14 @@ export function isStateLocked(state: LockState, now: Date): boolean {
 		return isLocked(state.lock, now, { uploadedAt: state.uploadedAt, holdReleasedAt: state.holdReleasedAt });
 	} catch {
 		return true;
+	}
+}
+
+/** ISO time the retention ends, or `undefined` when it has none or a hold keeps its `period` from starting. */
+export function untilOf(state: LockState): string | undefined {
+	try {
+		return effectiveUntil(state.lock, { uploadedAt: state.uploadedAt, holdReleasedAt: state.holdReleasedAt });
+	} catch {
+		return undefined;
 	}
 }

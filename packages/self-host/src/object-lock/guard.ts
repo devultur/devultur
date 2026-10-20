@@ -2,15 +2,16 @@
 // `assertWritable` first; the bulk helpers below run it for you, so a caller can't sweep a prefix or an object's
 // encryption keys without the check. R2 deletes aren't conditional: a lock set between the check and the delete
 // (milliseconds) isn't seen. That window is accepted (decision 2).
-import { decodeEncryptionMeta, effectiveUntil, isVideoRawKey, type RetentionDerivatives } from "@devultur/core";
+import { isVideoRawKey, type RetentionDerivatives } from "@devultur/core";
 import type { Context, MiddlewareHandler } from "hono";
 import { deletePrefix, storageKey } from "../helpers";
-import { isVariantKey, variantPrefix } from "../image/transform-plan";
+import { isVariantKey } from "../image/transform-plan";
 import { getRequestState } from "../request-state";
 import type { WorkerApp } from "../types";
 import { recordLockAudit } from "./audit";
+import { type DeletedVersion, sweepObjectKeys } from "./object-keys";
 import { effectiveLock } from "./sidecar";
-import { isStateLocked, type LockState } from "./state";
+import { isStateLocked, type LockState, untilOf } from "./state";
 
 type GuardContext = Context<WorkerApp>;
 
@@ -51,7 +52,7 @@ const VIDEO_KEY = /^((?:public|private)\/video\/[^/]+)(?:\/|$)/;
  * Which stored original decides whether `key` can change: the key itself, the raws of its video (a derived file under
  * the video folder, or the folder itself), or nothing (image variants and mezzanines are regenerable caches).
  */
-type LockSubject = { kind: "original"; key: string } | { kind: "video"; rawPrefix: string } | null;
+export type LockSubject = { kind: "original"; key: string } | { kind: "video"; rawPrefix: string } | null;
 
 export function lockSubjectOf(key: string): LockSubject {
 	if (isVariantKey(key)) return null;
@@ -61,7 +62,8 @@ export function lockSubjectOf(key: string): LockSubject {
 	return { kind: "original", key };
 }
 
-interface LockedOriginal {
+/** The locked original (virtual `key`) that keeps something from changing, and its lock. */
+export interface LockedOriginal {
 	key: string;
 	state: LockState;
 }
@@ -72,31 +74,21 @@ function protectsDerived(state: LockState): boolean {
 	return derivatives === "inherit";
 }
 
-async function lockedOriginal(
-	context: GuardContext,
-	root: string,
-	key: string,
-	now: Date,
-): Promise<LockedOriginal | null> {
-	const object = await context.env.MEDIA_BUCKET.head(`${root}${key}`);
-	const state = object ? (await effectiveLock(context.env.MEDIA_BUCKET, root, key, object)).state : null;
+async function lockedOriginal(bucket: R2Bucket, root: string, key: string, now: Date): Promise<LockedOriginal | null> {
+	const object = await bucket.head(`${root}${key}`);
+	const state = object ? (await effectiveLock(bucket, root, key, object)).state : null;
 	return state && isStateLocked(state, now) ? { key, state } : null;
 }
 
 // Heads each raw instead of trusting the listing's metadata (a list only carries it with `include`, per compat date).
-async function lockedRaw(
-	context: GuardContext,
-	root: string,
-	rawPrefix: string,
-	now: Date,
-): Promise<LockedOriginal | null> {
+async function lockedRaw(bucket: R2Bucket, root: string, rawPrefix: string, now: Date): Promise<LockedOriginal | null> {
 	let cursor: string | undefined;
 	do {
-		const listing = await context.env.MEDIA_BUCKET.list({ prefix: `${root}${rawPrefix}`, cursor });
+		const listing = await bucket.list({ prefix: `${root}${rawPrefix}`, cursor });
 		for (const listed of listing.objects) {
 			const key = listed.key.slice(root.length);
-			const object = await context.env.MEDIA_BUCKET.head(listed.key);
-			const state = object ? (await effectiveLock(context.env.MEDIA_BUCKET, root, key, object)).state : null;
+			const object = await bucket.head(listed.key);
+			const state = object ? (await effectiveLock(bucket, root, key, object)).state : null;
 			if (state && protectsDerived(state) && isStateLocked(state, now)) return { key, state };
 		}
 		cursor = listing.truncated ? listing.cursor : undefined;
@@ -104,12 +96,24 @@ async function lockedRaw(
 	return null;
 }
 
+/**
+ * The locked original that keeps `subject` (see `lockSubjectOf`) from changing under `root` in the media bucket, or
+ * `null` when it's free. An unreadable lock record counts as held; a video's files inherit from its raws (`inherit`).
+ */
+export function findLockedOriginal(
+	bucket: R2Bucket,
+	root: string,
+	subject: NonNullable<LockSubject>,
+	now: Date,
+): Promise<LockedOriginal | null> {
+	return subject.kind === "original"
+		? lockedOriginal(bucket, root, subject.key, now)
+		: lockedRaw(bucket, root, subject.rawPrefix, now);
+}
+
 function retentionActive(context: GuardContext, locked: LockedOriginal, op: LockOp): Response {
-	const { lock, uploadedAt, holdReleasedAt } = locked.state;
-	let until: string | undefined;
-	try {
-		until = effectiveUntil(lock, { uploadedAt, holdReleasedAt });
-	} catch {}
+	const { lock } = locked.state;
+	const until = untilOf(locked.state);
 	const verb = op === "delete" ? "deleted" : "overwritten";
 	return context.json(
 		{
@@ -147,10 +151,7 @@ export async function assertWritable(
 		const subjectId = subject.kind === "original" ? subject.key : subject.rawPrefix;
 		if (checked.has(subjectId)) continue;
 		checked.add(subjectId);
-		const locked =
-			subject.kind === "original"
-				? await lockedOriginal(context, root, subject.key, now)
-				: await lockedRaw(context, root, subject.rawPrefix, now);
+		const locked = await findLockedOriginal(context.env.MEDIA_BUCKET, root, subject, now);
 		if (!locked) continue;
 		const requested = key === locked.key ? [key] : [key, locked.key];
 		await recordLockAudit(context, {
@@ -197,37 +198,7 @@ export async function guardedDeletePrefix(context: GuardContext, prefix: string)
 }
 
 /**
- * The object's own keys in the keys bucket: the direct children of `{storageKey}/` (`{storageKey}/{keyId}`; a key id
- * has no `/`). The current `enc`'s and any a replaced version left behind. Never deeper: an asset nested under this
- * one's path (`asset/a` and `asset/a/b.pdf` are both valid) keeps its keys at `{storageKey}/b.pdf/{keyId}`.
- */
-async function ownKeysOf(keysBucket: R2Bucket, fullKey: string): Promise<R2Object[]> {
-	const keys: R2Object[] = [];
-	let cursor: string | undefined;
-	do {
-		const listing = await keysBucket.list({ prefix: `${fullKey}/`, delimiter: "/", cursor });
-		keys.push(...listing.objects);
-		cursor = listing.truncated ? listing.cursor : undefined;
-	} while (cursor);
-	return keys;
-}
-
-/** The deleted object's version, read (HEAD) before its delete: its `enc` and when it was written. */
-export type DeletedVersion = Pick<R2Object, "uploaded" | "customMetadata">;
-
-/**
- * Whether a key under the object's prefix belongs to the deleted version or one it replaced: written no later than the
- * deleted object. A newer key is an upload in flight (a multipart created over it, a PUT between its key and its put):
- * shredding it would leave that upload's object undecryptable.
- */
-function isKeyOfDeletedVersion(key: R2Object, deleted: DeletedVersion): boolean {
-	return key.uploaded.getTime() <= deleted.uploaded.getTime();
-}
-
-/**
- * Deletes one object's encryption material from the keys bucket: its own keys (`{storageKey}/{keyId}`, see
- * `ownKeysOf`) no newer than the deleted version, and its variants' (`{storageKey}/__variants/…`). Never a bare
- * `{storageKey}/` prefix: the keys of an asset nested under this one's path live there. Destroying the keys destroys
+ * Deletes one object's encryption material from the keys bucket (see `sweepObjectKeys`). Destroying the keys destroys
  * the object (crypto-shredding), so the object must be writable.
  */
 export async function deleteKeysFor(
@@ -239,15 +210,7 @@ export async function deleteKeysFor(
 	if (blocked) return { blocked };
 	const keysBucket = context.env.KEYS_BUCKET;
 	if (!keysBucket) return { deletedCount: 0 };
-	const fullKey = storageKey(context, objectKey);
-	const ownKeys = new Set(
-		(await ownKeysOf(keysBucket, fullKey)).filter((key) => isKeyOfDeletedVersion(key, deleted)).map((key) => key.key),
-	);
-	const meta = decodeEncryptionMeta(deleted.customMetadata?.enc);
-	if (meta) ownKeys.add(`${fullKey}/${meta.keyId}`);
-	if (ownKeys.size > 0) await keysBucket.delete([...ownKeys]);
-	const variantKeyCount = await deletePrefix(keysBucket, variantPrefix(fullKey));
-	return { deletedCount: variantKeyCount + ownKeys.size };
+	return { deletedCount: await sweepObjectKeys(keysBucket, storageKey(context, objectKey), deleted) };
 }
 
 /** Deletes every key of a video folder (virtual `{visibility}/video/{id}`): all of it belongs to that one video. */

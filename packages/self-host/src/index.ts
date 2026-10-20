@@ -32,6 +32,15 @@ export { LOCK_AUDIT_PREFIX, type LockAuditAction, type LockAuditRecord } from ".
 export { LOCK_HOLD_HEADER, LOCK_UNTIL_HEADER } from "./object-lock/delivery";
 export { RESERVED_LOCK_PREFIXES } from "./object-lock/guard";
 export { HOLD_PAGE_SIZE, type HoldSkip } from "./object-lock/hold";
+export { type LockLookupOptions, readObjectLock, type StoredObjectLock } from "./object-lock/lock-status";
+export {
+	deletePrefixRespectingLocks,
+	type PrefixDeleteOptions,
+	type PrefixDeleteResult,
+	type RetainedObject,
+} from "./object-lock/prefix-delete";
+export type { PrefixWalkOptions } from "./object-lock/prefix-walk";
+export { type RetainedSummary, retainedSummary } from "./object-lock/retained-summary";
 export { LOCK_SIDECAR_PREFIX, type LockSidecar, type LockSource } from "./object-lock/sidecar";
 export { LOCK_METADATA_KEY } from "./object-lock/state";
 export type { ComposedPlugins, PluginMiddleware, PluginRoute, WorkerPlugin } from "./plugin";
