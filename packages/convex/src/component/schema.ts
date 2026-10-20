@@ -65,6 +65,9 @@ export default defineSchema({
 		// Outputs of a preset transcode: each MP4/ladder with its stable URL, poster, and whether it has audio.
 		...transcodeOutputFields,
 		captionLocales: v.optional(v.array(v.string())),
+		// True while requested captions haven't arrived: `transcode.complete` then waits in "captioning" instead
+		// of going straight to "ready". Unset (records from before this field) means no captions were requested.
+		captionsPending: v.optional(v.boolean()),
 		duration: v.optional(v.number()),
 		createdAt: v.number(),
 	}).index("by_key", ["key"]),

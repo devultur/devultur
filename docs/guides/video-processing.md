@@ -66,4 +66,7 @@ export const handleMediaWebhook = createWebhookHandler(media, {
 ```
 
 A wrong or missing bearer gets `401` and no callback runs. Use `onEvent` to receive every event, including progress.
-With Convex, `@devultur/convex` registers this route for you.
+With Convex, `@devultur/convex` serves this route once your app mounts the component with an `httpPrefix`
+(`app.use(devultur, { httpPrefix: "/devultur/", ... })`), at `https://<deployment>.convex.site/devultur/webhook`.
+Without `httpPrefix` Convex doesn't expose the route and every transcode times out. See
+[Webhook route](../../packages/convex/README.md#webhook-route).

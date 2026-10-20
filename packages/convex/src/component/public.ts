@@ -131,9 +131,17 @@ export const processVideo = action({
 		const preset = args.preset;
 		const callbackUrl = args.callbackUrl ?? `${process.env.CONVEX_SITE_URL}${WEBHOOK_PATH}`;
 
+		const hasCaptionLocales = (args.locales?.length ?? 0) > 0;
+
 		// "queued" state BEFORE firing (feedback "requesting transcode…").
 		// The transcode.started webhook will move it to "transcoding"; this order avoids a race.
-		await ctx.runMutation(api.public.updateMedia, { key: mediaKey, transcodeStatus: MediaStatus.QUEUED });
+		// `captionsPending` is set here too, before any webhook can land: `transcode.complete` reads it to choose
+		// between "captioning" (captions still on their way) and "ready".
+		await ctx.runMutation(api.public.updateMedia, {
+			key: mediaKey,
+			transcodeStatus: MediaStatus.QUEUED,
+			captionsPending: hasCaptionLocales,
+		});
 
 		let result: Awaited<ReturnType<WorkerClient["transcode"]>>;
 		try {
@@ -151,12 +159,13 @@ export const processVideo = action({
 			throw error;
 		}
 
-		// Captions is best-effort: its failure shouldn't mark the video as failed.
-		if (args.locales && args.locales.length > 0) {
+		// Captions is best-effort: its failure shouldn't mark the video as failed, nor leave it waiting for
+		// captions that will never arrive.
+		if (args.locales && hasCaptionLocales) {
 			try {
 				await media.requestCaptions(args.key, args.locales, { callbackUrl });
 			} catch {
-				// noop — the transcode carries on
+				await ctx.runMutation(internal.public.skipCaptions, { key: mediaKey });
 			}
 		}
 
@@ -166,6 +175,25 @@ export const processVideo = action({
 		await ctx.scheduler.runAfter(STUCK_TIMEOUT_MS, internal.public.checkTranscodeStuck, { key: mediaKey });
 
 		return result;
+	},
+});
+
+// The captions request failed: stop waiting for them. A video whose transcode already completed (and is
+// waiting in "captioning") becomes ready.
+export const skipCaptions = internalMutation({
+	args: { key: v.string() },
+	handler: async (ctx, args) => {
+		const record = await ctx.db
+			.query("media")
+			.withIndex("by_key", (q) => q.eq("key", args.key))
+			.first();
+		if (!record) return;
+
+		const isWaitingForCaptions = record.transcodeStatus === MediaStatus.CAPTIONING;
+		await ctx.db.patch(record._id, {
+			captionsPending: false,
+			...(isWaitingForCaptions ? { transcodeStatus: MediaStatus.READY } : {}),
+		});
 	},
 });
 
@@ -246,6 +274,7 @@ export const updateMedia = mutation({
 		playlistUrl: v.optional(v.string()),
 		thumbnailKey: v.optional(v.string()),
 		captionLocales: v.optional(v.array(v.string())),
+		captionsPending: v.optional(v.boolean()),
 		duration: v.optional(v.number()),
 	},
 	handler: async (ctx, args) => {
@@ -450,9 +479,10 @@ export const handleWebhookEvent = internalMutation({
 				break;
 
 			case MediaEventName.TRANSCODE_COMPLETE: {
-				const hasCaptions = (record.captionLocales?.length ?? 0) > 0;
+				// Wait in "captioning" only for captions that were requested and haven't arrived yet; a video
+				// transcoded without captions is ready right away.
 				await ctx.db.patch(record._id, {
-					transcodeStatus: hasCaptions ? MediaStatus.READY : MediaStatus.CAPTIONING,
+					transcodeStatus: record.captionsPending ? MediaStatus.CAPTIONING : MediaStatus.READY,
 					transcodeProgress: undefined,
 					duration: args.duration,
 					playlistUrl: args.playlistKey,
@@ -471,6 +501,7 @@ export const handleWebhookEvent = internalMutation({
 				await ctx.db.patch(record._id, {
 					transcodeStatus: hasPlaylist ? MediaStatus.READY : MediaStatus.TRANSCODING,
 					captionLocales: args.locales,
+					captionsPending: false,
 				});
 				break;
 			}
