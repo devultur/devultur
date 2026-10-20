@@ -27,7 +27,11 @@ function setup(options: { launchError?: Error } = {}) {
 		TRANSCODE_RUNNER: "cloudflare",
 		TRANSCODE_CONTAINER: namespace,
 		DELIVERY_SIGN_SECRET: "delivery",
-		MEDIA_BUCKET: { head: async () => ({ size: 10, customMetadata: {} }) },
+		MEDIA_BUCKET: {
+			head: async () => ({ size: 10, customMetadata: {} }),
+			get: async () => null,
+			put: async () => ({}),
+		},
 		MEDIA_KV: {
 			get: async (key: string, type?: string) => {
 				const value = kv.get(key) ?? null;
@@ -79,7 +83,11 @@ describe("transcode through a runner", () => {
 				...WORKER_SECRETS,
 				TRANSCODE_RUNNER: "lambda",
 				DELIVERY_SIGN_SECRET: "d",
-				MEDIA_BUCKET: { head: async () => ({ size: 1, customMetadata: {} }) },
+				MEDIA_BUCKET: {
+					head: async () => ({ size: 1, customMetadata: {} }),
+					get: async () => null,
+					put: async () => ({}),
+				},
 				MEDIA_KV: { get: async () => null, put: async () => {} },
 			} as never,
 		);

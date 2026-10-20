@@ -15,7 +15,7 @@ import type { UploadGrant, WorkerApp, WorkerVariables } from "./types";
 
 export const SIGN_SECRET = "delivery-secret";
 
-interface StoredObject {
+export interface StoredObject {
 	bytes: Uint8Array;
 	httpMetadata: Record<string, string>;
 	customMetadata: Record<string, string>;
@@ -25,7 +25,7 @@ interface StoredObject {
 	etag?: string;
 }
 
-interface PutOptions {
+export interface PutOptions {
 	httpMetadata?: Record<string, string>;
 	customMetadata?: Record<string, string>;
 	onlyIf?: Headers | { etagMatches?: string };

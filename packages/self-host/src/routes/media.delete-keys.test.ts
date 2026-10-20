@@ -14,6 +14,7 @@ function memoryBucket() {
 			objects.set(key, body);
 		},
 		head: async (key: string) => (objects.has(key) ? { key } : null),
+		get: async () => null,
 		list: async ({ prefix }: { prefix: string }) => ({
 			objects: [...objects.keys()].filter((key) => key.startsWith(prefix)).map((key) => ({ key })),
 			truncated: false,

@@ -1,5 +1,6 @@
 import { type Context, Hono } from "hono";
 import { isTranscodeWebhookAuthorized, KV_JOB_TTL_SECONDS, KvPrefix } from "../helpers";
+import { markTranscodeCompleted } from "../object-lock/transcode-marker";
 import type { RequestState } from "../request-state";
 import { addRouteResult } from "../route-result";
 import { JOB_TICKET_HEADER, verifyJobTicket } from "../transcode/job-ticket";
@@ -33,9 +34,10 @@ webhooks.post("/transcode", async (context) => {
 	if (body.event === "transcode.complete" && body.videoId) {
 		// The raw is retained unless the config asked to delete it on completion (`deleteOriginalOnSuccess`): only
 		// after a successful transcode; a `transcode.failed` never touches it.
-		const disposal = await disposeRawAfterTranscode(context.env, body.videoId);
+		const disposal = await disposeRawAfterTranscode(context, body.videoId);
 		if (disposal === "deleted") addRouteResult(context, { originalDeleted: true });
 		if (disposal === "retained") addRouteResult(context, { originalRetained: true });
+		await markTranscodeCompleted(context.env, body.videoId);
 		await context.env.MEDIA_KV.put(
 			`${KvPrefix.TRANSCODE_META}:${body.videoId}`,
 			JSON.stringify({ duration: body.duration }),

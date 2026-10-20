@@ -9,7 +9,8 @@ import { isVariantKey } from "../image/transform-plan";
 import { getRequestState } from "../request-state";
 import type { WorkerApp } from "../types";
 import { recordLockAudit } from "./audit";
-import { isStateLocked, type LockState, lockStateOf } from "./state";
+import { effectiveLock, sidecarKey } from "./sidecar";
+import { isStateLocked, type LockState } from "./state";
 
 type GuardContext = Context<WorkerApp>;
 
@@ -78,7 +79,7 @@ async function lockedOriginal(
 	now: Date,
 ): Promise<LockedOriginal | null> {
 	const object = await context.env.MEDIA_BUCKET.head(`${root}${key}`);
-	const state = object ? lockStateOf(object) : null;
+	const state = object ? (await effectiveLock(context.env.MEDIA_BUCKET, root, key, object)).state : null;
 	return state && isStateLocked(state, now) ? { key, state } : null;
 }
 
@@ -93,11 +94,10 @@ async function lockedRaw(
 	do {
 		const listing = await context.env.MEDIA_BUCKET.list({ prefix: `${root}${rawPrefix}`, cursor });
 		for (const listed of listing.objects) {
+			const key = listed.key.slice(root.length);
 			const object = await context.env.MEDIA_BUCKET.head(listed.key);
-			const state = object ? lockStateOf(object) : null;
-			if (state && protectsDerived(state) && isStateLocked(state, now)) {
-				return { key: listed.key.slice(root.length), state };
-			}
+			const state = object ? (await effectiveLock(context.env.MEDIA_BUCKET, root, key, object)).state : null;
+			if (state && protectsDerived(state) && isStateLocked(state, now)) return { key, state };
 		}
 		cursor = listing.truncated ? listing.cursor : undefined;
 	} while (cursor);
@@ -152,7 +152,16 @@ export async function assertWritable(
 				? await lockedOriginal(context, root, subject.key, now)
 				: await lockedRaw(context, root, subject.rawPrefix, now);
 		if (!locked) continue;
-		await recordLockAudit({ type: "write_rejected", op, key: locked.key });
+		const requested = key === locked.key ? [key] : [key, locked.key];
+		await recordLockAudit(context, {
+			action: op === "delete" ? "delete_rejected" : "overwrite_rejected",
+			keys: requested,
+			before: locked.state.lock,
+			after: null,
+			outcome: "rejected",
+			reason: "retention_active",
+			root,
+		});
 		return retentionActive(context, locked, op);
 	}
 	return null;
@@ -182,6 +191,8 @@ export async function guardedDeletePrefix(context: GuardContext, prefix: string)
 	for (let start = 0; start < storageKeys.length; start += DELETE_BATCH_SIZE) {
 		await context.env.MEDIA_BUCKET.delete(storageKeys.slice(start, start + DELETE_BATCH_SIZE));
 	}
+	// The lock records of what was deleted (sidecars, a video's transcode marker) go with it.
+	if (storageKeys.length > 0) await deletePrefix(context.env.MEDIA_BUCKET, sidecarKey(root, prefix));
 	return { deletedCount: storageKeys.length };
 }
 

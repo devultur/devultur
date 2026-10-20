@@ -5,11 +5,12 @@
 import { TranscodeStatus } from "@devultur/core";
 import type { Context } from "hono";
 import { storageKey } from "../helpers";
-import { hasPriorTranscodeOutputs } from "../transcode/raw-retention";
+import { getRequestState } from "../request-state";
 import { readStatus } from "../transcode/status";
 import type { WorkerApp } from "../types";
 import { assertWritable, isReservedLockKey, reservedKeyResponse } from "./guard";
-import { lockStateOf } from "./state";
+import { effectiveLock } from "./sidecar";
+import { hasCompletedTranscode } from "./transcode-marker";
 
 type OverwriteContext = Context<WorkerApp>;
 
@@ -62,24 +63,23 @@ export class WriteConflictError extends Error {
 
 /**
  * A re-transcode overwrites the video's outputs, so it's refused while they're retained (the raw is locked with
- * `derivatives: "inherit"`). Allowed: the first transcode (it only creates outputs), and a retry of one whose last
- * job `failed`: its partial outputs were never a finished set, and the new job's runner may overwrite them (see
- * job-outputs.ts). The status record lives 24 h, so without one the outputs are assumed complete (fail closed).
- * `videoFolder` is virtual, without a trailing slash (`{visibility}/video/{id}`).
+ * `derivatives: "inherit"`) and a transcode of the video has completed (durable marker, or the status record).
+ * Allowed: the first transcode, and the retry of one that never completed (failed, or the runner died): its partial
+ * outputs were never a finished set, and the new job's runner may overwrite them (job-outputs.ts).
  */
 export async function assertRetranscodable(
 	context: OverwriteContext,
-	videoFolder: string,
-	videoId: string,
-	raw: Pick<R2Object, "customMetadata">,
+	video: { id: string; folder: string; rawKey: string },
+	raw: Pick<R2Object, "customMetadata" | "etag"> & { uploaded?: Date },
 ): Promise<Response | null> {
-	// Common case first: an unlocked raw needs no listing.
-	if (!lockStateOf(raw)) return null;
-	const status = await readStatus(context.env.MEDIA_KV, videoId);
-	if (status?.status === TranscodeStatus.FAILED) return null;
-	const folder = storageKey(context, `${videoFolder}/`);
-	if (!(await hasPriorTranscodeOutputs(context.env.MEDIA_BUCKET, folder))) return null;
-	return assertWritable(context, [videoFolder], "overwrite");
+	const root = getRequestState(context).storagePrefix;
+	const { state } = await effectiveLock(context.env.MEDIA_BUCKET, root, video.rawKey, raw);
+	if (!state) return null;
+	const isCompleted =
+		(await hasCompletedTranscode(context.env.MEDIA_BUCKET, root, video.folder)) ||
+		(await readStatus(context.env.MEDIA_KV, video.id))?.status === TranscodeStatus.COMPLETED;
+	if (!isCompleted) return null;
+	return assertWritable(context, [video.folder], "overwrite");
 }
 
 export type BatchWriteCheck = { blocked: Response } | { conditions: Map<string, WriteCondition> };

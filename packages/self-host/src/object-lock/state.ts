@@ -1,6 +1,6 @@
-// Where an object's lock lives and how it's read back. Today: the object's own R2 `customMetadata.lock`, written in
-// the same `put` (or multipart create) as the bytes, so an object never exists unprotected. Later changes to a lock
-// (extend, hold, release) go to a sidecar under `__lock/`; `readLockState` is the one seam that will merge it.
+// The lock an object was uploaded with: its own R2 `customMetadata.lock`, written in the same `put` (or multipart
+// create) as the bytes, so an object never exists unprotected. Later changes live in a sidecar (sidecar.ts), and
+// `effectiveLock` there picks whichever is in force.
 import { isLocked, type ObjectLock, type ResolvedLock, validateLock } from "@devultur/core";
 
 /** `customMetadata` key holding the lock set at upload (JSON `{ retention?, hold }`). Owned by the Worker. */
@@ -10,7 +10,7 @@ export interface LockState {
 	lock: ObjectLock;
 	/** `R2Object.uploaded`: a `retention.period` without a hold counts from here. */
 	uploadedAt?: Date;
-	/** When the hold was released (sidecar, not written yet): the period counts from here instead. */
+	/** When the hold was released (from the sidecar): the period counts from here instead. */
 	holdReleasedAt?: Date;
 }
 
@@ -40,12 +40,6 @@ export function lockStateOf(object: LockedObject): LockState | null {
 	const lock = parseLockMetadata(object.customMetadata?.[LOCK_METADATA_KEY]);
 	if (!lock) return null;
 	return { lock, ...(object.uploaded ? { uploadedAt: object.uploaded } : {}) };
-}
-
-/** Lock state of the object at `storageKey`. `null` if it doesn't exist or carries no lock. */
-export async function readLockState(bucket: R2Bucket, storageKey: string): Promise<LockState | null> {
-	const object = await bucket.head(storageKey);
-	return object ? lockStateOf(object) : null;
 }
 
 /** True while the state forbids delete and overwrite. A period with no known start fails closed (locked). */

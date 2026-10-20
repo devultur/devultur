@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { loggedAudits } from "../object-lock/audit-test-support";
 import { WORKER_SECRETS, withWorkerAuth, workerWithMiddleware } from "../plugins/worker-secret-auth-test-env";
 import { updateRequestState } from "../request-state";
 import type { TranscodeContainerNamespace } from "../transcode/cloudflare";
@@ -22,6 +23,8 @@ function memoryBucket(keys: string[], lockedKeys: string[] = []) {
 			objects.add(key);
 			return { key };
 		},
+		// Lock sidecars and markers are objects too: only what a test adds exists.
+		get: async (key: string) => (objects.has(key) ? { text: async () => "", etag: "e" } : null),
 		head: async (key: string) =>
 			objects.has(key) ? { size: 10, customMetadata: lockedKeys.includes(key) ? { lock } : {} } : null,
 		delete: async (key: string | string[]) => {
@@ -97,9 +100,8 @@ describe("original retention after transcode", () => {
 		expect(res.status).toBe(200);
 		expect(mediaBucket.objects.has(RAW_KEY)).toBe(true);
 		expect(keysBucket.objects.has(RAW_L4_KEY)).toBe(true);
-		expect(log).toHaveBeenCalledWith(
-			JSON.stringify({ event: "lock.original_retained", videoId: "vid1", key: RAW_KEY }),
-		);
+		const [audit] = loggedAudits(log);
+		expect(audit).toMatchObject({ action: "original_retained", keys: [RAW_KEY], outcome: "skipped" });
 	});
 
 	it("allows the first transcode of a locked raw (it only creates outputs)", async () => {
@@ -107,8 +109,18 @@ describe("original retention after transcode", () => {
 		expect((await transcode()).status).toBe(200);
 	});
 
-	it("refuses re-transcoding a locked video whose outputs already exist", async () => {
+	it("allows re-transcoding a locked video whose transcode never completed (partial outputs)", async () => {
 		const { transcode } = setup({ objects: [RAW_KEY, PLAYLIST_KEY], lockedKeys: [RAW_KEY] });
+		expect((await transcode()).status).toBe(200);
+	});
+
+	it("refuses re-transcoding a locked video once a transcode completed, whatever the status record says", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const { transcode, webhook, mediaBucket } = setup({ objects: [RAW_KEY, PLAYLIST_KEY], lockedKeys: [RAW_KEY] });
+		expect((await transcode()).status).toBe(200);
+		await webhook({ event: "transcode.complete", duration: 42 });
+		expect(mediaBucket.objects.has("__lock/private/video/vid1/transcode-completed")).toBe(true);
+
 		const res = await transcode();
 		expect(res.status).toBe(409);
 		expect(await res.json()).toMatchObject({ code: "retention_active", key: RAW_KEY, hold: true });

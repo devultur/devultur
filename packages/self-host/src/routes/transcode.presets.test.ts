@@ -29,7 +29,11 @@ function setup(presets?: TranscodeSettings, outputBaseUrl?: string) {
 		TRANSCODE_RUNNER: "cloudflare",
 		TRANSCODE_CONTAINER: namespace,
 		DELIVERY_SIGN_SECRET: "delivery",
-		MEDIA_BUCKET: { head: async () => ({ size: 10, customMetadata: {} }) },
+		MEDIA_BUCKET: {
+			head: async () => ({ size: 10, customMetadata: {} }),
+			get: async () => null,
+			put: async () => ({}),
+		},
 		MEDIA_KV: {
 			get: async (key: string, type?: string) => {
 				const value = kv.get(key) ?? null;
