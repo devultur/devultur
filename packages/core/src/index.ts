@@ -72,6 +72,26 @@ export {
 	SHA256_VERIFIED_HEADER,
 	sha256Hex,
 } from "./integrity";
+export type {
+	LockResolution,
+	LockValidation,
+	ObjectLock,
+	ResolvedLock,
+	ResolvedRetention,
+	Retention,
+	RetentionDerivatives,
+	RetentionMode,
+} from "./lock";
+export {
+	DEFAULT_RETENTION_DERIVATIVES,
+	isIsoInstant,
+	RETENTION_DERIVATIVES,
+	RETENTION_MODES,
+	resolveLock,
+	validateLock,
+} from "./lock";
+export type { LockChange, LockChangeOptions, LockChangeReason, LockInstant, LockTiming } from "./lock-change";
+export { canChange, effectiveUntil, isLocked } from "./lock-change";
 export type { DevulturKind, DevulturMedia, Visibility } from "./media";
 export {
 	DEFAULT_VISIBILITY,
