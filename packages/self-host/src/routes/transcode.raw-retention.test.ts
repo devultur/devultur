@@ -18,6 +18,10 @@ function memoryBucket(keys: string[], lockedKeys: string[] = []) {
 	const lock = JSON.stringify({ hold: true });
 	return {
 		objects,
+		put: async (key: string) => {
+			objects.add(key);
+			return { key };
+		},
 		head: async (key: string) =>
 			objects.has(key) ? { size: 10, customMetadata: lockedKeys.includes(key) ? { lock } : {} } : null,
 		delete: async (key: string | string[]) => {
@@ -66,7 +70,7 @@ function setup(options: { deleteRaw?: boolean; objects?: string[]; lockedKeys?: 
 	const transcode = () => send("/v1/transcode", { method: "POST", body: JSON.stringify({ key: RAW_KEY }) });
 	const webhook = (event: Record<string, unknown>) =>
 		send("/v1/webhooks/transcode", { method: "POST", body: JSON.stringify({ videoId: "vid1", ...event }) });
-	return { send, transcode, webhook, mediaBucket, keysBucket };
+	return { send, transcode, webhook, mediaBucket, keysBucket, kv };
 }
 
 afterEach(() => vi.restoreAllMocks());
@@ -96,6 +100,38 @@ describe("original retention after transcode", () => {
 		expect(log).toHaveBeenCalledWith(
 			JSON.stringify({ event: "lock.original_retained", videoId: "vid1", key: RAW_KEY }),
 		);
+	});
+
+	it("allows the first transcode of a locked raw (it only creates outputs)", async () => {
+		const { transcode } = setup({ lockedKeys: [RAW_KEY] });
+		expect((await transcode()).status).toBe(200);
+	});
+
+	it("refuses re-transcoding a locked video whose outputs already exist", async () => {
+		const { transcode } = setup({ objects: [RAW_KEY, PLAYLIST_KEY], lockedKeys: [RAW_KEY] });
+		const res = await transcode();
+		expect(res.status).toBe(409);
+		expect(await res.json()).toMatchObject({ code: "retention_active", key: RAW_KEY, hold: true });
+	});
+
+	it("retries a failed first transcode of a locked video, and its runner overwrites the partial outputs", async () => {
+		const { transcode, send, kv } = setup({ objects: [RAW_KEY, PLAYLIST_KEY], lockedKeys: [RAW_KEY] });
+		kv.set("transcode-status:vid1", JSON.stringify({ status: "failed", jobRef: "job-0", updatedAt: 0 }));
+
+		expect((await transcode()).status).toBe(200);
+		// The launch recorded the new job as `queued`: its runner may rewrite the failed job's playlist.
+		const rewrite = await send(`/v1/upload/${PLAYLIST_KEY}`, {
+			method: "PUT",
+			body: "#EXTM3U",
+			headers: { "Content-Type": "application/vnd.apple.mpegurl" },
+		});
+		expect(rewrite.status).toBe(200);
+	});
+
+	it("refuses re-transcoding a locked video whose transcode completed", async () => {
+		const { transcode, kv } = setup({ objects: [RAW_KEY, PLAYLIST_KEY], lockedKeys: [RAW_KEY] });
+		kv.set("transcode-status:vid1", JSON.stringify({ status: "completed", jobRef: "job-0", updatedAt: 0 }));
+		expect((await transcode()).status).toBe(409);
 	});
 
 	it("keeps the raw when retention is on", async () => {

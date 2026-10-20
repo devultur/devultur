@@ -25,6 +25,7 @@ const env = {
 	MEDIA_BUCKET: {
 		get: async () => ({ body: new Response("audio").body, customMetadata: {} }),
 		put: async () => {},
+		head: async () => null,
 	},
 	GROQ_API_KEY: "g",
 	MISTRAL_API_KEY: "m",

@@ -17,6 +17,7 @@ import {
 	parseSecurityHeader,
 	storageKey,
 } from "../helpers";
+import { captionConflictResponse, prepareCaptionWrites } from "../object-lock/caption-writes";
 import { getRequestState } from "../request-state";
 import type {
 	CaptionJobMeta,
@@ -245,7 +246,9 @@ captions.post("/", async (context) => {
 	// The .vtt files live in the same visibility folder as the video (`{visibility}/video/{id}/captions/…`).
 	// Without this prefix they'd get written to `video/{id}/…` and delivery looks them up with visibility → 404.
 	const visibility = visibilityFromKey(body.key) ?? "private";
-	const captionKey = (locale: string) => storageKey(context, `${visibility}/${captionPath(videoId, locale)}`);
+	const captionVirtualKey = (locale: string) => `${visibility}/${captionPath(videoId, locale)}`;
+	const writes = await prepareCaptionWrites(context, body.locales, captionVirtualKey);
+	if ("blocked" in writes) return writes.blocked;
 
 	// The .vtt files are private assets of the video → encrypted at rest if the policy asks for it (same criterion
 	// as the raw/thumbnail). The video's binding override (audio/raw metadata) propagates to the
@@ -254,7 +257,7 @@ captions.post("/", async (context) => {
 	const captionPolicy = resolveSecurity(resourceOverride, scope.config?.security);
 	const encryptCaptions = captionPolicy.encrypt && visibility === "private" && Boolean(context.env.KEYS_BUCKET);
 	const putCaption = async (locale: string, vtt: string) => {
-		const objectKey = captionKey(locale);
+		const objectKey = writes.storageKeyOf(locale);
 		const metadata: Record<string, string> = {};
 		if (resourceOverride) metadata.security = JSON.stringify(resourceOverride);
 		let bodyToStore: string | Uint8Array = vtt;
@@ -268,7 +271,7 @@ captions.post("/", async (context) => {
 			bodyToStore = result.body;
 			metadata.enc = result.enc;
 		}
-		await context.env.MEDIA_BUCKET.put(objectKey, bodyToStore, {
+		await writes.put(locale, bodyToStore, {
 			httpMetadata: { contentType: "text/vtt" },
 			...(Object.keys(metadata).length > 0 ? { customMetadata: metadata } : {}),
 		});
@@ -351,7 +354,8 @@ captions.post("/", async (context) => {
 			} satisfies MediaEvent,
 			webhookData,
 		);
-		return context.json({ error: failure.error, code: failure.code }, failure.status);
+		const conflict = captionConflictResponse(context, err);
+		return conflict ?? context.json({ error: failure.error, code: failure.code }, failure.status);
 	}
 });
 

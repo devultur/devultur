@@ -23,6 +23,7 @@ import {
 	signViewerToken,
 	storageKey,
 } from "../helpers";
+import { assertRetranscodable } from "../object-lock/overwrite";
 import { cappedExpiry, decideCredential, withPluginClaims } from "../plugin-hooks";
 import { getRequestState } from "../request-state";
 import { audienceClaim, scopeClaim } from "../token-claims";
@@ -92,6 +93,8 @@ transcode.post("/", async (context) => {
 	if (!isVideoId(videoId, body.key)) {
 		return context.json({ error: "Invalid key format" }, 400);
 	}
+	const retained = await assertRetranscodable(context, `${visibility}/${videoBasePath(videoId)}`, videoId, object);
+	if (retained) return retained;
 
 	// Preset: the request's (name or inline spec, strictly validated) → the config's default → `hls-720p`.
 	const scope = getRequestState(context);

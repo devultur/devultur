@@ -18,6 +18,8 @@ function setup(rawStorageClass?: RawStorageClass) {
 			delete: async (key: string) => void kv.delete(key),
 		},
 		MEDIA_BUCKET: {
+			// Empty bucket: the lock check finds nothing to overwrite.
+			head: async () => null,
 			put: async (key: string, _value: unknown, options?: R2PutOptions) => {
 				putOptions.set(key, options);
 				return {};

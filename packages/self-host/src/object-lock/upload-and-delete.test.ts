@@ -90,6 +90,89 @@ describe("lock at upload", () => {
 	});
 });
 
+describe("overwrite of a locked object", () => {
+	const GRANT: UploadGrant = { tokenId: "t", pathPrefix: "asset/docs/", visibility: "private" };
+
+	it("refuses `overwrite: true` on a locked asset at POST, before any bytes", async () => {
+		const worker = exportsWorker({ uploadGrant: GRANT });
+		const { key } = await upload(worker, { path: "docs/a.pdf", lock: COMPLIANCE });
+		const res = await worker.postJson("/v1/upload", {
+			filename: "a.pdf",
+			contentType: "application/pdf",
+			path: "docs/a.pdf",
+			overwrite: true,
+		});
+		expect(res.status).toBe(409);
+		expect(await res.json()).toMatchObject({ code: "retention_active", key });
+	});
+
+	it("refuses the PUT when the lock was set after the POST, and creates no encryption key", async () => {
+		const worker = exportsWorker({ uploadGrant: GRANT, security: { encrypt: true } });
+		const { key } = await upload(worker, { path: "docs/b.pdf" });
+		const created = await worker.postJson("/v1/upload", {
+			filename: "b.pdf",
+			contentType: "application/pdf",
+			path: "docs/b.pdf",
+			overwrite: true,
+		});
+		const { uploadUrl } = (await created.json()) as { uploadUrl: string };
+		const stored = worker.mediaBucket.objects.get(`prefix-a/${key}`);
+		if (stored) stored.customMetadata.lock = JSON.stringify({ hold: true });
+		const keyCount = worker.keysBucket.objects.size;
+
+		const res = await worker.send(uploadUrl, {
+			method: "PUT",
+			body: BYTES,
+			headers: { "Content-Type": "application/pdf" },
+		});
+
+		expect(res.status).toBe(409);
+		expect(await res.json()).toMatchObject({ code: "retention_active", hold: true });
+		expect(worker.keysBucket.objects.size).toBe(keyCount);
+	});
+
+	// The race the conditional put closes: the object changes between the guard's check and the write (here, a lock
+	// lands in that window). R2 refuses the put; the Worker answers 409 `write_conflict` rather than retrying, and
+	// deletes the encryption key it had created for the refused attempt. The client retries and gets the current answer.
+	it("answers 409 write_conflict when the object changes between the check and the put", async () => {
+		const worker = exportsWorker({ uploadGrant: GRANT, security: { encrypt: true } });
+		const { key } = await upload(worker, { path: "docs/c.pdf" });
+		const created = await worker.postJson("/v1/upload", {
+			filename: "c.pdf",
+			contentType: "application/pdf",
+			path: "docs/c.pdf",
+			overwrite: true,
+		});
+		const { uploadUrl } = (await created.json()) as { uploadUrl: string };
+		const keysBefore = [...worker.keysBucket.objects.keys()];
+		const bucket = worker.env.MEDIA_BUCKET as unknown as { put: (...args: unknown[]) => Promise<unknown> };
+		const realPut = bucket.put;
+		bucket.put = async (...args) => {
+			bucket.put = realPut;
+			await realPut(`prefix-a/${key}`, "locked meanwhile", { customMetadata: { lock: '{"hold":true}' } });
+			return realPut(...args);
+		};
+
+		const res = await worker.send(uploadUrl, {
+			method: "PUT",
+			body: BYTES,
+			headers: { "Content-Type": "application/pdf" },
+		});
+
+		expect(res.status).toBe(409);
+		expect(await res.json()).toMatchObject({ code: "write_conflict", key });
+		expect(worker.mediaBucket.objects.get(`prefix-a/${key}`)?.customMetadata.lock).toBe('{"hold":true}');
+		expect([...worker.keysBucket.objects.keys()]).toEqual(keysBefore);
+	});
+
+	it("still overwrites an unlocked asset", async () => {
+		const worker = exportsWorker({ uploadGrant: GRANT });
+		await upload(worker, { path: "docs/d.pdf" });
+		const again = await upload(worker, { path: "docs/d.pdf", overwrite: true });
+		expect(again.status).toBe(200);
+	});
+});
+
 describe("delete of a locked object", () => {
 	it("answers 409 retention_active and keeps the object and its keys", async () => {
 		const worker = exportsWorker({ security: { encrypt: true } });
