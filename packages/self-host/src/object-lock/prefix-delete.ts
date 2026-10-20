@@ -1,7 +1,8 @@
 // Deleting a whole storage prefix from a Worker's own code (an app's teardown, a sweeper for expired files) without
 // destroying retained files. What it deletes, it deletes the way `DELETE /v1/media/…` does: the object, its encryption
 // keys no newer than it (an upload in flight keeps its own) and its variants'; a video folder left empty also loses the
-// rest of its keys written before the call started (the HLS key) and its transcode-completed marker. What's locked
+// rest of its keys written before the call started (the HLS key) and its transcode-completed marker, when the whole
+// folder is under the prefix. What's locked
 // stays, with its keys, variants and lock record. Lock records of deleted objects stay too, inert: they're bound to
 // the deleted versions. Lock records, audit objects and keys not laid out like the Worker's are never deleted.
 //
@@ -30,7 +31,11 @@ import {
 } from "./prefix-walk";
 import { forgetTranscodeCompleted } from "./transcode-marker";
 
-export interface PrefixDeleteOptions extends PrefixWalkOptions {
+/**
+ * No `now`: locks are judged by the real clock, so no caller can make a retention read as expired. (The read-only
+ * `readObjectLock` and `retainedSummary` take one, to ask "what about then?".)
+ */
+export interface PrefixDeleteOptions extends Omit<PrefixWalkOptions, "now"> {
 	/** The Worker's `KEYS_BUCKET`, when it has one: the encryption keys of what's deleted go too. */
 	keysBucket?: R2Bucket;
 }
@@ -81,8 +86,9 @@ export async function deletePrefixRespectingLocks(options: PrefixDeleteOptions):
 	const budget = subrequestBudget(options.maxSubrequests ?? DEFAULT_MAX_SUBREQUESTS);
 	const mediaBucket = budget.track(options.mediaBucket);
 	const keysBucket = options.keysBucket ? budget.track(options.keysBucket) : undefined;
-	const resolveLock = lockResolver(mediaBucket, options.now ?? startedAt);
-	const start = decodeCursor(options.cursor);
+	// Never a `now` from the options (a JavaScript caller could still pass one): the clock is the real one.
+	const resolveLock = lockResolver(mediaBucket, startedAt);
+	const start = decodeCursor(options.cursor, options);
 	const result: PrefixDeleteResult = {
 		deletedCount: 0,
 		deletedBytes: 0,
@@ -116,7 +122,9 @@ export async function deletePrefixRespectingLocks(options: PrefixDeleteOptions):
 	};
 
 	const enterFolder = async (place: ObjectPlace): Promise<OpenFolder | null> => {
-		const folder = VIDEO_FOLDER.exec(place.key)?.[1];
+		const videoFolder = VIDEO_FOLDER.exec(place.key)?.[1];
+		// A folder reaching outside the prefix is never closed: its other keys aren't this call's to delete.
+		const folder = videoFolder && `${place.root}${videoFolder}/`.startsWith(options.prefix) ? videoFolder : undefined;
 		if (openFolder && openFolder.root === place.root && openFolder.folder === folder) return openFolder;
 		await closeFolder();
 		openFolder = folder ? { root: place.root, folder, hasDeleted: false, hasRetained: false } : null;
@@ -166,6 +174,6 @@ export async function deletePrefixRespectingLocks(options: PrefixDeleteOptions):
 	assertProgress(walk.hasProgressed || hasClosed || isFinished);
 	const cursor = isFinished
 		? undefined
-		: encodeCursor({ ...walk.position, ...(pendingFolder ? { folder: pendingFolder } : {}) });
+		: encodeCursor(options.prefix, { ...walk.position, ...(pendingFolder ? { folder: pendingFolder } : {}) });
 	return { ...result, ...(cursor ? { cursor } : {}), subrequests: budget.used };
 }

@@ -75,17 +75,59 @@ export interface WalkCursor extends WalkPosition {
 	folder?: PendingFolder;
 }
 
-export function encodeCursor(cursor: WalkCursor): string {
-	return btoa(JSON.stringify(cursor));
+/** A cursor is bound to the prefix it was returned for: `{ prefix, after?, listCursor?, folder? }`, base64 JSON. */
+export function encodeCursor(prefix: string, cursor: WalkCursor): string {
+	return btoa(JSON.stringify({ prefix, ...cursor }));
 }
 
-export function decodeCursor(cursor: string | undefined): WalkCursor {
-	if (cursor === undefined) return {};
+const VIDEO_FOLDER_SHAPE = /^(?:public|private)\/video\/[^/]+$/;
+
+function invalidCursor(reason: string): never {
+	throw new RangeError(`cursor isn't one this function returned for this prefix: ${reason}`);
+}
+
+function parseCursor(cursor: string): Record<string, unknown> {
 	try {
-		const decoded = JSON.parse(atob(cursor)) as WalkCursor;
-		if (typeof decoded === "object" && decoded !== null) return decoded;
+		const parsed: unknown = JSON.parse(atob(cursor));
+		if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed))
+			return parsed as Record<string, unknown>;
 	} catch {}
-	throw new RangeError("cursor isn't one this function returned");
+	return invalidCursor("not a cursor");
+}
+
+const isOptionalString = (value: unknown) => value === undefined || typeof value === "string";
+
+/** A pending folder must be a video folder under `prefix`, at a storage prefix the walk itself would read. */
+function validFolder(value: unknown, options: Pick<PrefixWalkOptions, "prefix" | "root">): PendingFolder | undefined {
+	if (value === undefined) return undefined;
+	const { root, folder } = (typeof value === "object" && value !== null ? value : {}) as Record<string, unknown>;
+	if (typeof root !== "string" || typeof folder !== "string" || !VIDEO_FOLDER_SHAPE.test(folder)) {
+		return invalidCursor("folder");
+	}
+	const folderPrefix = `${root}${folder}/`;
+	const place = placeOfStorageKey(`${folderPrefix}x`, options.root);
+	const isPlaced = place.kind === "object" && place.root === root;
+	if (!isPlaced || !folderPrefix.startsWith(options.prefix)) return invalidCursor("folder outside the prefix");
+	return { root, folder };
+}
+
+/** Reads a cursor this module returned for `options.prefix`; anything else throws `RangeError` before any call. */
+export function decodeCursor(
+	cursor: string | undefined,
+	options: Pick<PrefixWalkOptions, "prefix" | "root">,
+): WalkCursor {
+	if (cursor === undefined) return {};
+	const { prefix, after, listCursor, folder } = parseCursor(cursor);
+	if (prefix !== options.prefix) return invalidCursor("another prefix");
+	if (!isOptionalString(after) || !isOptionalString(listCursor)) return invalidCursor("position");
+	if (typeof after === "string" && !after.startsWith(options.prefix))
+		return invalidCursor("position outside the prefix");
+	const pendingFolder = validFolder(folder, options);
+	return {
+		...(typeof after === "string" ? { after } : {}),
+		...(typeof listCursor === "string" ? { listCursor } : {}),
+		...(pendingFolder ? { folder: pendingFolder } : {}),
+	};
 }
 
 export interface WalkedObject {
@@ -122,6 +164,9 @@ export async function walkPrefix(
 			if (error instanceof BudgetExhausted) return stopped();
 			throw error;
 		}
+		// The whole page is checked before any of it is visited: a key outside the prefix means a listing nobody asked for.
+		const stray = listing.objects.find((listed) => !listed.key.startsWith(options.prefix));
+		if (stray) throw new RangeError(`listing returned ${stray.key}, outside the prefix ${options.prefix}`);
 		for (const listed of listing.objects) {
 			try {
 				await visit({ listed, place: placeOfStorageKey(listed.key, options.root) });

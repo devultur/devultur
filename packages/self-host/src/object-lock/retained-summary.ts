@@ -60,8 +60,8 @@ export async function retainedSummary(options: PrefixWalkOptions): Promise<Retai
 		if (lock.until && (!summary.latestUntil || lock.until > summary.latestUntil)) summary.latestUntil = lock.until;
 	};
 
-	const walk = await walkPrefix(options, mediaBucket, decodeCursor(options.cursor), visit);
+	const walk = await walkPrefix(options, mediaBucket, decodeCursor(options.cursor, options), visit);
 	assertProgress(walk.hasProgressed || walk.isDone);
-	const cursor = walk.isDone ? undefined : encodeCursor(walk.position);
+	const cursor = walk.isDone ? undefined : encodeCursor(options.prefix, walk.position);
 	return { ...summary, ...(cursor ? { cursor } : {}), subrequests: budget.used };
 }

@@ -357,7 +357,12 @@ do {
 - **What goes.** A free object goes the way `DELETE /v1/media/<key>` deletes it: with its encryption keys in
   `KEYS_BUCKET` (except those of an upload in flight over it) and its variants'. A video folder left empty also loses
   the rest of its keys written before the call started (the HLS key) and its transcode-completed marker, as with
-  `DELETE /v1/media/videos/<id>`. `deletedBytes` adds up the sizes of the versions deleted.
+  `DELETE /v1/media/videos/<id>`, when the whole folder is under the prefix. `deletedBytes` adds up the sizes of the
+  versions deleted.
+- **Real time only.** The delete takes no `now`: locks are judged by the real clock, so no option can make a retention
+  read as expired. `readObjectLock` and `retainedSummary` take a `now`, to ask what's retained at another time.
+- **Cursors are bound to their prefix.** A cursor works only with the `prefix` it was returned for. One that's
+  malformed, from another prefix, or pointing outside it throws a `RangeError` before any bucket call.
 - **What stays.** Retained files, with their variants, keys and lock records. The lock records of deleted files stay
   too, inert, as with the routes. Nothing under `__lock/` or `__lock-audit/` is touched: once a storage prefix has
   nothing retained left, delete those yourself if you're tearing it down.
@@ -373,7 +378,7 @@ do {
   trail. R2 deletes aren't conditional: a lock set between an object's check and its delete isn't seen. That gap is
   milliseconds for the object's own lock, and up to 5 seconds for an inherited one (see [Caveats](#caveats)).
 
-`retainedSummary({ mediaBucket, prefix, cursor? })` answers "can this be deleted?" without deleting anything:
+`retainedSummary({ mediaBucket, prefix, cursor?, now? })` answers "can this be deleted?" without deleting anything:
 `{ scannedCount, retainedCount, retainedBytes, latestUntil?, hasHold, cursor?, subrequests }`, with the same bounds.
 Add up the counts of each call. With `hasHold`, something stays until it's released, not until `latestUntil`.
 
