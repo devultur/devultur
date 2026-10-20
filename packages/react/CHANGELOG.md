@@ -1,5 +1,12 @@
 # @devultur/react
 
+## 1.0.3
+
+### Patch Changes
+
+- Updated dependencies [[`1f6cc5a`](https://github.com/devultur/devultur/commit/1f6cc5a6982aed728b1e8c1b1d8299e7bf7e6252)]:
+  - @devultur/core@1.0.3
+
 ## 1.0.2
 
 ### Patch Changes
