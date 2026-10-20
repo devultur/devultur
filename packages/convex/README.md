@@ -149,7 +149,9 @@ are rethrown unchanged.
 
 These are server-side calls: `exposeApi` never lets a browser choose or change a lock. Its `createUploadUrl` applies
 `config.upload.lock` instead. A bulk hold by prefix runs on your server with `@devultur/core`'s
-`createWorkerClient(...).lock.holdAll({ prefix })`.
+`createWorkerClient(...).lock.holdAll({ prefix })`. The
+[Retention and holds](https://github.com/devultur/devultur/blob/main/docs/guides/object-lock.md) guide covers the model,
+what's enforced and the caveats.
 
 ## Documentation
 

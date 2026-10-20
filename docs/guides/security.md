@@ -77,3 +77,9 @@ bucket_name = "devultur-media-keys"
 
 Per-resource overrides travel in the object metadata (set on upload, read on delivery) and resolve
 against the Worker default — exactly like `visibility`.
+
+## Retention and holds
+
+To keep a file from being deleted or overwritten (WORM), lock it with a compliance or governance retention, or a
+hold. Deleting a locked file's encryption keys is refused too, since that destroys the file just the same. See
+[Retention and holds](object-lock.md).

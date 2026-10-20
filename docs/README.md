@@ -14,8 +14,11 @@ package's source.
 - [Video player](guides/video-player.md)
 - [Progress tracking](guides/progress-tracking.md)
 - [Security](guides/security.md)
+- [Retention and holds](guides/object-lock.md): compliance and governance retention, holds, audit, and the
+  caveats
 - [Framework examples](guides/framework-examples.md)
-- [Convex component with a self-hosted Worker](../packages/convex/README.md#using-a-self-hosted-worker)
+- [Convex component with a self-hosted Worker](../packages/convex/README.md#using-a-self-hosted-worker), its
+  [errors](../packages/convex/README.md#errors) and [object lock](../packages/convex/README.md#object-lock)
 
 ## React
 

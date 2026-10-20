@@ -114,6 +114,7 @@ export const media = createMediaRouter({
 | `DELETE /v1/media/…`, `GET /v1/assets` | Worker secret |
 | `/v1/transcode`, `/v1/captions` | Worker secret |
 | `POST /v1/token`, `/v1/token/upload`, `/v1/token/download` | Worker secret |
+| `GET`/`PUT /v1/lock/<key>`, `POST /v1/lock/hold` | Worker secret ([Retention and holds](object-lock.md)) |
 | `GET`/`HEAD /v1/media/…` | Public media is open. Private media needs a viewer token from `POST /v1/token`, or the Worker secret. |
 | `GET /v1/download/<id>` | The link id is the credential (single use) |
 | `POST /v1/webhooks/transcode` | `TRANSCODE_WEBHOOK_SECRET` |
@@ -152,10 +153,11 @@ export default createWorker({
 | `cacheRules` | `Cache-Control` per prefix of the `asset/` namespace |
 | `originalStorageClass` | R2 storage class of an uploaded video original (`Standard` or `InfrequentAccess`) |
 | `maxFileLifetimeSeconds` | Longest lifetime of an uploaded file, in seconds: the default TTL and a ceiling (a shorter `expiresIn` still wins). For a demo or scratch Worker whose uploads clean themselves up. |
-| `uploadMetadata` | String map added to the R2 `customMetadata` of every uploaded object (for example which app uploaded it). Keys the Worker owns (`security`, `enc`, `expiresAt`, `derivedFrom`, `sha256*`) are dropped. |
+| `uploadMetadata` | String map added to the R2 `customMetadata` of every uploaded object (for example which app uploaded it). Keys the Worker owns (`security`, `enc`, `expiresAt`, `derivedFrom`, `lock`, `sha256*`) are dropped. |
+| `lock` | Default lock of an uploaded file: retention and hold (see [Retention and holds](object-lock.md)). An upload or its upload token overrides it. |
 | `transcode.presets` | Named presets and the default one, used when a request names no preset |
 | `transcode.maxResolution` | Highest rung of the HLS ladder (`720p`, `1080p`, `4k`) |
-| `transcode.deleteOriginalOnSuccess` | Delete the original once a transcode completes. It's never deleted after a failure. |
+| `transcode.deleteOriginalOnSuccess` | Delete the original once a transcode completes. It's never deleted after a failure, nor while it's [locked](object-lock.md#transcoding-a-locked-video). |
 | `transcode.outputBaseUrl` | Base of the output URLs in your webhook. Unset: the origin of the transcode request. |
 
 A plugin can narrow these rules per request, for example to give each of your apps its own storage prefix,
