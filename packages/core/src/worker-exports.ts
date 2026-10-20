@@ -3,6 +3,7 @@
 // download links, and server-side streaming without exposing credentials.
 import { errorFromResponse } from "./api-error";
 import { EXPIRES_AT_HEADER, SHA256_HEADER, SHA256_VERIFIED_HEADER } from "./integrity";
+import type { ObjectLock } from "./lock";
 import type { Visibility } from "./media";
 import { type CapabilityUploadResult, shouldUseMultipart, uploadMultipart } from "./multipart";
 
@@ -19,6 +20,8 @@ export interface CreateUploadTokenOptions {
 	fileExpiresIn?: number;
 	/** Visibility of the token's files (default `private`). */
 	visibility?: Visibility;
+	/** Minimum lock of every file uploaded with the token: an upload can make it stricter, never looser. */
+	lock?: ObjectLock;
 }
 
 export interface UploadToken {
@@ -49,6 +52,10 @@ export interface UploadAssetOptions {
 	 * config's per-prefix rule, or `public, max-age=60, stale-while-revalidate=86400`.
 	 */
 	cacheControl?: string;
+	/** Lock of the file (retention and/or hold), written with its bytes. */
+	lock?: ObjectLock;
+	/** Shorthand for `lock.hold`. */
+	hold?: boolean;
 	/** Parts in flight at once in a multipart upload (default 4). */
 	concurrency?: number;
 	onProgress?: (percent: number) => void;
@@ -169,6 +176,8 @@ export function createUploadsClient(base: string, request: JsonRequest): Uploads
 					overwrite: options.overwrite,
 					visibility: options.visibility,
 					cacheControl: options.cacheControl,
+					lock: options.lock,
+					hold: options.hold,
 				}),
 			});
 			const uploadUrl = `${base}${created.uploadUrl}`;

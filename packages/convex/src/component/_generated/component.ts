@@ -23,6 +23,44 @@ import type { FunctionReference } from "convex/server";
  */
 export type ComponentApi<Name extends string | undefined = string | undefined> =
   {
+    lock: {
+      getLock: FunctionReference<
+        "action",
+        "internal",
+        { key: string },
+        any,
+        Name
+      >;
+      releaseHold: FunctionReference<
+        "action",
+        "internal",
+        { keys: Array<string> },
+        any,
+        Name
+      >;
+      setHold: FunctionReference<
+        "action",
+        "internal",
+        { keys: Array<string> },
+        any,
+        Name
+      >;
+      setLock: FunctionReference<
+        "action",
+        "internal",
+        {
+          bypassGovernance?: boolean;
+          derivatives?: "inherit" | "original-only";
+          key: string;
+          mode?: "governance" | "compliance";
+          period?: number;
+          remove?: true;
+          until?: string;
+        },
+        any,
+        Name
+      >;
+    };
     public: {
       createMedia: FunctionReference<
         "mutation",
@@ -43,6 +81,16 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         {
           contentType: string;
           filename: string;
+          hold?: boolean;
+          lock?: {
+            hold?: boolean;
+            retention?: {
+              derivatives?: "inherit" | "original-only";
+              mode: "governance" | "compliance";
+              period?: number;
+              until?: string;
+            };
+          };
           visibility?: "public" | "private";
         },
         any,

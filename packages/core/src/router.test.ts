@@ -50,6 +50,15 @@ describe("router createUploadUrl (direct storage) — path parity", () => {
 		expect(opts.contentDisposition).toContain("filename*=UTF-8''Mi%20V%C3%ADdeo%20%231.png");
 	});
 
+	it("refuses a lock: a presigned PUT to the bucket can't enforce one", async () => {
+		createUploadUrlSpy.mockClear();
+		const router = createMediaRouter({ storage: storageConfig, image: image({ maxSize: "10MB" }) });
+		await expect(router.createUploadUrl({ filename: "a.png", contentType: "image/png", hold: true })).rejects.toThrow(
+			/needs a media worker/,
+		);
+		expect(createUploadUrlSpy).not.toHaveBeenCalled();
+	});
+
 	it("sends the video raw to Infrequent Access (S3 value STANDARD_IA)", async () => {
 		createUploadUrlSpy.mockClear();
 		const router = createMediaRouter({

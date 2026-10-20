@@ -240,6 +240,7 @@ export type {
 	TranscodeJobResult,
 	TranscodeOptions,
 	TranscodeStatusResult,
+	UploadFileOptions,
 	UploadFileResult,
 	WorkerClient,
 	WorkerTransport,
@@ -257,3 +258,5 @@ export type {
 	UploadsClient,
 	UploadToken,
 } from "./worker-exports";
+export type { HoldPage, HoldSkip, HoldTarget, LockClient, LockView, SetLockOptions } from "./worker-lock";
+export { createLockClient, HOLD_PAGE_SIZE } from "./worker-lock";

@@ -1,20 +1,12 @@
 import type { WorkerClient } from "@devultur/core";
-import {
-	createWorkerClient,
-	DEFAULT_TOKEN_EXPIRY_SECONDS,
-	extractId,
-	MediaEventName,
-	MediaStatus,
-} from "@devultur/core";
+import { DEFAULT_TOKEN_EXPIRY_SECONDS, extractId, MediaEventName, MediaStatus } from "@devultur/core";
 import { v } from "convex/values";
 import { api, internal } from "./_generated/api";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { action, env, internalMutation, mutation, query } from "./_generated/server";
+import { action, internalMutation, mutation, query } from "./_generated/server";
+import { objectLockValidator } from "./lockValidators";
+import { getMediaClient } from "./mediaClient";
 import { transcodeOutputFields } from "./schema";
-
-function getMediaClient(): WorkerClient {
-	return createWorkerClient(env.DEVULTUR_SECRET, env.DEVULTUR_API_URL);
-}
 
 // Webhook path RELATIVE to the component. Convex gives the component a `CONVEX_SITE_URL` that ALREADY
 // includes its mount prefix (e.g. `${site}/devultur`), so `${CONVEX_SITE_URL}/webhook` resolves to the
@@ -55,6 +47,9 @@ export const createUploadUrl = action({
 		filename: v.string(),
 		contentType: v.string(),
 		visibility: v.optional(v.union(v.literal("public"), v.literal("private"))),
+		/** Lock of the new file (retention and/or hold), written with its bytes. */
+		lock: v.optional(objectLockValidator),
+		hold: v.optional(v.boolean()),
 	},
 	handler: async (_ctx, args) => {
 		const media = getMediaClient();
