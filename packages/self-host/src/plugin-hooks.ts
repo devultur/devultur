@@ -1,6 +1,8 @@
 // Plugin hooks: decisions plugins take at fixed points of a route, with the request's context. `createWorker()` runs
 // the hooks of every plugin in order and hands the composed result to the routes through a context variable.
+import type { ObjectLock } from "@devultur/core";
 import type { Context } from "hono";
+import type { LockAuditRecord } from "./object-lock/audit";
 import type { Json } from "./request-state";
 import type { DownloadLinkInfo } from "./route-result";
 
@@ -42,19 +44,47 @@ export type BeforeLinkRedeemHook = (
 	link: DownloadLinkInfo,
 ) => Response | null | Promise<Response | null>;
 
+/** What a lock change does: `set` a first (or expired) retention, `extend` it, `shorten` or `remove` it. */
+export type LockChangeAction = "set" | "extend" | "shorten" | "remove";
+
+export interface LockChangeRequest {
+	action: LockChangeAction;
+	/** The virtual keys it changes. */
+	keys: string[];
+	before: ObjectLock | null;
+	after: ObjectLock | null;
+}
+
+export type LockChangeDecision = { allow: false; response: Response } | { allow: true };
+
+/**
+ * Before the Worker changes a lock. Refuse with a response, or allow. Approving a governance `shorten`/`remove` asked
+ * with `bypassGovernance` takes at least one of these hooks, and all of them must allow it (decision 4 of #3).
+ */
+export type AuthorizeLockChangeHook = (
+	context: AnyContext,
+	request: LockChangeRequest,
+) => LockChangeDecision | Promise<LockChangeDecision>;
+
+/** After a lock event (change, rejected delete or overwrite, retained original), to store the record elsewhere. */
+export type OnLockAuditHook = (context: AnyContext, record: LockAuditRecord) => void | Promise<void>;
+
 /** The hooks of every plugin, in plugin order. */
 export interface PluginHooks {
 	issueCredential: IssueCredentialHook[];
 	beforeLinkRedeem: BeforeLinkRedeemHook[];
+	authorizeLockChange: AuthorizeLockChangeHook[];
+	onLockAudit: OnLockAuditHook[];
 }
 
 /** Context variable that carries the hooks to the routes. Internal. */
 export const PLUGIN_HOOKS_VARIABLE = "pluginHooks";
 
-const NO_HOOKS: PluginHooks = { issueCredential: [], beforeLinkRedeem: [] };
+const NO_HOOKS: PluginHooks = { issueCredential: [], beforeLinkRedeem: [], authorizeLockChange: [], onLockAudit: [] };
 
 export function getPluginHooks(context: AnyContext): PluginHooks {
-	return (context.get(PLUGIN_HOOKS_VARIABLE) as PluginHooks | undefined) ?? NO_HOOKS;
+	// Merged over the empty set: a mount that only provides some hooks (a test, an older composer) still works.
+	return { ...NO_HOOKS, ...(context.get(PLUGIN_HOOKS_VARIABLE) as Partial<PluginHooks> | undefined) };
 }
 
 const earliest = (current: number | undefined, next: number | undefined) =>
@@ -83,6 +113,22 @@ export async function gateLinkRedemption(context: AnyContext, link: DownloadLink
 		if (refusal) return refusal;
 	}
 	return null;
+}
+
+/**
+ * Runs the `authorizeLockChange` hooks in plugin order: the first refusal wins. `isApproved`: at least one hook ran and
+ * all allowed, which is what a governance bypass needs. No hook: allowed, but not approved.
+ */
+export async function decideLockChange(
+	context: AnyContext,
+	request: LockChangeRequest,
+): Promise<{ allow: false; response: Response } | { allow: true; isApproved: boolean }> {
+	const hooks = getPluginHooks(context).authorizeLockChange;
+	for (const hook of hooks) {
+		const decision = await hook(context, request);
+		if (!decision.allow) return decision;
+	}
+	return { allow: true, isApproved: hooks.length > 0 };
 }
 
 /** Earliest of a requested expiry and the plugins' cap, in the unit of `requested` (`toUnit` converts the cap). */

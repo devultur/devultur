@@ -279,6 +279,8 @@ describe("single-use download links", () => {
 		const seen: DownloadLinkInfo[] = [];
 		const pluginHooks: PluginHooks = {
 			issueCredential: [],
+			authorizeLockChange: [],
+			onLockAudit: [],
 			beforeLinkRedeem: [
 				async (_context, link) => {
 					seen.push(link);

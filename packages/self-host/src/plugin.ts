@@ -1,7 +1,13 @@
 // Plugins: how the Worker is extended, and how it is built. `createWorker({ plugins })` composes them; the default ones
 // (worker-secret auth, static config, credential policy, download links) use the same API as any plugin of yours.
 import type { Hono, MiddlewareHandler } from "hono";
-import type { BeforeLinkRedeemHook, IssueCredentialHook, PluginHooks } from "./plugin-hooks";
+import type {
+	AuthorizeLockChangeHook,
+	BeforeLinkRedeemHook,
+	IssueCredentialHook,
+	OnLockAuditHook,
+	PluginHooks,
+} from "./plugin-hooks";
 
 // biome-ignore lint/suspicious/noExplicitAny: a plugin's middleware and routes type their own bindings and variables
 type AnyMiddleware = MiddlewareHandler<any>;
@@ -36,6 +42,10 @@ export interface WorkerPlugin {
 	issueCredential?: IssueCredentialHook;
 	/** Before `GET /v1/download/{id}` spends a use of a link that still has one. */
 	beforeLinkRedeem?: BeforeLinkRedeemHook;
+	/** Before `PUT /v1/lock` changes a lock: refuse it, or approve a governance bypass. */
+	authorizeLockChange?: AuthorizeLockChangeHook;
+	/** After every lock event, with its audit record. Runs after the response. */
+	onLockAudit?: OnLockAuditHook;
 }
 
 export interface ComposedPlugins {
@@ -67,6 +77,10 @@ export function composePlugins(plugins: readonly WorkerPlugin[]): ComposedPlugin
 		hooks: {
 			issueCredential: plugins.flatMap((plugin) => (plugin.issueCredential ? [plugin.issueCredential] : [])),
 			beforeLinkRedeem: plugins.flatMap((plugin) => (plugin.beforeLinkRedeem ? [plugin.beforeLinkRedeem] : [])),
+			authorizeLockChange: plugins.flatMap((plugin) =>
+				plugin.authorizeLockChange ? [plugin.authorizeLockChange] : [],
+			),
+			onLockAudit: plugins.flatMap((plugin) => (plugin.onLockAudit ? [plugin.onLockAudit] : [])),
 		},
 	};
 }

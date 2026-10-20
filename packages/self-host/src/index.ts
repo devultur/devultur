@@ -9,6 +9,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { rejectReservedLockPaths } from "./object-lock/guard";
+import { lockRoute } from "./object-lock/lock-route";
 import { composePlugins, type WorkerPlugin } from "./plugin";
 import { PLUGIN_HOOKS_VARIABLE } from "./plugin-hooks";
 import { defaultPlugins } from "./plugins";
@@ -26,16 +27,24 @@ export { deletePrefix, hashKey, isServiceToken, storageKey, verifyViewerToken } 
 export { imageOriginAuthorization, isImageOriginRequest, readImageOriginScope } from "./image/cloudflare";
 export { type ImageTransformParams, parseTransformParams } from "./image/params";
 export { isVariantKey, variantPrefix } from "./image/transform-plan";
+export { LOCK_AUDIT_PREFIX, type LockAuditAction, type LockAuditRecord } from "./object-lock/audit";
+export { LOCK_HOLD_HEADER, LOCK_UNTIL_HEADER } from "./object-lock/delivery";
 export { RESERVED_LOCK_PREFIXES } from "./object-lock/guard";
+export { LOCK_SIDECAR_PREFIX, type LockSidecar, type LockSource } from "./object-lock/sidecar";
 export { LOCK_METADATA_KEY } from "./object-lock/state";
 export type { ComposedPlugins, PluginMiddleware, PluginRoute, WorkerPlugin } from "./plugin";
 export type {
 	AllowedCredential,
+	AuthorizeLockChangeHook,
 	BeforeLinkRedeemHook,
 	CredentialDecision,
 	CredentialKind,
 	CredentialRequest,
 	IssueCredentialHook,
+	LockChangeAction,
+	LockChangeDecision,
+	LockChangeRequest,
+	OnLockAuditHook,
 } from "./plugin-hooks";
 export {
 	type CredentialPolicyOptions,
@@ -130,6 +139,7 @@ export function createWorker(options?: CreateWorkerOptions) {
 	app.route("/v1/transcode", transcode);
 	app.route("/v1/captions", captions);
 	app.route("/v1/token", token);
+	app.route("/v1/lock", lockRoute);
 	for (const route of routes) app.route(route.path, route.app);
 
 	app.notFound((c) => c.json({ error: "Not found" }, 404));

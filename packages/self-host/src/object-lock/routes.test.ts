@@ -1,48 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { memoryBucket } from "../exports-test-harness";
 import { KvPrefix } from "../helpers";
 import { createWorker } from "../index";
-import { WORKER_SECRETS, withWorkerAuth } from "../plugins/worker-secret-auth-test-env";
+import { CAPTION_KEY, type LockedFixture, lockedFixture, MP4_KEY, RAW_KEY } from "./worker-fixture";
 
-// Every route of `createWorker()` that can change stored bytes must go through the lock guard. This test lists each
-// PUT/POST/DELETE route and says why it's safe: a new route fails here until someone classifies it.
-const RAW_KEY = "private/video/vid1/raw/clip.mp4";
-const CAPTION_KEY = "private/video/vid1/captions/en.vtt";
-const MP4_KEY = "private/video/vid1/mp4/main-720p.mp4";
-
-type Fixture = ReturnType<typeof lockedFixture>;
+// Every route of `createWorker()` that can change stored bytes (or a lock) must go through the lock guard. This test
+// lists each PUT/POST/DELETE route and says why it's safe: a new route fails here until someone classifies it.
+type Fixture = LockedFixture;
 
 type Classification = { guarded: (fixture: Fixture) => Promise<void> } | { nonDestructive: string };
-
-function lockedFixture() {
-	const mediaBucket = memoryBucket();
-	const keysBucket = memoryBucket();
-	const kv = new Map<string, string>();
-	const lock = JSON.stringify({ retention: { mode: "compliance", until: "2999-01-01T00:00:00Z" }, hold: false });
-	mediaBucket.objects.set(RAW_KEY, { bytes: new Uint8Array(4), httpMetadata: {}, customMetadata: { lock } });
-	mediaBucket.objects.set(CAPTION_KEY, { bytes: new Uint8Array(4), httpMetadata: {}, customMetadata: {} });
-	mediaBucket.objects.set(MP4_KEY, { bytes: new Uint8Array(4), httpMetadata: {}, customMetadata: {} });
-	keysBucket.objects.set(`${RAW_KEY}/key-1`, { bytes: new Uint8Array(4), httpMetadata: {}, customMetadata: {} });
-	const env = {
-		...WORKER_SECRETS,
-		DELIVERY_SIGN_SECRET: "delivery",
-		MEDIA_BUCKET: mediaBucket,
-		KEYS_BUCKET: keysBucket,
-		MEDIA_KV: {
-			get: async (key: string, type?: string) => {
-				const value = kv.get(key) ?? null;
-				return type === "json" && value ? JSON.parse(value) : value;
-			},
-			put: async (key: string, value: string) => void kv.set(key, value),
-			delete: async (key: string) => void kv.delete(key),
-		},
-	};
-	const app = createWorker();
-	const send = (path: string, init?: RequestInit) =>
-		app.request(`https://media.example${path}`, withWorkerAuth(init), env as never, { waitUntil() {} } as never);
-	const isIntact = () => mediaBucket.objects.has(RAW_KEY) && keysBucket.objects.has(`${RAW_KEY}/key-1`);
-	return { send, kv, mediaBucket, keysBucket, isIntact };
-}
 
 async function expectRetentionActive(response: Response, verb = "deleted"): Promise<void> {
 	expect(response.status).toBe(409);
@@ -127,7 +92,13 @@ const ROUTES: Record<string, Classification> = {
 		},
 	},
 	"POST /v1/transcode": {
-		guarded: async ({ send, keysBucket }) => {
+		guarded: async ({ send, keysBucket, mediaBucket }) => {
+			// The video already finished a transcode (durable marker): a new one would overwrite retained outputs.
+			mediaBucket.objects.set("__lock/private/video/vid1/transcode-completed", {
+				bytes: new Uint8Array(1),
+				httpMetadata: {},
+				customMetadata: {},
+			});
 			const keyCount = keysBucket.objects.size;
 			const res = await send("/v1/transcode", { method: "POST", body: JSON.stringify({ key: RAW_KEY }) });
 			// Refused before the runner launches or the HLS key is written: it would overwrite retained outputs.
@@ -150,6 +121,17 @@ const ROUTES: Record<string, Classification> = {
 			const fresh = await captions(["fr"]);
 			expect(fresh.status).not.toBe(409);
 			expect(fetchSpy).toHaveBeenCalled();
+		},
+	},
+	"PUT /v1/lock/:key{.+}": {
+		guarded: async ({ send }) => {
+			// Compliance only extends: an earlier date is refused like a delete would be.
+			const res = await send(`/v1/lock/${RAW_KEY}`, {
+				method: "PUT",
+				body: JSON.stringify({ until: "2998-01-01T00:00:00Z" }),
+			});
+			expect(res.status).toBe(409);
+			expect(await res.json()).toMatchObject({ code: "compliance_extend_only", key: RAW_KEY });
 		},
 	},
 	"POST /v1/token": { nonDestructive: "signs a viewer token" },

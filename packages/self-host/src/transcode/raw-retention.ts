@@ -2,10 +2,12 @@
 // runner's webhook arrives without the request's config); on receiving `transcode.complete` it's deleted if that
 // was requested. A `transcode.failed` never touches it: without the raw there's no possible retry.
 import { isVideoRawKey } from "@devultur/core";
+import type { Context } from "hono";
 import { deletePrefix, KV_JOB_TTL_SECONDS, KvPrefix } from "../helpers";
 import { recordLockAudit } from "../object-lock/audit";
-import { isStateLocked, readLockState } from "../object-lock/state";
-import type { WorkerEnv } from "../types";
+import { effectiveLock, splitVideoStorageKey } from "../object-lock/sidecar";
+import { isStateLocked } from "../object-lock/state";
+import type { WorkerApp } from "../types";
 
 interface RawDisposal {
 	/** Full R2 key of the raw (with the storage prefix). */
@@ -14,6 +16,11 @@ interface RawDisposal {
 }
 
 const disposalKey = (videoId: string) => `${KvPrefix.TRANSCODE_RAW}:${videoId}`;
+
+/** What the launch remembered for `videoId` (24 h): the raw's storage key and whether to delete it. */
+export async function readRawDisposal(kv: KVNamespace, videoId: string): Promise<RawDisposal | null> {
+	return kv.get<RawDisposal>(disposalKey(videoId), "json");
+}
 
 /** On accepting the transcode. A re-transcode replaces the previous decision (the one from the current setting). */
 export async function rememberRawDisposal(kv: KVNamespace, videoId: string, disposal: RawDisposal): Promise<void> {
@@ -28,14 +35,26 @@ export type RawDisposalOutcome = "deleted" | "retained" | "kept";
  * keys bucket) if requested. A locked raw wins over `deleteOriginalOnSuccess` (decision 6 of #3): it stays, the skip
  * is logged and the webhook still succeeds. Idempotent: a retried webhook deletes nothing again and returns `deleted`.
  */
-export async function disposeRawAfterTranscode(env: WorkerEnv, videoId: string): Promise<RawDisposalOutcome> {
-	const disposal = await env.MEDIA_KV.get<RawDisposal>(disposalKey(videoId), "json");
+export async function disposeRawAfterTranscode(
+	context: Context<WorkerApp>,
+	videoId: string,
+): Promise<RawDisposalOutcome> {
+	const { env } = context;
+	const disposal = await readRawDisposal(env.MEDIA_KV, videoId);
 	if (!disposal?.deleteOnComplete || !disposal.storageKey) return "kept";
 
-	const lockState = await readLockState(env.MEDIA_BUCKET, disposal.storageKey);
-	if (lockState && isStateLocked(lockState, new Date())) {
-		console.log(JSON.stringify({ event: "lock.original_retained", videoId, key: disposal.storageKey }));
-		await recordLockAudit({ type: "original_retained", key: disposal.storageKey, videoId });
+	const raw = await env.MEDIA_BUCKET.head(disposal.storageKey);
+	const location = splitVideoStorageKey(disposal.storageKey);
+	const lock = raw && location ? await effectiveLock(env.MEDIA_BUCKET, location.root, location.key, raw) : null;
+	if (lock?.state && isStateLocked(lock.state, new Date())) {
+		await recordLockAudit(context, {
+			action: "original_retained",
+			keys: [location?.key ?? disposal.storageKey],
+			before: lock.state.lock,
+			after: null,
+			outcome: "skipped",
+			root: location?.root ?? "",
+		});
 		return "retained";
 	}
 
