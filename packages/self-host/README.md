@@ -61,6 +61,8 @@ middleware of your own.
   [github.com/devultur/devultur/blob/main/docs/guides/self-host.md](https://github.com/devultur/devultur/blob/main/docs/guides/self-host.md).
 - Plugins (auth, request state, hooks, example plugins):
   [github.com/devultur/devultur/blob/main/docs/guides/plugins.md](https://github.com/devultur/devultur/blob/main/docs/guides/plugins.md).
+- Retention and holds (compliance and governance locks, holds, audit, caveats):
+  [github.com/devultur/devultur/blob/main/docs/guides/object-lock.md](https://github.com/devultur/devultur/blob/main/docs/guides/object-lock.md).
 
 ## License
 

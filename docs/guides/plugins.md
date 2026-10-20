@@ -42,6 +42,8 @@ interface WorkerPlugin {
   routes?: Array<{ path: string; app: Hono }>;
   issueCredential?: (context: Context, request: CredentialRequest) => CredentialDecision | Promise<CredentialDecision>;
   beforeLinkRedeem?: (context: Context, link: DownloadLinkInfo) => Response | null | Promise<Response | null>;
+  authorizeLockChange?: (context: Context, request: LockChangeRequest) => LockChangeDecision | Promise<LockChangeDecision>;
+  onLockAudit?: (context: Context, record: LockAuditRecord) => void | Promise<void>;
 }
 ```
 
@@ -118,10 +120,61 @@ allow gets `403 { "code": "token_rejected" }`; which claim failed is only logged
 **`beforeLinkRedeem`** runs before `GET /v1/download/<id>` spends a use of a link. Return a `Response` to refuse it
 (the use isn't spent), or `null` to let it go on. It gets the link's `storagePrefix`, `key` and plugin `context`.
 
+**`authorizeLockChange`** runs before the Worker changes a lock ([Retention and holds](object-lock.md)):
+`PUT /v1/lock/<key>` once per change, and `POST /v1/lock/hold` once per page. It gets:
+
+- `action`: `set`, `extend`, `shorten`, `remove`, `hold` or `release`;
+- `keys`, and the `prefix` of a bulk hold;
+- `before` and `after`, the locks (`null` / `{ hold }` for a hold page).
+
+Return `{ allow: false, response }` to refuse, or `{ allow: true }`. The first refusal wins. The hook also decides
+the governance privilege: shortening or removing a governance retention takes `bypassGovernance: true` in the request
+**and** at least one `authorizeLockChange` hook, with every hook allowing it. With no such hook, nothing can shorten a
+governance retention.
+
+This one lets only a records officer, who sends a second credential, shorten or remove a governance retention:
+
+```typescript
+import { isBearerOf } from "@devultur/core";
+import type { WorkerPlugin } from "@devultur/self-host";
+
+const recordsOfficer: WorkerPlugin = {
+  name: "records-officer",
+  authorizeLockChange: (context, { action }) => {
+    if (action !== "shorten" && action !== "remove") return { allow: true };
+    // Bound with `wrangler secret put RECORDS_OFFICER_SECRET`; the request still carries the Worker secret.
+    if (isBearerOf(context.req.header("X-Records-Officer"), context.env.RECORDS_OFFICER_SECRET)) {
+      return { allow: true };
+    }
+    return {
+      allow: false,
+      response: context.json({ error: "Only a records officer can shorten a retention", code: "officer_required" }, 403),
+    };
+  },
+};
+```
+
+**`onLockAudit`** gets every [audit record](object-lock.md#audit) after the response (`waitUntil`): lock changes, the
+lock set at upload, refused deletes and overwrites, and originals kept after a transcode. Use it to store the records
+somewhere other than the default `__lock-audit/` objects, for example a database or a log pipeline. A failure is
+logged and never reaches the caller.
+
+```typescript
+const auditToD1: WorkerPlugin = {
+  name: "audit-to-d1",
+  onLockAudit: async (context, record) => {
+    await context.env.AUDIT_DB.prepare("INSERT INTO lock_audit (at, action, keys, record) VALUES (?, ?, ?, ?)")
+      .bind(record.at, record.action, record.keys.join(" "), JSON.stringify(record))
+      .run();
+  },
+};
+```
+
 ## After the route
 
 - `getRouteResult(context)` tells a middleware that runs after `await next()` what the route did: `redeemedLink`
-  (the download link just redeemed), `originalDeleted` (`transcode.complete` deleted the original) and
+  (the download link just redeemed), `originalDeleted` (`transcode.complete` deleted the original),
+  `originalRetained` (it kept a locked original instead) and
   `transcodeJob` (the job a runner callback belongs to, with its plugin `context`).
 - `getPendingUpload(context)`, before the route, returns the upload an upload URL points to: its key, storage key,
   content type and plugin `context`. `cancelPendingUpload(context, uploadUrl)` makes an upload URL stop working, for
