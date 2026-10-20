@@ -40,7 +40,11 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       createUploadUrl: FunctionReference<
         "action",
         "internal",
-        { contentType: string; filename: string },
+        {
+          contentType: string;
+          filename: string;
+          visibility?: "public" | "private";
+        },
         any,
         Name
       >;
@@ -54,7 +58,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       deleteVideo: FunctionReference<
         "action",
         "internal",
-        { videoId: string },
+        { videoId: string; visibility?: "public" | "private" },
         any,
         Name
       >;
@@ -72,7 +76,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         any,
         Name
       >;
-      issueViewerToken: FunctionReference<"action", "internal", { sessionSecret?: string }, any, Name>;
+      issueViewerToken: FunctionReference<
+        "action",
+        "internal",
+        { sessionSecret?: string },
+        any,
+        Name
+      >;
       listCaptionsByMedia: FunctionReference<
         "query",
         "internal",
@@ -132,13 +142,26 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "internal",
         {
           captionLocales?: Array<string>;
+          captionsPending?: boolean;
           duration?: number;
+          failureReason?:
+            | "invalid_input"
+            | "unsupported_codec"
+            | "timeout"
+            | "capacity"
+            | "internal";
           key: string;
           playlistUrl?: string;
+          retriable?: boolean;
           thumbnailKey?: string;
           transcodeError?: string;
           transcodeProgress?: { current: number; total: number };
-          transcodeStatus?: "transcoding" | "captioning" | "ready" | "failed";
+          transcodeStatus?:
+            | "queued"
+            | "transcoding"
+            | "captioning"
+            | "ready"
+            | "failed";
         },
         any,
         Name

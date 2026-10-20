@@ -1,7 +1,7 @@
 # @devultur/convex
 
 [Convex](https://convex.dev) component for Devultur media: stores media records and watch progress in isolated
-tables, exposes upload, token, transcode and delete functions for your app, registers the transcode webhook, and
+tables, exposes upload, token, transcode and delete functions for your app, serves the transcode webhook route, and
 ships typed validators and React bindings.
 
 ## Install
@@ -11,8 +11,26 @@ pnpm add @devultur/convex
 pnpm exec devultur-init
 ```
 
-`devultur-init` adds the component to `convex/convex.config.ts`, creates `convex/devultur.ts` with the exposed
-functions, and prints the Convex env vars to set (your media Worker's URL and credential).
+`devultur-init` adds the component to `convex/convex.config.ts` (mounted with `httpPrefix: "/devultur/"`, see
+[Webhook route](#webhook-route)), creates `convex/devultur.ts` with the exposed functions, and prints the Convex env
+vars to set (your media Worker's URL and credential).
+
+## Webhook route
+
+The component receives transcode and captions events on its own HTTP route, `POST /webhook`. Convex serves a
+component's HTTP routes only when the app mounts the component with an `httpPrefix`:
+
+```typescript
+// convex/convex.config.ts
+app.use(devultur, { httpPrefix: "/devultur/", env: { /* see below */ } });
+```
+
+With that prefix the route is `https://<deployment>.convex.site/devultur/webhook`. You don't need an `http.ts` entry
+for it. `processVideo` sends the Worker that URL as the `callbackUrl`, and it follows the prefix you choose (with
+`httpPrefix: "/media/"` it is `https://<deployment>.convex.site/media/webhook`).
+
+Without `httpPrefix` the route doesn't exist: the Worker's events get `404`, the media record never leaves
+`queued`, and every transcode fails with a timeout.
 
 ## Example
 
@@ -83,8 +101,10 @@ npx convex env set DEVULTUR_API_URL https://media.example.com
 npx convex env set DEVULTUR_SECRET <the Worker's WORKER_AUTH_SECRET>
 ```
 
-**Webhooks.** You don't configure anything else. `processVideo` sends the Worker a `callbackUrl` that points at
-the component's route, `<CONVEX_SITE_URL>/devultur/webhook`. The transcode runner reports to the Worker with
+**Webhooks.** Keep the `httpPrefix` in `app.use()`: without it Convex doesn't serve the component's route and every
+transcode times out (see [Webhook route](#webhook-route)). Nothing else needs configuring. `processVideo` sends the
+Worker a `callbackUrl` that points at the component's route, `https://<deployment>.convex.site/devultur/webhook`
+(your app's `CONVEX_SITE_URL` followed by the prefix and `webhook`). The transcode runner reports to the Worker with
 `TRANSCODE_WEBHOOK_SECRET`. The Worker then forwards each event to the `callbackUrl` with
 `Authorization: Bearer <WORKER_AUTH_SECRET>`. The component accepts an event only when that bearer equals
 `DEVULTUR_SECRET`. If `DEVULTUR_SECRET` is wrong or missing, the component answers `401` to every event. Keep

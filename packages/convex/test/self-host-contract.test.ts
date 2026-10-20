@@ -3,11 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { memoryBucket, SIGN_SECRET } from "../../self-host/src/exports-test-harness";
 import { createWorker } from "../../self-host/src/index";
 import type { TranscodeContainerNamespace } from "../../self-host/src/transcode/cloudflare";
+import { memoryDb } from "./memory-db";
 
 // Contract test: the component's REAL action handlers (public.ts) and webhook route (http.ts) against an in-memory
 // `createWorker()` with the default plugins. Only the Convex runtime is stubbed: the function builders return their
-// definitions, `ctx.runQuery` / `ctx.runMutation` / `ctx.scheduler` are spies, and the transcode runner is a fake
-// container that records the launch instead of running FFmpeg (the runner's callback is simulated below).
+// definitions, `ctx.runQuery` / `ctx.runMutation` are spies that run the component's own queries and mutations
+// against an in-memory database, `ctx.scheduler` is a spy, and the transcode runner is a fake container that records
+// the launch instead of running FFmpeg (the runner's callback is simulated below).
 // It lives outside `src` because it imports the Worker's source and test harness, which the published package must
 // not (see scripts/oss-leak-guard.test.ts).
 
@@ -16,6 +18,7 @@ const CONVEX_SITE_URL = "https://app.convex.site/devultur";
 const WORKER_AUTH_SECRET = "worker-auth-secret";
 // Deliberately different from WORKER_AUTH_SECRET: the component must only ever need the latter.
 const TRANSCODE_WEBHOOK_SECRET = "transcode-webhook-secret";
+const TRANSCRIPTION_URL = "https://api.groq.com/";
 
 type Handler = (ctx: unknown, args: unknown) => Promise<unknown>;
 interface FunctionDefinition {
@@ -103,12 +106,27 @@ function setup() {
 		MEDIA_KV: memoryKv(),
 		TRANSCODE_RUNNER: "cloudflare",
 		TRANSCODE_CONTAINER: container.namespace,
+		GROQ_API_KEY: "transcription-key",
+	};
+	// The transcription provider the captions route calls. Off by default: the network refuses it. When available,
+	// it answers once `pending` settles, and resolves `requested` when the Worker calls it.
+	const transcription = {
+		isAvailable: false,
+		pending: Promise.resolve(),
+		requested: Promise.withResolvers<void>(),
 	};
 	const app = createWorker();
 	const executionCtx = { waitUntil() {}, passThroughOnException() {} } as never;
 	const workerCalls: WorkerCall[] = [];
 	const webhookDeliveries: WebhookDelivery[] = [];
-	const runMutation = vi.fn(async (_reference: string, _args: unknown) => null);
+	const db = memoryDb();
+	// `api.public.x` / `internal.public.x` are the strings "public.x" here (see the `_generated/api` mock).
+	const runFunction = async (reference: string, args: unknown) => {
+		const fn = component[reference.replace(/^public\./, "")];
+		if (!fn) throw new Error(`component function ${reference} not found`);
+		return fn.handler({ db }, args);
+	};
+	const runMutation = vi.fn(runFunction);
 
 	const sendToWorker = (request: Request) => app.request(request, undefined, env as never, executionCtx);
 
@@ -138,11 +156,16 @@ function setup() {
 			});
 			return response;
 		}
+		if (transcription.isAvailable && request.url.startsWith(TRANSCRIPTION_URL)) {
+			transcription.requested.resolve();
+			await transcription.pending;
+			return Response.json({ language: "english", duration: 12, words: [{ word: "Hello.", start: 0, end: 1 }] });
+		}
 		throw new Error(`Unexpected fetch to ${request.url}`);
 	});
 
 	const ctx = {
-		runQuery: vi.fn(async () => null),
+		runQuery: vi.fn(runFunction),
 		runMutation,
 		scheduler: { runAfter: vi.fn(async () => {}) },
 	};
@@ -154,7 +177,21 @@ function setup() {
 	/** A direct request to the Worker, as a browser or the transcode runner makes it. */
 	const send = (path: string, init?: RequestInit) => sendToWorker(new Request(`${WORKER_URL}${path}`, init));
 
-	return { run, send, deliverToComponent, mediaBucket, container, workerCalls, webhookDeliveries, runMutation };
+	/** The component's media record for `key`, as the app's queries read it. */
+	const mediaRecord = (key: string) => runFunction("public.getMediaByKey", { key }) as Promise<Record<string, unknown>>;
+
+	return {
+		run,
+		send,
+		deliverToComponent,
+		mediaBucket,
+		container,
+		workerCalls,
+		webhookDeliveries,
+		runMutation,
+		mediaRecord,
+		transcription,
+	};
 }
 
 type Contract = ReturnType<typeof setup>;
@@ -168,6 +205,22 @@ async function uploadThroughComponent(contract: Contract, file: { filename: stri
 	// The browser PUTs to the URL the component returned (on the Worker's origin).
 	const put = await fetch(created.url, { method: "PUT", body: bytes, headers: { "Content-Type": file.contentType } });
 	return { ...created, bytes, put };
+}
+
+/** The transcode runner reports `transcode.complete` to the Worker, which forwards it to the component. */
+async function completeTranscode(contract: Contract) {
+	const videoId = contract.container.launches.at(-1)?.env.VIDEO_ID;
+	const callback = await contract.send("/v1/webhooks/transcode", {
+		method: "POST",
+		headers: { "Content-Type": "application/json", Authorization: `Bearer ${TRANSCODE_WEBHOOK_SECRET}` },
+		body: JSON.stringify({
+			event: MediaEventName.TRANSCODE_COMPLETE,
+			videoId,
+			duration: 12,
+			playlistKey: "master.m3u8",
+		}),
+	});
+	expect(callback.status).toBe(200);
 }
 
 beforeEach(() => {
@@ -245,6 +298,71 @@ describe("@devultur/convex against a self-hosted Worker", () => {
 			body: JSON.stringify(delivery?.body),
 		});
 		expect((await contract.deliverToComponent(replay)).status).toBe(401);
+	});
+
+	it("moves a video transcoded without captions straight to ready", async () => {
+		const contract = setup();
+		const { key } = await uploadThroughComponent(contract, { filename: "clip.mp4", contentType: "video/mp4" });
+		const mediaKey = key.split("/")[2] ?? "";
+
+		await contract.run("processVideo", { key });
+		expect(await contract.mediaRecord(mediaKey)).toMatchObject({ transcodeStatus: "queued", captionsPending: false });
+
+		await completeTranscode(contract);
+		expect(await contract.mediaRecord(mediaKey)).toMatchObject({ transcodeStatus: "ready", duration: 12 });
+	});
+
+	it("keeps a video with requested captions in captioning until they arrive", async () => {
+		const contract = setup();
+		const { key } = await uploadThroughComponent(contract, { filename: "clip.mp4", contentType: "video/mp4" });
+		const mediaKey = key.split("/")[2] ?? "";
+
+		// The transcode completes while the transcription is still running.
+		const transcriptionDone = Promise.withResolvers<void>();
+		contract.transcription.isAvailable = true;
+		contract.transcription.pending = transcriptionDone.promise;
+		const processing = contract.run("processVideo", { key, locales: ["en"] });
+		await contract.transcription.requested.promise;
+		await completeTranscode(contract);
+		expect(await contract.mediaRecord(mediaKey)).toMatchObject({
+			transcodeStatus: "captioning",
+			captionsPending: true,
+		});
+
+		// The Worker forwards `captions.complete` once the transcription returns.
+		transcriptionDone.resolve();
+		await processing;
+		expect(await contract.mediaRecord(mediaKey)).toMatchObject({
+			transcodeStatus: "ready",
+			captionsPending: false,
+			captionLocales: ["en"],
+		});
+	});
+
+	it("reaches ready when the captions arrive before the transcode completes", async () => {
+		const contract = setup();
+		contract.transcription.isAvailable = true;
+		const { key } = await uploadThroughComponent(contract, { filename: "clip.mp4", contentType: "video/mp4" });
+		const mediaKey = key.split("/")[2] ?? "";
+
+		// The Worker generates the captions during the request and forwards `captions.complete` right away.
+		await contract.run("processVideo", { key, locales: ["en"] });
+		expect(await contract.mediaRecord(mediaKey)).toMatchObject({ captionsPending: false, captionLocales: ["en"] });
+
+		await completeTranscode(contract);
+		expect(await contract.mediaRecord(mediaKey)).toMatchObject({ transcodeStatus: "ready" });
+	});
+
+	it("stops waiting for captions whose request failed", async () => {
+		const contract = setup();
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		const { key } = await uploadThroughComponent(contract, { filename: "clip.mp4", contentType: "video/mp4" });
+		const mediaKey = key.split("/")[2] ?? "";
+
+		await contract.run("processVideo", { key, locales: ["en"] });
+
+		expect(contract.runMutation).toHaveBeenCalledWith("public.skipCaptions", { key: mediaKey });
+		expect(await contract.mediaRecord(mediaKey)).toMatchObject({ captionsPending: false });
 	});
 
 	it("deletes a file and a video so the next read is 404", async () => {

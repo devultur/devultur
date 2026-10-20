@@ -34,8 +34,8 @@ import type { DataModel } from "./dataModel.js";
  * Typesafe environment variables declared in `convex.config.ts`.
  */
 type Env = {
-  readonly DEVULTUR_SECRET: string;
   readonly DEVULTUR_API_URL: string;
+  readonly DEVULTUR_SECRET: string;
 };
 
 /**

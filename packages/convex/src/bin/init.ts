@@ -47,6 +47,10 @@ export default app;
 
 	if (content.includes("@devultur/convex")) {
 		log("⏭️  convex.config.ts already has devultur — skipping");
+		if (!content.includes("httpPrefix")) {
+			log("⚠️  Mount it with an httpPrefix, or Convex doesn't serve its webhook route and every transcode times out:");
+			log('   app.use(devultur, { httpPrefix: "/devultur/", env: { ... } })');
+		}
 		return;
 	}
 
@@ -128,6 +132,8 @@ console.log(`
         <App />
       </DevulturProvider>
 
-   Webhook route is automatically registered at /devultur/webhook
-   (no changes needed in your http.ts)
+   Transcode webhooks: Convex serves the component's webhook route only because
+   convex.config.ts mounts it with httpPrefix "/devultur/". The route is
+      POST https://<deployment>.convex.site/devultur/webhook
+   and processVideo sends it to the Worker as the callbackUrl (no changes needed in your http.ts).
 `);

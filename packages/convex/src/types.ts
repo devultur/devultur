@@ -10,7 +10,7 @@ export interface MediaRecord {
 	filename: string;
 	contentType: string;
 	sizeBytes: number;
-	transcodeStatus?: "transcoding" | "captioning" | "ready" | "failed";
+	transcodeStatus?: "queued" | "transcoding" | "captioning" | "ready" | "failed";
 	transcodeProgress?: { current: number; total: number };
 	transcodeError?: string;
 	playlistUrl?: string;
@@ -18,6 +18,8 @@ export interface MediaRecord {
 	/** Key of the storyboard VTT (hover previews); URL via `buildStoryboardUrl` from `@devultur/core`. */
 	storyboardKey?: string;
 	captionLocales?: string[];
+	/** True while requested captions haven't arrived; the video waits in "captioning" only then. */
+	captionsPending?: boolean;
 	duration?: number;
 	createdAt: number;
 }

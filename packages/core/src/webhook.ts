@@ -11,6 +11,12 @@ interface HandleWebhookOptions {
 	read: ReadFn;
 }
 
+/**
+ * Applies a media Worker event to your media record through `read` / `patch`.
+ *
+ * `transcode.complete` waits in "captioning" only when the record has `captionsPending: true` (set it when you
+ * request captions); otherwise the video goes straight to "ready". `captions.complete` clears `captionsPending`.
+ */
 export async function handleWebhook({ event, recordId, patch, read }: HandleWebhookOptions): Promise<void> {
 	switch (event.event) {
 		case MediaEventName.TRANSCODE_STARTED:
@@ -29,10 +35,11 @@ export async function handleWebhook({ event, recordId, patch, read }: HandleWebh
 			break;
 
 		case MediaEventName.TRANSCODE_COMPLETE: {
+			// Wait in "captioning" only for requested captions that haven't arrived; without them, ready right away.
 			const record = await read(recordId);
-			const hasCaptions = ((record?.captionLocales as string[] | undefined)?.length ?? 0) > 0;
+			const isWaitingForCaptions = record?.captionsPending === true;
 			await patch(recordId, {
-				transcodeStatus: hasCaptions ? MediaStatus.READY : MediaStatus.CAPTIONING,
+				transcodeStatus: isWaitingForCaptions ? MediaStatus.CAPTIONING : MediaStatus.READY,
 				transcodeProgress: undefined,
 				duration: event.duration,
 				playlistUrl: event.playlistKey,
@@ -52,6 +59,7 @@ export async function handleWebhook({ event, recordId, patch, read }: HandleWebh
 			await patch(recordId, {
 				transcodeStatus: hasPlaylist ? MediaStatus.READY : MediaStatus.TRANSCODING,
 				captionLocales: event.locales,
+				captionsPending: false,
 			});
 			break;
 		}
