@@ -28,10 +28,12 @@ function patchConvexConfig() {
 		'app.use(devultur, { httpPrefix: "/devultur/", env: { DEVULTUR_SECRET: app.env.DEVULTUR_SECRET, DEVULTUR_API_URL: app.env.DEVULTUR_API_URL } });';
 
 	if (!existsSync(configPath)) {
+		// The app must declare the env vars it binds: `app.env.<NAME>` throws for an undeclared one.
 		const content = `import { defineApp } from "convex/server";
+import { v } from "convex/values";
 ${importLine}
 
-const app = defineApp();
+const app = defineApp({ env: { DEVULTUR_SECRET: v.string(), DEVULTUR_API_URL: v.string() } });
 ${useLine}
 
 export default app;
@@ -64,6 +66,10 @@ export default app;
 
 	writeFileSync(configPath, content);
 	log("✅ Patched convex/convex.config.ts with devultur component");
+	if (!/DEVULTUR_SECRET:\s*v\./.test(content)) {
+		log("⚠️  Declare the env vars it binds in defineApp(), or Convex rejects the config:");
+		log("   defineApp({ env: { DEVULTUR_SECRET: v.string(), DEVULTUR_API_URL: v.string() } })");
+	}
 }
 
 function createDevulturModule() {
