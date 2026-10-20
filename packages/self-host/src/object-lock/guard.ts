@@ -69,15 +69,26 @@ export interface LockedOriginal {
 }
 
 /** With `original-only`, derived files are free: only the uploaded object is retained. */
-function protectsDerived(state: LockState): boolean {
+export function protectsDerived(state: LockState): boolean {
 	const derivatives: RetentionDerivatives = state.lock.retention?.derivatives ?? "inherit";
 	return derivatives === "inherit";
 }
 
+/** The lock of `object`, already read (HEAD) at virtual `key` under `root`, when it's in force. */
+export async function lockedObject(
+	bucket: R2Bucket,
+	root: string,
+	key: string,
+	object: R2Object,
+	now: Date,
+): Promise<LockedOriginal | null> {
+	const { state } = await effectiveLock(bucket, root, key, object);
+	return state && isStateLocked(state, now) ? { key, state } : null;
+}
+
 async function lockedOriginal(bucket: R2Bucket, root: string, key: string, now: Date): Promise<LockedOriginal | null> {
 	const object = await bucket.head(`${root}${key}`);
-	const state = object ? (await effectiveLock(bucket, root, key, object)).state : null;
-	return state && isStateLocked(state, now) ? { key, state } : null;
+	return object ? lockedObject(bucket, root, key, object, now) : null;
 }
 
 // Heads each raw instead of trusting the listing's metadata (a list only carries it with `include`, per compat date).

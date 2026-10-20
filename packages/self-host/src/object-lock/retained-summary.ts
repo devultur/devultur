@@ -1,9 +1,12 @@
-// "Can this prefix be deleted?": what under a storage prefix is retained, without deleting anything. Same walk and
-// bounds as `deletePrefixRespectingLocks`, so a summary of a prefix and a delete of it agree on what stays.
-import { lockResolver, toStoredObjectLock } from "./lock-status";
+// "Can this prefix be deleted?": what under a storage prefix is retained, without deleting anything. Same walk,
+// resolution and bounds as `deletePrefixRespectingLocks`, so a summary of a prefix and a delete of it agree on what
+// stays.
+import { lockResolver, toStoredObjectLock, UNRECOGNIZED_LOCK } from "./lock-status";
 import {
-	assertBudget,
+	assertProgress,
 	DEFAULT_MAX_SUBREQUESTS,
+	decodeCursor,
+	encodeCursor,
 	type PrefixWalkOptions,
 	subrequestBudget,
 	type WalkedObject,
@@ -13,6 +16,7 @@ import {
 export interface RetainedSummary {
 	/** Objects looked at (lock records and audit not included). */
 	scannedCount: number;
+	/** What a delete would keep, keys not laid out like the Worker's included. */
 	retainedCount: number;
 	retainedBytes: number;
 	/** The latest retention end among what's retained (ISO). Holds have none: see `hasHold`. */
@@ -25,14 +29,9 @@ export interface RetainedSummary {
 	subrequests: number;
 }
 
-/** An original's head and sidecar, or a video's raw listing and one raw's head and sidecar. */
-const OBJECT_COST = 4;
-
 /** What's retained under `options.prefix` (full storage keys). Bounded and resumable like the delete. */
 export async function retainedSummary(options: PrefixWalkOptions): Promise<RetainedSummary> {
-	const maxSubrequests = options.maxSubrequests ?? DEFAULT_MAX_SUBREQUESTS;
-	assertBudget(maxSubrequests, OBJECT_COST);
-	const budget = subrequestBudget(maxSubrequests);
+	const budget = subrequestBudget(options.maxSubrequests ?? DEFAULT_MAX_SUBREQUESTS);
 	const mediaBucket = budget.track(options.mediaBucket);
 	const resolveLock = lockResolver(mediaBucket, options.now ?? new Date());
 	const summary: RetainedSummary = {
@@ -43,17 +42,26 @@ export async function retainedSummary(options: PrefixWalkOptions): Promise<Retai
 		subrequests: 0,
 	};
 
-	const visit = async ({ listed, split }: WalkedObject) => {
+	const visit = async ({ listed, place }: WalkedObject) => {
+		if (place.kind === "reserved") return;
+		let lock = UNRECOGNIZED_LOCK;
+		let size = listed.size;
+		if (place.kind === "object") {
+			const object = await mediaBucket.head(listed.key);
+			if (!object) return;
+			lock = toStoredObjectLock(await resolveLock(place, object), place);
+			size = object.size;
+		}
 		summary.scannedCount += 1;
-		const locked = await resolveLock(split);
-		if (!locked) return;
-		const lock = toStoredObjectLock(locked, split);
+		if (!lock.locked) return;
 		summary.retainedCount += 1;
-		summary.retainedBytes += listed.size;
+		summary.retainedBytes += size;
 		if (lock.hold) summary.hasHold = true;
 		if (lock.until && (!summary.latestUntil || lock.until > summary.latestUntil)) summary.latestUntil = lock.until;
 	};
 
-	const { cursor } = await walkPrefix(options, mediaBucket, { budget, objectCost: OBJECT_COST, visit });
-	return { ...summary, ...(cursor !== undefined ? { cursor } : {}), subrequests: budget.used };
+	const walk = await walkPrefix(options, mediaBucket, decodeCursor(options.cursor), visit);
+	assertProgress(walk.hasProgressed || walk.isDone);
+	const cursor = walk.isDone ? undefined : encodeCursor(walk.position);
+	return { ...summary, ...(cursor ? { cursor } : {}), subrequests: budget.used };
 }

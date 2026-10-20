@@ -177,8 +177,17 @@ describe("deletePrefixRespectingLocks", () => {
 
 	it("refuses a bound too small to make progress", async () => {
 		const buckets = lockBuckets();
+		await buckets.putObject("private/file/f1/a.pdf");
+		const options = { mediaBucket: buckets.mediaBucket, keysBucket: buckets.keysBucket, prefix: ROOT };
+		await expect(deletePrefixRespectingLocks({ ...options, maxSubrequests: 3 })).rejects.toThrow(RangeError);
+		await expect(deletePrefixRespectingLocks({ ...options, maxSubrequests: 0 })).rejects.toThrow(RangeError);
+		expect(buckets.hasMedia("private/file/f1/a.pdf")).toBe(true);
+	});
+
+	it("refuses a cursor it didn't return", async () => {
+		const buckets = lockBuckets();
 		await expect(
-			deletePrefixRespectingLocks({ mediaBucket: buckets.mediaBucket, prefix: ROOT, maxSubrequests: 5 }),
+			deletePrefixRespectingLocks({ mediaBucket: buckets.mediaBucket, prefix: ROOT, cursor: "not a cursor" }),
 		).rejects.toThrow(RangeError);
 	});
 });

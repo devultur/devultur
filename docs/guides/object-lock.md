@@ -335,32 +335,43 @@ do {
     prefix: "apps/a1/",
     cursor,
   });
-  // result: { deletedCount, deletedBytes, deletedKeyCount, retainedCount, retainedBytes, retained, cursor?, subrequests }
+  // result: { deletedCount, deletedBytes, deletedKeyCount, retainedCount, retainedBytes, retained, skippedCount,
+  //           cursor?, subrequests }
   cursor = result.cursor;
 } while (cursor);
 ```
 
 - **Keys are storage keys**: the full R2 keys, your storage prefix included. Nothing needs a request. The storage
-  prefix each key lives under (where its lock record is) is read from the key: everything before its first `public/`
-  or `private/` segment. Pass `root` when you walk a single storage prefix that has a segment named `public` or
+  prefix each key lives under (where its lock record is) is read from the key: everything before its first `public`
+  or `private` segment. Pass `root` when you walk a single storage prefix that has a segment named `public` or
   `private`. One prefix can span several storage prefixes, each read on its own.
+- **Keys it can't place are kept.** A key with no `public` or `private` segment (or none right after the `root` you
+  passed) isn't laid out like the Worker's, so its lock record can't be found. It's never deleted: it comes back in
+  `retained` with `unrecognized: true`. A key with a segment ending in `__lock` or `__lock-audit` (a lock record or
+  audit object, even under a storage prefix with no trailing `/`) is never touched, and is counted in `skippedCount`.
 - **Same resolution as the routes.** The upload's lock, or the lock record bound to the stored version (a record left
-  by a replaced version is ignored). An unreadable record counts as held (`unreadable: true`). A video's files inherit
-  from its raws unless they're `original-only`, and an image's variants follow it, as `DELETE /v1/media/<key>` keeps
-  them. `lockedBy` names the original whose lock it is.
+  by a replaced version is ignored). An unreadable record counts as held (`unreadable: true`). Each object's own lock
+  is checked on the version read (HEAD) right before its delete. A video's files inherit from its raws, and an image's
+  variants from the image, unless the lock is `original-only`. That inherited lock is read once and reused for at
+  most 50 objects or 5 seconds. `lockedBy` names the original whose lock it is.
 - **What goes.** A free object goes the way `DELETE /v1/media/<key>` deletes it: with its encryption keys in
   `KEYS_BUCKET` (except those of an upload in flight over it) and its variants'. A video folder left empty also loses
-  the rest of its keys (the HLS key) and its transcode-completed marker, as with `DELETE /v1/media/videos/<id>`.
+  the rest of its keys written before the call started (the HLS key) and its transcode-completed marker, as with
+  `DELETE /v1/media/videos/<id>`. `deletedBytes` adds up the sizes of the versions deleted.
 - **What stays.** Retained files, with their variants, keys and lock records. The lock records of deleted files stay
   too, inert, as with the routes. Nothing under `__lock/` or `__lock-audit/` is touched: once a storage prefix has
   nothing retained left, delete those yourself if you're tearing it down.
-- **Bounded.** A Worker invocation has a subrequest limit. Each call stops before `maxSubrequests` bucket calls
-  and returns a `cursor` to go on from. The default, 40, fits under the Workers Free plan's 50 subrequests per
+- **Bounded.** A Worker invocation has a subrequest limit. Every bucket call is counted, and a call never makes more
+  than `maxSubrequests`. It reads everything an object needs before deleting any of it, and only deletes if the budget
+  left covers it, so it never stops halfway through an object. It returns a `cursor` to go on from (a video folder it
+  emptied is finished by the next call). The default, 40, fits under the Workers Free plan's 50 subrequests per
   request and leaves room for your own calls. On a paid plan, raise it (to a few hundred, say) so each call gets
-  further. `batchSize` (default 100, at most 1000) sets how many objects it
-  lists at a time. Run a large prefix over several invocations (a queue, or a cron that keeps the cursor).
+  further. A bound too small to finish even one object throws a `RangeError`. `batchSize` (default 100, at most 1000)
+  sets how many objects it lists at a time. Run a large prefix over several invocations (a queue, or a cron that
+  keeps the cursor).
 - **Not audited.** The call is your code, not a request, so no audit record or hook runs: log `retained` if you need a
-  trail. The [check/delete window](#caveats) applies.
+  trail. R2 deletes aren't conditional: a lock set between an object's check and its delete isn't seen. That gap is
+  milliseconds for the object's own lock, and up to 5 seconds for an inherited one (see [Caveats](#caveats)).
 
 `retainedSummary({ mediaBucket, prefix, cursor? })` answers "can this be deleted?" without deleting anything:
 `{ scannedCount, retainedCount, retainedBytes, latestUntil?, hasHold, cursor?, subrequests }`, with the same bounds.

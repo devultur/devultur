@@ -1,27 +1,51 @@
 import { describe, expect, it } from "vitest";
 import { readObjectLock, retainedSummary } from "../index";
-import { splitStorageKey } from "./lock-status";
+import { placeOfStorageKey } from "./lock-status";
 import { compliance, expired, FAR_FUTURE, governance, lockBuckets, ROOT } from "./prefix-test-support";
 
 const RAW = "private/video/v1/raw/clip.mp4";
 const SEGMENT = "private/video/v1/hls/seg-0.ts";
 
-describe("splitStorageKey", () => {
+describe("placeOfStorageKey", () => {
 	it("reads the storage prefix from the key's first visibility segment", () => {
-		expect(splitStorageKey(`${ROOT}private/file/f1/a.pdf`)).toEqual({ root: ROOT, key: "private/file/f1/a.pdf" });
-		expect(splitStorageKey("public/asset/site/private/a.css")).toEqual({
+		expect(placeOfStorageKey(`${ROOT}private/file/f1/a.pdf`)).toEqual({
+			kind: "object",
+			root: ROOT,
+			key: "private/file/f1/a.pdf",
+		});
+		expect(placeOfStorageKey("public/asset/site/private/a.css")).toEqual({
+			kind: "object",
 			root: "",
 			key: "public/asset/site/private/a.css",
 		});
-		expect(splitStorageKey(`${ROOT}__lock/private/file/f1/a.pdf`)?.key).toBe("__lock/private/file/f1/a.pdf");
 	});
 
-	it("uses the root it's given, and refuses keys outside it", () => {
-		expect(splitStorageKey("x/public/y/private/f/1/a", "x/public/y/")).toEqual({
+	it("uses the root it's given", () => {
+		expect(placeOfStorageKey("x/public/y/private/f/1/a", "x/public/y/")).toEqual({
+			kind: "object",
 			root: "x/public/y/",
 			key: "private/f/1/a",
 		});
-		expect(splitStorageKey("other/private/f/1/a", ROOT)).toBeNull();
+	});
+
+	// Regression: a key with no visibility segment used to fall back to root "", which put lock records in reach.
+	it.each([
+		`${ROOT}__lock/private/file/f1/a.pdf`,
+		`${ROOT}__lock-audit/2030-01-01/x.json`,
+		"app1-__lock/public/file/f1/a.pdf",
+		"app1-__lock-audit/2030-01-01/x.json",
+		"__lock/public/file/f1/a.pdf",
+	])("never treats %s as an object", (key) => {
+		expect(placeOfStorageKey(key).kind).toBe("reserved");
+		expect(placeOfStorageKey(key, "").kind).toBe("reserved");
+	});
+
+	it.each([
+		["app1-public/file/f1/a.pdf", undefined],
+		["other/private/f/1/a", ROOT],
+		[`${ROOT}private/file/f1/a.pdf`, ""],
+	])("doesn't recognize %s (root %s)", (key, root) => {
+		expect(placeOfStorageKey(key, root)).toEqual({ kind: "unrecognized" });
 	});
 });
 
@@ -85,6 +109,31 @@ describe("readObjectLock", () => {
 			`${ROOT}public/image/i1/a.jpg/__variants/w200.webp`,
 		);
 		expect(lock).toMatchObject({ locked: true, lockedBy: `${ROOT}public/image/i1/a.jpg` });
+	});
+
+	it("frees the variants of an original-only image, like the delete route", async () => {
+		const buckets = lockBuckets();
+		const originalOnly = { retention: { ...compliance.retention!, derivatives: "original-only" as const } };
+		await buckets.putObject("public/image/i1/a.jpg", { lock: originalOnly });
+		await buckets.putObject("public/image/i1/a.jpg/__variants/w200.webp");
+		const options = { mediaBucket: buckets.mediaBucket };
+		expect(await readObjectLock(options, `${ROOT}public/image/i1/a.jpg/__variants/w200.webp`)).toEqual({
+			locked: false,
+			hold: false,
+		});
+		expect(await readObjectLock(options, `${ROOT}public/image/i1/a.jpg`)).toMatchObject({ locked: true });
+	});
+
+	it("keeps a key it can't place, and reads no lock record as an object", async () => {
+		const buckets = lockBuckets();
+		await buckets.media.put("app1-public/file/f1/a.pdf", "x");
+		await buckets.media.put("app1-__lock/public/file/f1/a.pdf", "{}");
+		const options = { mediaBucket: buckets.mediaBucket };
+		expect(await readObjectLock(options, "app1-public/file/f1/a.pdf")).toMatchObject({
+			locked: true,
+			unrecognized: true,
+		});
+		expect(await readObjectLock(options, "app1-__lock/public/file/f1/a.pdf")).toBeNull();
 	});
 });
 
