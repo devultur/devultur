@@ -115,6 +115,42 @@ webhooks with the `webhookCredential` your plugin sets in the request state (or 
 none; see [Plugins](https://github.com/devultur/devultur/blob/main/docs/guides/plugins.md)). Set `DEVULTUR_SECRET`
 to that value, and make sure your plugin also accepts it as the bearer of the component's calls.
 
+## Errors
+
+When the media Worker refuses a request, component actions throw a `ConvexError` whose `data` is
+`{ code, message, status, details? }`. A plain `Error` would lose these fields across the component boundary. `code` is
+the Worker's stable code: for example `retention_active`, `compliance_extend_only`, `lock_conflict`,
+`lock_privilege_required`, `file_too_large`, or `worker_error` when the Worker sent none. `details` carries the rest of
+the Worker's answer, such as the `{ key, mode, until, hold }` of a `retention_active`.
+
+```ts
+import { devulturErrorOf } from "@devultur/convex";
+
+try {
+  await devultur.setLock(ctx, key, { until });
+} catch (error) {
+  const refusal = devulturErrorOf(error); // null when it isn't a Worker refusal
+  if (refusal?.code === "compliance_extend_only") {
+    // the date can only move later
+  }
+  throw error;
+}
+```
+
+`isDevulturError(error)` is the matching type guard. Errors that aren't Worker refusals, such as a network failure,
+are rethrown unchanged.
+
+## Object lock
+
+- `devultur.createUploadUrl(ctx, { filename, contentType, lock, hold })` locks a file from its first write.
+- `devultur.getLock(ctx, key)` and `devultur.setLock(ctx, key, { mode, until, period, derivatives })` read and change
+  a file's retention.
+- `devultur.setHold(ctx, keys)` and `devultur.releaseHold(ctx, keys)` set and release holds.
+
+These are server-side calls: `exposeApi` never lets a browser choose or change a lock. Its `createUploadUrl` applies
+`config.upload.lock` instead. A bulk hold by prefix runs on your server with `@devultur/core`'s
+`createWorkerClient(...).lock.holdAll({ prefix })`.
+
 ## Documentation
 
 Guides and API reference: [github.com/devultur/devultur/tree/main/docs](https://github.com/devultur/devultur/tree/main/docs).

@@ -3,10 +3,11 @@ import { DEFAULT_TOKEN_EXPIRY_SECONDS, extractId, MediaEventName, MediaStatus } 
 import { v } from "convex/values";
 import { api, internal } from "./_generated/api";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { action, internalMutation, mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import { objectLockValidator } from "./lockValidators";
 import { getMediaClient } from "./mediaClient";
 import { transcodeOutputFields } from "./schema";
+import { workerAction } from "./workerErrors";
 
 // Webhook path RELATIVE to the component. Convex gives the component a `CONVEX_SITE_URL` that ALREADY
 // includes its mount prefix (e.g. `${site}/devultur`), so `${CONVEX_SITE_URL}/webhook` resolves to the
@@ -30,7 +31,7 @@ const failureReasonValidator = v.union(
 
 // --- Media Actions (call CF Worker) ---
 
-export const issueViewerToken = action({
+export const issueViewerToken = workerAction({
 	args: { sessionSecret: v.optional(v.string()) },
 	handler: async (_ctx, args) => {
 		const media = getMediaClient();
@@ -42,7 +43,7 @@ export const issueViewerToken = action({
 	},
 });
 
-export const createUploadUrl = action({
+export const createUploadUrl = workerAction({
 	args: {
 		filename: v.string(),
 		contentType: v.string(),
@@ -58,7 +59,7 @@ export const createUploadUrl = action({
 	},
 });
 
-export const deleteMediaAction = action({
+export const deleteMediaAction = workerAction({
 	args: { key: v.string() },
 	handler: async (_ctx, args) => {
 		const media = getMediaClient();
@@ -66,7 +67,7 @@ export const deleteMediaAction = action({
 	},
 });
 
-export const deleteVideo = action({
+export const deleteVideo = workerAction({
 	args: { videoId: v.string(), visibility: v.optional(v.union(v.literal("public"), v.literal("private"))) },
 	handler: async (ctx, args) => {
 		const media = getMediaClient();
@@ -98,7 +99,7 @@ export const cleanupVideoRecords = internalMutation({
 	},
 });
 
-export const processVideo = action({
+export const processVideo = workerAction({
 	args: {
 		key: v.string(),
 		preset: v.optional(v.string()),

@@ -1,22 +1,22 @@
 // Object lock from the app's server: read and change an object's retention, and set or release holds on a list of
 // keys. These are component functions, so only the app's own functions can call them (never a browser). A bulk hold
 // by prefix stays on the app's server, with `@devultur/core`'s `createWorkerClient(...).lock.holdAll({ prefix })`.
-// A refusal throws the Worker's `DevulturApiError` (`code`: `retention_active`, `compliance_extend_only`,
-// `lock_privilege_required`, `lock_conflict`, ...).
+// A refusal throws a `ConvexError` whose `data.code` is the Worker's (`retention_active`, `compliance_extend_only`,
+// `lock_privilege_required`, `lock_conflict`, ...); see workerErrors.ts.
 import { HOLD_PAGE_SIZE } from "@devultur/core";
 import { v } from "convex/values";
-import { action } from "./_generated/server";
 import { derivativesValidator, retentionModeValidator } from "./lockValidators";
 import { getMediaClient } from "./mediaClient";
+import { workerAction } from "./workerErrors";
 
 const keysValidator = v.array(v.string());
 
-export const getLock = action({
+export const getLock = workerAction({
 	args: { key: v.string() },
 	handler: async (_ctx, args) => getMediaClient().lock.get(args.key),
 });
 
-export const setLock = action({
+export const setLock = workerAction({
 	args: {
 		key: v.string(),
 		mode: v.optional(retentionModeValidator),
@@ -41,12 +41,12 @@ async function changeHolds(keys: string[], hold: boolean) {
 	return { updated, skipped, pageSize: HOLD_PAGE_SIZE };
 }
 
-export const setHold = action({
+export const setHold = workerAction({
 	args: { keys: keysValidator },
 	handler: async (_ctx, args) => changeHolds(args.keys, true),
 });
 
-export const releaseHold = action({
+export const releaseHold = workerAction({
 	args: { keys: keysValidator },
 	handler: async (_ctx, args) => changeHolds(args.keys, false),
 });
