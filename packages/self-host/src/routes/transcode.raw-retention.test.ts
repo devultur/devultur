@@ -1,3 +1,4 @@
+import { encodeEncryptionMeta } from "@devultur/core";
 import type { MiddlewareHandler } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loggedAudits } from "../object-lock/audit-test-support";
@@ -25,8 +26,12 @@ function memoryBucket(keys: string[], lockedKeys: string[] = []) {
 		},
 		// Lock sidecars and markers are objects too: only what a test adds exists.
 		get: async (key: string) => (objects.has(key) ? { text: async () => "", etag: "e" } : null),
-		head: async (key: string) =>
-			objects.has(key) ? { size: 10, customMetadata: lockedKeys.includes(key) ? { lock } : {} } : null,
+		// Like R2's head, with the metadata: the raw is encrypted with `key-1` (RAW_L4_KEY), and maybe locked.
+		head: async (key: string) => {
+			if (!objects.has(key)) return null;
+			const enc = key === RAW_KEY ? { enc: encodeEncryptionMeta(new Uint8Array(16), "key-1") } : {};
+			return { size: 10, customMetadata: { ...enc, ...(lockedKeys.includes(key) ? { lock } : {}) } };
+		},
 		delete: async (key: string | string[]) => {
 			for (const each of Array.isArray(key) ? key : [key]) objects.delete(each);
 		},

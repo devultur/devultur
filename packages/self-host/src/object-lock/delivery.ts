@@ -3,6 +3,7 @@
 import { effectiveUntil } from "@devultur/core";
 import type { Context } from "hono";
 import { getRequestState } from "../request-state";
+import { isObjectExpired } from "../routes/object-response";
 import type { WorkerApp } from "../types";
 import { timingOf } from "./change";
 import { effectiveLock } from "./sidecar";
@@ -31,4 +32,18 @@ export async function lockHeaders(
 	} catch {}
 	if (state.lock.hold) headers.push([LOCK_HOLD_HEADER, "true"]);
 	return headers;
+}
+
+/**
+ * True when `object` is past its `expiresAt` and nothing holds it. A locked file doesn't expire: it's served (not
+ * `410`) until its lock ends, so a hold or retention set after upload keeps the file readable as well as undeletable.
+ */
+export async function isExpiredAndUnlocked(
+	bucket: R2Bucket,
+	location: { root: string; key: string },
+	object: LockedObject,
+): Promise<boolean> {
+	if (!isObjectExpired(object.customMetadata)) return false;
+	const { state } = await effectiveLock(bucket, location.root, location.key, object);
+	return !state || !isStateLocked(state, new Date());
 }

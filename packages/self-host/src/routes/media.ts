@@ -20,7 +20,7 @@ import {
 } from "../image/params";
 import { ImageTransformsMode, isVariantKey, resolveTransformsMode } from "../image/transform-plan";
 import { resolveWorkerVariant, workerVariantKey } from "../image/worker-transform";
-import { lockHeaders } from "../object-lock/delivery";
+import { isExpiredAndUnlocked, lockHeaders } from "../object-lock/delivery";
 import { getRequestState } from "../request-state";
 import type { WorkerApp } from "../types";
 import {
@@ -33,7 +33,7 @@ import {
 	responseFromEdgeHit,
 } from "./edge-cache";
 import { handleKeyDelete, handleVideoDelete } from "./media-delete";
-import { expiredResponse, isObjectExpired, streamObject } from "./object-response";
+import { expiredResponse, streamObject } from "./object-response";
 import { isStoryboardVttKey, storyboardVttResponse } from "./storyboard-vtt";
 import { viewerTokenClaimRejection } from "./viewer-token-claims";
 
@@ -138,7 +138,8 @@ media.get("/:key{.+}", async (context) => {
 	if (!object) {
 		return context.json({ error: "Not found" }, 404);
 	}
-	if (isObjectExpired(object.customMetadata)) return expiredResponse();
+	const location = { root: getRequestState(context).storagePrefix, key };
+	if (await isExpiredAndUnlocked(context.env.MEDIA_BUCKET, location, object)) return expiredResponse();
 
 	// L3: verify the session/IP binding against the request (after the fetch, to read the per-resource
 	// override from the metadata). Mismatch → 401 `session_mismatch` → the provider re-issues the token.

@@ -132,7 +132,7 @@ describe("POST /v1/lock/hold", () => {
 		const realPut = bucket.put;
 		bucket.put = async (...args) => {
 			bucket.put = realPut;
-			const winner = { revision: 1, objectEtag: "etag-0", lock: { hold: true }, updatedAt: "" };
+			const winner = { revision: 1, objectVersion: "v0", lock: { hold: true }, updatedAt: "" };
 			await realPut(`__lock/${RAW_KEY}`, JSON.stringify(winner));
 			return realPut(...args);
 		};

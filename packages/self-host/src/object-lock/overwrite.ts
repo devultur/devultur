@@ -18,6 +18,17 @@ export type WriteCondition = Headers | R2Conditional;
 
 export type WriteCheck = { blocked: Response } | { onlyIf: WriteCondition; exists: boolean };
 
+/**
+ * `onlyIf` for a write over exactly `object`. The etag is the content's MD5, so the same bytes written again (with
+ * another lock) would match it: the upload time pins that write too.
+ */
+function sameObject(object: Pick<R2Object, "etag"> & { uploaded?: Date }): R2Conditional {
+	return {
+		etagMatches: object.etag,
+		...(object.uploaded ? { uploadedBefore: new Date(object.uploaded.getTime() + 1) } : {}),
+	};
+}
+
 /** `onlyIf` for a create-only put (R2 returns null if the key already exists). */
 export function createOnlyCondition(): Headers {
 	return new Headers({ "If-None-Match": "*" });
@@ -38,11 +49,11 @@ export async function checkWrite(
 	const object = await context.env.MEDIA_BUCKET.head(fullKey);
 	if (!object) return { onlyIf: createOnlyCondition(), exists: false };
 	// Still conditional: an exempt write may replace the object, but not one written since this check.
-	if (options.isLockExempt) return { onlyIf: { etagMatches: object.etag }, exists: true };
+	if (options.isLockExempt) return { onlyIf: sameObject(object), exists: true };
 	const root = fullKey.endsWith(key) ? fullKey.slice(0, fullKey.length - key.length) : undefined;
 	const blocked = await assertWritable(context, [key], "overwrite", root);
 	if (blocked) return { blocked };
-	return { onlyIf: { etagMatches: object.etag }, exists: true };
+	return { onlyIf: sameObject(object), exists: true };
 }
 
 /**

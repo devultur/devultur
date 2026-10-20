@@ -36,6 +36,8 @@ export type LockResolution = { ok: true; lock: ResolvedLock } | { ok: false; err
 export const RETENTION_MODES: readonly RetentionMode[] = ["governance", "compliance"];
 export const RETENTION_DERIVATIVES: readonly RetentionDerivatives[] = ["inherit", "original-only"];
 export const DEFAULT_RETENTION_DERIVATIVES: RetentionDerivatives = "inherit";
+/** Longest `period`: 100 years, in seconds. Beyond it an expiry can't be computed as a date. */
+export const MAX_RETENTION_PERIOD_SECONDS = 100 * 366 * 24 * 60 * 60;
 
 type Raw = Record<string, unknown>;
 
@@ -71,8 +73,10 @@ function validateRetention(input: unknown, path: string, errors: string[]): Rete
 	if (until !== undefined && !isIsoInstant(until)) {
 		errors.push(`${path}.until: must be an ISO 8601 date-time with a zone`);
 	}
-	if (period !== undefined && !(Number.isSafeInteger(period) && (period as number) > 0)) {
-		errors.push(`${path}.period: must be a positive integer number of seconds`);
+	const isPeriodValid =
+		Number.isSafeInteger(period) && (period as number) > 0 && (period as number) <= MAX_RETENTION_PERIOD_SECONDS;
+	if (period !== undefined && !isPeriodValid) {
+		errors.push(`${path}.period: must be a positive integer number of seconds, at most 100 years`);
 	}
 	if (until !== undefined && period !== undefined) errors.push(`${path}: set either until or period, not both`);
 	if (until === undefined && period === undefined) errors.push(`${path}: until or period is required`);

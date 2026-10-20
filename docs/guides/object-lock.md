@@ -29,8 +29,8 @@ type ObjectLock = {
 };
 ```
 
-- **Retention** keeps the file until `until`, or for `period` seconds. Set one of the two: passing both is a `400`. A
-  `period` counts from the upload, or from the moment a hold is released.
+- **Retention** keeps the file until `until`, or for `period` seconds (at most 100 years). Set one of the two: passing
+  both is a `400`. A `period` counts from the upload, or from the moment a hold is released.
 - **Hold** keeps the file indefinitely, whatever its retention says. Releasing it starts the retention's `period`.
   If there's no retention, the file is free again.
 
@@ -63,6 +63,10 @@ after that date passes.
 
 Any lock can be made stricter without privilege: set a later date, a longer period, `inherit`, or a hold. An expired
 retention can be replaced freely.
+
+While a hold is set, a `period` can't be swapped for a fixed `until`. The period only starts at the release, so any
+date could end before it: compliance refuses it, and governance needs the privilege. Release the hold first, or
+extend the period.
 
 ## What's enforced, and where
 
@@ -179,7 +183,13 @@ least that lock. It can ask for a stricter one, never a looser one (`403 lock_be
 
 **Expiry.** A file can't expire while it's locked. An upload whose `expiresIn` (or token or config TTL) ends before
 its lock gets `400 lock_conflicts_expiry`, and so does any expiry on a held file. Keep this in mind with
-`maxFileLifetimeSeconds`.
+`maxFileLifetimeSeconds`. A lock set later (a hold, or an extended retention) can outlast the file's `expiresAt`: the
+file is then still served (not `410`) while it's locked, and expires once it's free. `GET /v1/assets` lists files by
+their `expiresAt` alone, so an expired locked file is left out of the listing.
+
+**Uploads without a pending upload.** A `PUT /v1/upload/<key>` with the Worker secret and no `POST /v1/upload` before
+it gets `config.lock` too, unless the key is a video's derived output (those follow their original through
+`derivatives`).
 
 Locks need the media Worker. In direct-storage mode, `createMediaRouter` throws when an upload asks for a lock,
 because a presigned PUT to the bucket can't enforce one.
@@ -202,8 +212,10 @@ The fields merge over the current retention, and `until` and `period` replace ea
 only. Holds have [their own route](#holds).
 
 R2 can't edit an object's metadata in place, so a change goes to a small record at `{storagePrefix}__lock/<key>`. The
-record is bound to the object version it was written for: a file uploaded again at the same key (once its lock has
-ended) starts from its own upload lock. Two concurrent changes can't both land: the second gets `409 lock_conflict`.
+record is bound to the object version it was written for (R2's per-write `version`, never the etag, which repeats when
+the same bytes are uploaded again). Deleting or overwriting the file deletes the record, and a file uploaded again at
+the same key starts from its own upload lock. Two concurrent changes can't both land: the second gets
+`409 lock_conflict`.
 
 ## Holds
 
@@ -228,7 +240,8 @@ for await (const page of client.lock.holdAll({ prefix: "private/asset/case-17/" 
   date stays.
 - **Releasing:** with a `retention.period`, the period starts now. With a fixed `until`, that date still applies.
   With no retention, the file is free.
-- Image variants under a prefix are skipped, since they're caches.
+- Image variants under a prefix are skipped, since they're caches. The Worker's own records (`__lock/`,
+  `__lock-audit/`) are never listed or changed, whatever the prefix.
 
 ## Audit
 

@@ -1,4 +1,5 @@
 // Deleting an original sweeps everything derived from it: variants, mezzanine, and their L4 keys (without touching neighbors).
+import { encodeEncryptionMeta } from "@devultur/core";
 import { describe, expect, it } from "vitest";
 import { mediaApp, memoryBucket } from "../image/test-support";
 
@@ -14,7 +15,9 @@ async function seed() {
 	const media = memoryBucket();
 	const keys = memoryBucket();
 	for (const key of [ORIGINAL, VARIANT, MEZZANINE, NEIGHBOR, OTHER]) {
-		await media.put(key, bytes, { httpMetadata: { contentType: "image/jpeg" } });
+		// Each object is encrypted with its own key `k1`, at `{key}/k1` in the keys bucket.
+		const customMetadata = { enc: encodeEncryptionMeta(new Uint8Array(16), "k1") };
+		await media.put(key, bytes, { httpMetadata: { contentType: "image/jpeg" }, customMetadata });
 		await keys.put(`${key}/k1`, bytes);
 	}
 	return { media, keys };

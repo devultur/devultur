@@ -2,10 +2,10 @@
 // `assertWritable` first; the bulk helpers below run it for you, so a caller can't sweep a prefix or an object's
 // encryption keys without the check. R2 deletes aren't conditional: a lock set between the check and the delete
 // (milliseconds) isn't seen. That window is accepted (decision 2).
-import { effectiveUntil, isVideoRawKey, type RetentionDerivatives } from "@devultur/core";
+import { decodeEncryptionMeta, effectiveUntil, isVideoRawKey, type RetentionDerivatives } from "@devultur/core";
 import type { Context, MiddlewareHandler } from "hono";
 import { deletePrefix, storageKey } from "../helpers";
-import { isVariantKey } from "../image/transform-plan";
+import { isVariantKey, variantPrefix } from "../image/transform-plan";
 import { getRequestState } from "../request-state";
 import type { WorkerApp } from "../types";
 import { recordLockAudit } from "./audit";
@@ -197,12 +197,31 @@ export async function guardedDeletePrefix(context: GuardContext, prefix: string)
 }
 
 /**
- * Deletes the encryption material of `objectKey` (virtual: an object, or a video folder) from the keys bucket, which
- * lives under `{storageKey}/`. Destroying it destroys the object (crypto-shredding), so the object must be writable.
+ * Deletes one object's encryption material from the keys bucket: its own key (`{storageKey}/{keyId}`, named by its
+ * `enc` metadata) and its variants' (`{storageKey}/__variants/…`). Never a bare `{storageKey}/`: an asset nested under
+ * this one's path (`asset/a` and `asset/a/b.pdf` are both valid) keeps its keys there. Destroying the keys destroys the
+ * object (crypto-shredding), so the object must be writable.
  */
-export async function deleteKeysFor(context: GuardContext, objectKey: string): Promise<GuardedDelete> {
+export async function deleteKeysFor(
+	context: GuardContext,
+	objectKey: string,
+	enc: string | undefined,
+): Promise<GuardedDelete> {
 	const blocked = await assertWritable(context, [objectKey], "delete");
 	if (blocked) return { blocked };
+	const keysBucket = context.env.KEYS_BUCKET;
+	if (!keysBucket) return { deletedCount: 0 };
+	const fullKey = storageKey(context, objectKey);
+	const meta = decodeEncryptionMeta(enc);
+	if (meta) await keysBucket.delete(`${fullKey}/${meta.keyId}`);
+	const variantKeyCount = await deletePrefix(keysBucket, variantPrefix(fullKey));
+	return { deletedCount: variantKeyCount + (meta ? 1 : 0) };
+}
+
+/** Deletes every key of a video folder (virtual `{visibility}/video/{id}`): all of it belongs to that one video. */
+export async function deleteFolderKeys(context: GuardContext, videoFolder: string): Promise<GuardedDelete> {
+	const blocked = await assertWritable(context, [videoFolder], "delete");
+	if (blocked) return { blocked };
 	if (!context.env.KEYS_BUCKET) return { deletedCount: 0 };
-	return { deletedCount: await deletePrefix(context.env.KEYS_BUCKET, `${storageKey(context, objectKey)}/`) };
+	return { deletedCount: await deletePrefix(context.env.KEYS_BUCKET, `${storageKey(context, videoFolder)}/`) };
 }

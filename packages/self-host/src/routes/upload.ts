@@ -11,7 +11,13 @@ import {
 	UPLOAD_TOKEN_TTL_SECONDS,
 } from "../helpers";
 import { resolveUploadLock } from "../object-lock/upload-lock";
-import { afterUploadWrite, assetUploadConflict, failedWrite, prepareUploadWrite } from "../object-lock/upload-write";
+import {
+	afterUploadWrite,
+	assetUploadConflict,
+	failedWrite,
+	prepareUploadWrite,
+	uploadLockOf,
+} from "../object-lock/upload-write";
 import { getRequestState, isAuthenticated } from "../request-state";
 import type { RawStorageClass, UploadPending, UploadRequest, WorkerApp } from "../types";
 import {
@@ -252,7 +258,7 @@ upload.put("/:key{.+}", async (context) => {
 	const customMetadata: Record<string, string> = {
 		...allowedUploadMetadata(pending?.uploadMetadata ?? getRequestState(context).config?.uploadMetadata),
 		...integrityMetadata(digest.sha256, true, pending?.expiresAt),
-		...lockMetadata(pending?.lock),
+		...lockMetadata(uploadLockOf(context, key, pending)),
 	};
 	// The binding override travels in the metadata → the delivery gate resolves it per-resource.
 	if (resourceSecurity) customMetadata.security = JSON.stringify(resourceSecurity);
@@ -273,10 +279,8 @@ upload.put("/:key{.+}", async (context) => {
 	// Conditional put (R2 returns null when the object changed or appeared since the check) → 409.
 	const stored = await context.env.MEDIA_BUCKET.put(finalStorageKey, storedBody, {
 		onlyIf: write.onlyIf,
-		// Standard except for the video raw when the config retains it ≥30 days (Infrequent Access, see
-		// `RAW_STORAGE_CLASS`): IA has a 30-day minimum and charges retrieval ($0.01/GB) on every read — the
-		// transcode's read, and the direct MP4 delivery if it isn't transcoded. With retention `off` the raw lives
-		// for minutes.
+		// Standard, except a video raw the config keeps ≥30 days: Infrequent Access (30-day minimum, and a retrieval
+		// charge on every read, the transcode's included; see `RAW_STORAGE_CLASS`).
 		storageClass,
 		httpMetadata: {
 			contentType,
@@ -287,9 +291,8 @@ upload.put("/:key{.+}", async (context) => {
 	});
 
 	if (stored === null) return failedWrite(context, key, pending, customMetadata.enc);
-
 	if (resolved) await context.env.MEDIA_KV.delete(resolved.kvKey);
-	await afterUploadWrite(context, key, pending);
+	await afterUploadWrite(context, key, pending, write.exists);
 
 	return context.json({ key, size: body.byteLength, sha256: digest.sha256, sha256Verified: true });
 });

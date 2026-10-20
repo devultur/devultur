@@ -135,7 +135,7 @@ describe("PUT /v1/lock/:key", () => {
 			bucket.put = realPut;
 			await realPut(
 				`__lock/${RAW_KEY}`,
-				JSON.stringify({ revision: 1, objectEtag: "etag-0", lock: { hold: true }, updatedAt: "" }),
+				JSON.stringify({ revision: 1, objectVersion: "v0", lock: { hold: true }, updatedAt: "" }),
 			);
 			return realPut(...args);
 		};

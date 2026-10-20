@@ -44,8 +44,13 @@ function satisfiesMinimum(minimum: ObjectLock, lock: ResolvedLock, now: number):
 /** True when the file would expire (410, then swept) while its lock still holds it. */
 function conflictsWithExpiry(lock: ResolvedLock, expiresAt: number, now: number): boolean {
 	if (lock.hold) return true;
-	const until = effectiveUntil(lock, { uploadedAt: now });
-	return until !== undefined && Date.parse(until) > expiresAt;
+	try {
+		const until = effectiveUntil(lock, { uploadedAt: now });
+		return until !== undefined && Date.parse(until) > expiresAt;
+	} catch {
+		// An expiry that can't be computed can't be shown to end before the file does: refuse.
+		return true;
+	}
 }
 
 /** The lock to store on the new object (`undefined`: none), or why the upload is refused. */
