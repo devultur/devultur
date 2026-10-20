@@ -101,11 +101,12 @@ export async function afterUploadWrite(
 	key: string,
 	pending: UploadPending | null,
 	write: Pick<AllowedWrite, "exists" | "replacedEnc">,
+	writtenEnc: string | undefined,
 ): Promise<void> {
 	const fullKey = pending?.storageKey ?? storageKey(context, key);
 	const root = fullKey.endsWith(key) ? fullKey.slice(0, -key.length) : getRequestState(context).storagePrefix;
 	if (pending) await discardStaleVariants(context.env.MEDIA_BUCKET, pending);
-	if (write.exists) await deleteReplacedKey(context, fullKey, write.replacedEnc);
+	if (write.exists) await deleteReplacedKey(context, fullKey, write.replacedEnc, writtenEnc);
 	const lock = uploadLockOf(context, key, pending);
 	if (!lock) return;
 	await recordLockAudit(context, {

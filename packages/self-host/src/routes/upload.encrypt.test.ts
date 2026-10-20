@@ -32,7 +32,7 @@ function uploadSetup(options?: { security?: SecurityPolicy; pending?: Record<str
 	const pendingRaw = options?.pending ? JSON.stringify(options.pending) : null;
 	const env = {
 		MEDIA_BUCKET: { put: mediaPut, head: async () => null, list: async () => ({ objects: [], truncated: false }) },
-		KEYS_BUCKET: { put: keysPut },
+		KEYS_BUCKET: { put: keysPut, head: async (path: string) => (keysStore.has(path) ? { key: path } : null) },
 		MEDIA_KV: {
 			get: async (kvKey: string) => (kvKey === `upload-pending:${PENDING_ID}` ? pendingRaw : null),
 			put: async () => {},

@@ -17,7 +17,7 @@ export interface MediaRecord {
 	filename: string;
 	contentType: string;
 	sizeBytes: number;
-	/** Set by a confirmed upload; unset on records from before 1.1.1. */
+	/** Set by a confirmed upload; unset on records from before 1.1.0. */
 	visibility?: "public" | "private";
 	/** Key of the uploaded object (a video's raw file). Set by a confirmed upload. */
 	objectKey?: string;

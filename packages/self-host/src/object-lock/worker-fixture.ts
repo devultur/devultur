@@ -14,8 +14,11 @@ export const MP4_KEY = "private/video/vid1/mp4/main-720p.mp4";
 export const RAW_UNTIL = "2999-01-01T00:00:00Z";
 
 export function lockedFixture(options: { plugins?: WorkerPlugin[]; config?: WorkerConfig } = {}) {
-	const mediaBucket = memoryBucket();
-	const keysBucket = memoryBucket();
+	// One clock for both buckets, like R2's: a key and the object it encrypts compare by when each was written.
+	let writes = 0;
+	const now = () => new Date(++writes);
+	const mediaBucket = memoryBucket({ now });
+	const keysBucket = memoryBucket({ now });
 	const kv = new Map<string, string>();
 	const lock = JSON.stringify({ retention: { mode: "compliance", until: RAW_UNTIL }, hold: false });
 	mediaBucket.objects.set(RAW_KEY, { bytes: new Uint8Array(4), httpMetadata: {}, customMetadata: { lock } });

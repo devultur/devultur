@@ -43,6 +43,7 @@ export interface StoredObject {
 	body: Uint8Array<ArrayBuffer>;
 	contentType: string;
 	customMetadata: Record<string, string>;
+	uploaded?: Date;
 }
 
 interface PutOptions {
@@ -72,7 +73,7 @@ export function memoryBucket() {
 		},
 		async head(key: string) {
 			const stored = objects.get(key);
-			return stored ? { key, customMetadata: stored.customMetadata } : null;
+			return stored ? { key, uploaded: stored.uploaded ?? new Date(0), customMetadata: stored.customMetadata } : null;
 		},
 		async put(key: string, body: ArrayBuffer | Uint8Array, options?: PutOptions) {
 			const bytes = new Uint8Array(body instanceof Uint8Array ? body.slice() : body.slice(0));
@@ -80,6 +81,7 @@ export function memoryBucket() {
 				body: bytes,
 				contentType: options?.httpMetadata?.contentType ?? "",
 				customMetadata: options?.customMetadata ?? {},
+				uploaded: new Date(),
 			});
 			return { key };
 		},
@@ -88,7 +90,14 @@ export function memoryBucket() {
 		},
 		async list({ prefix }: { prefix: string }) {
 			const keys = [...objects.keys()].filter((key) => key.startsWith(prefix));
-			return { objects: keys.map((key) => ({ key, size: objects.get(key)?.body.byteLength ?? 0 })), truncated: false };
+			return {
+				objects: keys.map((key) => ({
+					key,
+					size: objects.get(key)?.body.byteLength ?? 0,
+					uploaded: objects.get(key)?.uploaded ?? new Date(0),
+				})),
+				truncated: false,
+			};
 		},
 	};
 }

@@ -260,8 +260,11 @@ export function exportsWorker(options: ExportsWorkerOptions = {}) {
 		lock,
 		...variables
 	} = options;
-	const mediaBucket = memoryBucket();
-	const keysBucket = memoryBucket();
+	// One clock for both buckets, like R2's: a key and the object it encrypts compare by when each was written.
+	let writes = 0;
+	const now = () => new Date(++writes);
+	const mediaBucket = memoryBucket({ now });
+	const keysBucket = memoryBucket({ now });
 	const kv = memoryKv();
 	const links = downloadLinkNamespace();
 	const app = new Hono<WorkerApp>();

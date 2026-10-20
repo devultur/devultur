@@ -99,6 +99,7 @@ function setup(options: SetupOptions = {}) {
 				const stored = keys.get(path);
 				return stored ? { arrayBuffer: async () => stored, customMetadata: undefined } : null;
 			},
+			head: async (path: string) => (keys.has(path) ? { key: path } : null),
 		},
 	} as unknown as WorkerApp["Bindings"];
 

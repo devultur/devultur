@@ -83,7 +83,7 @@ await saveCover({ cover: media }); // a DevulturMedia: stores as-is in a dv.medi
 ```
 
 The PUT goes through `XMLHttpRequest` (`fetch` reports no upload progress), in parts for large files. `key` is an
-optional field of `DevulturMedia` and of `dv.media()` (since 1.1.1), so references stored without it stay valid. It
+optional field of `DevulturMedia` and of `dv.media()` (since 1.1.0), so references stored without it stay valid. It
 is informational: delivery URLs are still derived from `id`, `kind`, `visibility` and `filename`.
 
 ## Media library
@@ -140,10 +140,18 @@ A record is written only after the Worker confirms the object exists, so an aban
 
 A record's `key` is the media id for every kind (what `getMedia` takes), and `objectKey` is the uploaded object's key.
 `confirmUpload` only accepts upload keys (`{visibility}/{image|file}/{id}/{name}`, `{visibility}/video/{id}/raw/{name}`)
-and is idempotent: a video's transcode state stays as it is. `deleteMedia` removes an image's or a file's record once
+and is idempotent: a video's transcode state stays as it is.
+
+`confirmUpload`, like every function `exposeApi` returns (and the `devultur-init` template exports), has no auth of
+its own: anyone who can call your Convex deployment can call it. Wrap it with your app's auth, as you would the other
+exposed functions: export your own action that checks `ctx.auth` and then calls `devultur.confirmUpload(ctx, { key })`.
+The caller only names the key: the record's visibility, size and content type come from the Worker's `HEAD` of the
+object, never from the arguments.
+
+`deleteMedia` removes an image's or a file's record once
 the Worker deleted the object (a delete refused by a lock keeps it). `deleteVideo` removes a video's.
 
-Records from before 1.1.1 (and a video only `processVideo` recorded) have no `visibility` or `objectKey`;
+Records from before 1.1.0 (and a video only `processVideo` recorded) have no `visibility` or `objectKey`;
 `mediaFromRecord` returns `null` for them. Nothing needs migrating: the new fields are optional. `listMedia` doesn't
 report an object's lock: read it from an action with `devultur.getLock(ctx, record.objectKey)`.
 

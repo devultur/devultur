@@ -3,7 +3,7 @@ import type { MediaRecord } from "./types";
 
 /**
  * The `DevulturMedia` reference of a component record (a `listMedia` row), ready for `<Image>`, `<DownloadLink>` or a
- * `dv.media()` field. `null` for a record without a visibility: one from before 1.1.1, or a video only `processVideo`
+ * `dv.media()` field. `null` for a record without a visibility: one from before 1.1.0, or a video only `processVideo`
  * recorded.
  */
 export function mediaFromRecord(record: MediaRecord): DevulturMedia | null {
