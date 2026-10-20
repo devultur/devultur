@@ -36,6 +36,7 @@ import {
 	discardStaleVariants,
 	headerSha256,
 	integrityMetadata,
+	lockMetadata,
 	sha256Mismatch,
 	targetFailure,
 } from "./upload-integrity";
@@ -135,6 +136,7 @@ async function handleMultipartCreate(context: UploadContext, key: string, target
 	const customMetadata: Record<string, string> = {
 		...allowedUploadMetadata(pending.uploadMetadata),
 		...integrityMetadata(declaredSha256, false, pending.expiresAt),
+		...lockMetadata(pending.lock),
 	};
 	if (pending.security) customMetadata.security = JSON.stringify(pending.security);
 	const policy = resolveSecurity(pending.security, getRequestState(context).config?.security);

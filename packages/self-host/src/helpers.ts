@@ -229,8 +229,11 @@ export async function hashKey(key: string): Promise<string> {
 		.join("");
 }
 
-// Lists and batch-deletes every object under a prefix (R2 deletes up to 1000 keys/call).
-// Returns how many it deleted. Idempotent: empty prefix → 0.
+/**
+ * Lists and batch-deletes every object under `prefix` (R2 deletes up to 1000 keys/call) and returns how many it
+ * deleted. Idempotent: empty prefix → 0. It bypasses object locks: routes delete through `guardedDeletePrefix` and
+ * `deleteKeysFor` (object-lock/guard.ts). Use this only for regenerable data (image variants) or after the guard ran.
+ */
 export async function deletePrefix(bucket: R2Bucket, prefix: string): Promise<number> {
 	let deletedCount = 0;
 	let cursor: string | undefined;

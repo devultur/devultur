@@ -1,7 +1,7 @@
 // Request state: everything the plugins tell the routes about the current request, in one context variable. Every
 // request starts at the bucket root with no rules; plugins narrow it with `updateRequestState` (for example the storage
 // prefix and the rules of whoever the credential belongs to). The routes only read it with `getRequestState`.
-import type { CacheRule, SecurityPolicy, TranscodeSettings } from "@devultur/core";
+import type { CacheRule, ObjectLock, SecurityPolicy, TranscodeSettings } from "@devultur/core";
 import type { Context } from "hono";
 import type { UploadGrant } from "./export-types";
 import type { MaxResolution, RawStorageClass, UploadRules } from "./types";
@@ -58,9 +58,14 @@ export interface WorkerConfig {
 	/**
 	 * R2 custom metadata added to every object the request uploads (also on the later credential-less PUT), for example
 	 * which app or user uploaded it. Keys the Worker owns (integrity `sha256*`, `expiresAt`, `security`, `enc`,
-	 * `derivedFrom`) are dropped from it.
+	 * `derivedFrom`, `lock`) are dropped from it.
 	 */
 	uploadMetadata?: Record<string, string>;
+	/**
+	 * Default lock of an uploaded file: retention (`governance` or `compliance`, until a date or for a period) and hold.
+	 * The upload request (or its upload token) overrides it. Unset: files aren't locked.
+	 */
+	lock?: ObjectLock;
 	transcode?: TranscodeConfig;
 }
 

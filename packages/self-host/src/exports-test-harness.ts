@@ -1,7 +1,8 @@
-// Harness for the private exports tests: in-memory R2 with metadata, `onlyIf` (If-None-Match: *), ranges and
+// Harness for the private exports tests: in-memory R2 with metadata, `uploaded`, `onlyIf` (If-None-Match: * and
+// `etagMatches`), ranges and
 // multipart; in-memory KV; and a Durable Objects namespace that instantiates the real `DownloadLink` class with an
 // in-memory storage and a `blockConcurrencyWhile` that, like the Workers one, doesn't let anything else run meanwhile.
-import type { CacheRule, SecurityPolicy } from "@devultur/core";
+import type { CacheRule, ObjectLock, SecurityPolicy } from "@devultur/core";
 import { Hono } from "hono";
 import { DownloadLink, type DownloadLinkState, type DownloadLinkStorage } from "./download-link";
 import { type PluginContext, updateRequestState } from "./request-state";
@@ -18,12 +19,28 @@ interface StoredObject {
 	bytes: Uint8Array;
 	httpMetadata: Record<string, string>;
 	customMetadata: Record<string, string>;
+	/** Set by every write; a test that seeds `objects` directly may leave it out (the epoch). */
+	uploaded?: Date;
+	/** Changes on every write, so `onlyIf.etagMatches` can tell a stale read from the current object. */
+	etag?: string;
 }
 
 interface PutOptions {
 	httpMetadata?: Record<string, string>;
 	customMetadata?: Record<string, string>;
-	onlyIf?: Headers;
+	onlyIf?: Headers | { etagMatches?: string };
+}
+
+export interface MemoryBucketOptions {
+	/** `uploaded` of each write. Default: the epoch, so listings stay deterministic. */
+	now?: () => Date;
+}
+
+function failsCondition(onlyIf: PutOptions["onlyIf"], existing: StoredObject | undefined): boolean {
+	if (!onlyIf) return false;
+	if (onlyIf instanceof Headers) return onlyIf.get("If-None-Match") === "*" && existing !== undefined;
+	if (onlyIf.etagMatches === undefined) return false;
+	return existing?.etag !== onlyIf.etagMatches.replaceAll('"', "");
 }
 
 function toBytes(value: ArrayBuffer | Uint8Array | string): Uint8Array {
@@ -34,7 +51,9 @@ function r2Body(key: string, stored: StoredObject, bytes = stored.bytes) {
 	return {
 		key,
 		size: stored.bytes.byteLength,
-		httpEtag: `"etag-${key.length}"`,
+		etag: stored.etag ?? "etag-0",
+		httpEtag: `"${stored.etag ?? "etag-0"}"`,
+		uploaded: stored.uploaded ?? new Date(0),
 		httpMetadata: stored.httpMetadata,
 		customMetadata: stored.customMetadata,
 		body: new Blob([bytes as BlobPart]).stream(),
@@ -43,8 +62,10 @@ function r2Body(key: string, stored: StoredObject, bytes = stored.bytes) {
 	};
 }
 
-export function memoryBucket() {
+export function memoryBucket({ now = () => new Date(0) }: MemoryBucketOptions = {}) {
 	const objects = new Map<string, StoredObject>();
+	let writes = 0;
+	const stamp = () => ({ uploaded: now(), etag: `etag-${++writes}` });
 	const sessions = new Map<string, { key: string; options: PutOptions; parts: Map<number, Uint8Array> }>();
 	const resumeMultipartUpload = (key: string, uploadId: string) => ({
 		uploadPart: async (partNumber: number, value: ArrayBuffer | Uint8Array) => {
@@ -59,6 +80,7 @@ export function memoryBucket() {
 				bytes,
 				httpMetadata: session?.options.httpMetadata ?? {},
 				customMetadata: session?.options.customMetadata ?? {},
+				...stamp(),
 			});
 			return { size: bytes.byteLength };
 		},
@@ -67,11 +89,12 @@ export function memoryBucket() {
 	return {
 		objects,
 		put: async (key: string, value: ArrayBuffer | Uint8Array | string, options: PutOptions = {}) => {
-			if (options.onlyIf?.get("If-None-Match") === "*" && objects.has(key)) return null;
+			if (failsCondition(options.onlyIf, objects.get(key))) return null;
 			objects.set(key, {
 				bytes: toBytes(value),
 				httpMetadata: options.httpMetadata ?? {},
 				customMetadata: options.customMetadata ?? {},
+				...stamp(),
 			});
 			return { key };
 		},
@@ -83,7 +106,9 @@ export function memoryBucket() {
 		},
 		head: async (key: string) => {
 			const stored = objects.get(key);
-			return stored ? { key, size: stored.bytes.byteLength, customMetadata: stored.customMetadata } : null;
+			if (!stored) return null;
+			const { size, etag, httpEtag, uploaded, httpMetadata, customMetadata } = r2Body(key, stored);
+			return { key, size, etag, httpEtag, uploaded, httpMetadata, customMetadata };
 		},
 		list: async ({ prefix = "", limit = 1000, cursor }: { prefix?: string; limit?: number; cursor?: string }) => {
 			const start = Number(cursor ?? "0");
@@ -94,8 +119,9 @@ export function memoryBucket() {
 				objects: page.map(([key, stored]) => ({
 					key,
 					size: stored.bytes.byteLength,
-					httpEtag: `"etag-${key.length}"`,
-					uploaded: new Date(0),
+					etag: stored.etag ?? "etag-0",
+					httpEtag: `"${stored.etag ?? "etag-0"}"`,
+					uploaded: stored.uploaded ?? new Date(0),
 					httpMetadata: stored.httpMetadata,
 					customMetadata: stored.customMetadata,
 				})),
@@ -181,6 +207,7 @@ export interface ExportsWorkerOptions extends Partial<WorkerVariables> {
 	context?: PluginContext;
 	maxFileLifetimeSeconds?: number;
 	uploadMetadata?: Record<string, string>;
+	lock?: ObjectLock;
 }
 
 export function exportsWorker(options: ExportsWorkerOptions = {}) {
@@ -192,6 +219,7 @@ export function exportsWorker(options: ExportsWorkerOptions = {}) {
 		context: pluginContext,
 		maxFileLifetimeSeconds,
 		uploadMetadata,
+		lock,
 		...variables
 	} = options;
 	const mediaBucket = memoryBucket();
@@ -207,6 +235,7 @@ export function exportsWorker(options: ExportsWorkerOptions = {}) {
 				...(cacheRules ? { cacheRules } : {}),
 				...(maxFileLifetimeSeconds ? { maxFileLifetimeSeconds } : {}),
 				...(uploadMetadata ? { uploadMetadata } : {}),
+				...(lock ? { lock } : {}),
 			},
 			access: { ...(uploadGrant ? { uploadGrant } : {}), ...(ownerAccess ? { trustedRead: true } : {}) },
 			...(pluginContext ? { context: pluginContext } : {}),

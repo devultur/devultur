@@ -1,4 +1,4 @@
-import type { MediaType, SecurityPolicy, TranscodeSpec, Visibility } from "@devultur/core";
+import type { MediaType, ObjectLock, ResolvedLock, SecurityPolicy, TranscodeSpec, Visibility } from "@devultur/core";
 import type { UploadGrant } from "./export-types";
 import type { PluginHooks } from "./plugin-hooks";
 import type { PluginContext, RequestState } from "./request-state";
@@ -197,6 +197,10 @@ export interface UploadRequest {
 	size?: number;
 	/** `Cache-Control` of an asset: preset (`immutable` | `revalidate` | `no-cache`) or a validated string. */
 	cacheControl?: string;
+	/** Lock of the new file (retention and/or hold). Resolved against the token's minimum and the config default. */
+	lock?: ObjectLock;
+	/** Shorthand for `lock.hold`: retain the file indefinitely from the moment it exists. */
+	hold?: boolean;
 }
 
 export interface UploadPending {
@@ -228,6 +232,8 @@ export interface UploadPending {
 	cacheControl?: string;
 	/** `config.uploadMetadata` of the POST → the object's `customMetadata` (under the Worker's own). */
 	uploadMetadata?: Record<string, string>;
+	/** Lock resolved in the POST → the object's `customMetadata.lock`, in the same write as its bytes. */
+	lock?: ResolvedLock;
 }
 
 export interface MultipartPending {

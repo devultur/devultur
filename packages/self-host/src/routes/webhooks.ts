@@ -33,7 +33,9 @@ webhooks.post("/transcode", async (context) => {
 	if (body.event === "transcode.complete" && body.videoId) {
 		// The raw is retained unless the config asked to delete it on completion (`deleteOriginalOnSuccess`): only
 		// after a successful transcode; a `transcode.failed` never touches it.
-		if (await disposeRawAfterTranscode(context.env, body.videoId)) addRouteResult(context, { originalDeleted: true });
+		const disposal = await disposeRawAfterTranscode(context.env, body.videoId);
+		if (disposal === "deleted") addRouteResult(context, { originalDeleted: true });
+		if (disposal === "retained") addRouteResult(context, { originalRetained: true });
 		await context.env.MEDIA_KV.put(
 			`${KvPrefix.TRANSCODE_META}:${body.videoId}`,
 			JSON.stringify({ duration: body.duration }),

@@ -8,6 +8,7 @@ import {
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+import { rejectReservedLockPaths } from "./object-lock/guard";
 import { composePlugins, type WorkerPlugin } from "./plugin";
 import { PLUGIN_HOOKS_VARIABLE } from "./plugin-hooks";
 import { defaultPlugins } from "./plugins";
@@ -25,6 +26,8 @@ export { deletePrefix, hashKey, isServiceToken, storageKey, verifyViewerToken } 
 export { imageOriginAuthorization, isImageOriginRequest, readImageOriginScope } from "./image/cloudflare";
 export { type ImageTransformParams, parseTransformParams } from "./image/params";
 export { isVariantKey, variantPrefix } from "./image/transform-plan";
+export { RESERVED_LOCK_PREFIXES } from "./object-lock/guard";
+export { LOCK_METADATA_KEY } from "./object-lock/state";
 export type { ComposedPlugins, PluginMiddleware, PluginRoute, WorkerPlugin } from "./plugin";
 export type {
 	AllowedCredential,
@@ -113,6 +116,7 @@ export function createWorker(options?: CreateWorkerOptions) {
 		context.set(PLUGIN_HOOKS_VARIABLE, hooks);
 		await next();
 	});
+	app.use("/v1/*", rejectReservedLockPaths);
 	for (const handler of middleware) app.use("*", handler);
 
 	app.get("/health", (c) => c.json({ status: "ok" }));

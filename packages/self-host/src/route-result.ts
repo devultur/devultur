@@ -29,6 +29,8 @@ export interface RouteResult {
 	redeemedLink?: DownloadLinkInfo;
 	/** `transcode.complete` deleted the video's original (`config.transcode.deleteOriginalOnSuccess`). */
 	originalDeleted?: boolean;
+	/** `transcode.complete` was asked to delete the original but kept it: it's locked (retention or hold). */
+	originalRetained?: boolean;
 	/** The transcode callback carried a valid job ticket: the job it belongs to. */
 	transcodeJob?: TranscodeJob;
 }

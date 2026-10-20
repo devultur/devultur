@@ -1,9 +1,10 @@
 // Upload integrity and TTL: the plaintext's sha256 (before L4 encryption), the metadata that carries it onto the R2
 // object, and the error responses shared by the single PUT, multipart, and the creation POST.
-import { normalizeSha256, SHA256_HEADER, sha256Hex } from "@devultur/core";
+import { normalizeSha256, type ResolvedLock, SHA256_HEADER, sha256Hex } from "@devultur/core";
 import type { Context } from "hono";
 import { deletePrefix } from "../helpers";
 import { variantPrefix } from "../image/transform-plan";
+import { encodeLockMetadata, LOCK_METADATA_KEY } from "../object-lock/state";
 import type { WorkerApp } from "../types";
 import type { UploadTargetError } from "./upload-target";
 
@@ -20,10 +21,16 @@ export const ObjectMeta = {
 
 /**
  * `customMetadata` keys the Worker itself writes and reads (besides `sha256*`): security policy,
- * encryption material, expiry, and the marker for image variants. Lowercase (R2's S3-based keys are
+ * encryption material, expiry, the marker for image variants, and the object lock. Lowercase (R2's S3-based keys are
  * case-insensitive).
  */
-const WORKER_METADATA_KEYS = new Set(["security", "enc", ObjectMeta.EXPIRES_AT.toLowerCase(), "derivedfrom"]);
+const WORKER_METADATA_KEYS = new Set([
+	"security",
+	"enc",
+	ObjectMeta.EXPIRES_AT.toLowerCase(),
+	"derivedfrom",
+	LOCK_METADATA_KEY,
+]);
 
 function isWorkerMetadataKey(key: string): boolean {
 	const lowerKey = key.toLowerCase();
@@ -77,6 +84,12 @@ export async function digestBody(
 	const expected = declared ?? header;
 	if (expected && expected !== actual) return { mismatch: { expected, actual } };
 	return { sha256: actual };
+}
+
+/** The lock metadata for the object (`{}` when it isn't locked). */
+export function lockMetadata(lock: ResolvedLock | undefined): Record<string, string> {
+	const encoded = encodeLockMetadata(lock);
+	return encoded ? { [LOCK_METADATA_KEY]: encoded } : {};
 }
 
 /** Integrity/TTL metadata for the object. */
