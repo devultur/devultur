@@ -17,7 +17,6 @@ package's source.
 - [Retention and holds](guides/object-lock.md): compliance and governance retention, holds, audit, and the
   caveats
 - [Framework examples](guides/framework-examples.md)
-- [Upgrading to 1.1 and 1.2](guides/upgrading.md): what changed, and what to do after upgrading
 - [Convex component with a self-hosted Worker](../packages/convex/README.md#using-a-self-hosted-worker), its
   [media library](../packages/convex/README.md#media-library), [errors](../packages/convex/README.md#errors) and
   [object lock](../packages/convex/README.md#object-lock)
