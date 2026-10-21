@@ -83,8 +83,8 @@ await saveCover({ cover: media }); // a DevulturMedia: stores as-is in a dv.medi
 ```
 
 The PUT goes through `XMLHttpRequest` (`fetch` reports no upload progress), in parts for large files. `key` is an
-optional field of `DevulturMedia` and of `dv.media()` (since 1.1.0), so references stored without it stay valid. It
-is informational: delivery URLs are still derived from `id`, `kind`, `visibility` and `filename`.
+optional field of `DevulturMedia` and of `dv.media()`. It is informational: delivery URLs are derived from `id`,
+`kind`, `visibility` and `filename`.
 
 ## Media library
 
@@ -148,12 +148,11 @@ exposed functions: export your own action that checks `ctx.auth` and then calls 
 The caller only names the key: the record's visibility, size and content type come from the Worker's `HEAD` of the
 object, never from the arguments.
 
-`deleteMedia` removes an image's or a file's record once
-the Worker deleted the object (a delete refused by a lock keeps it). `deleteVideo` removes a video's.
+`deleteMedia` removes an image's or a file's record once the Worker
+deleted the object (a delete refused by a lock keeps it). `deleteVideo` removes a video's.
 
-Records from before 1.1.0 (and a video only `processVideo` recorded) have no `visibility` or `objectKey`;
-`mediaFromRecord` returns `null` for them. Nothing needs migrating: the new fields are optional. `listMedia` doesn't
-report an object's lock: read it from an action with `devultur.getLock(ctx, record.objectKey)`.
+A video only `processVideo` recorded has no `visibility` or `objectKey`, and `mediaFromRecord` returns `null` for
+it. `listMedia` doesn't report an object's lock: read it from an action with `devultur.getLock(ctx, record.objectKey)`.
 
 ## Using a self-hosted Worker
 
