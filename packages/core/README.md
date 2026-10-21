@@ -30,6 +30,10 @@ const { token } = await worker.issueToken("user_123");
 const src = buildMediaUrl("https://media.example.com", key, { token, width: 640, format: "webp" });
 ```
 
+`worker.lock` reads and changes a file's retention and holds (`get`, `set`, `hold`, `release`, `holdAll`,
+`releaseAll`), and a refusal surfaces as a `DevulturApiError` with its `code` and `details`. See
+[Retention and holds](https://github.com/devultur/devultur/blob/main/docs/guides/object-lock.md).
+
 ## Documentation
 
 Guides and API reference: [github.com/devultur/devultur/tree/main/docs](https://github.com/devultur/devultur/tree/main/docs).

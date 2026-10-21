@@ -12,6 +12,8 @@ and your React app.
   your bucket.
 - **Private delivery**: short-lived viewer tokens bound to a session, single-use download links, and optional
   encryption at rest (AES-CTR for files, AES-128 HLS for video).
+- **Retention and holds**: keep files from being deleted or overwritten until a date or until released
+  (compliance and governance modes, legal holds, an audit trail), enforced by the Worker on every route.
 - **React components**: `VideoPlayer`, `UploadZone`, captions, transcripts and progress tracking.
 
 ## Packages
@@ -113,10 +115,11 @@ Using Convex? `@devultur/convex` wraps all of this in a component with typed val
 
 The guides in [`docs/`](docs) cover the Worker and the SDKs:
 
-- [Self-host the media Worker](docs/guides/self-host.md)
+- [Self-host the media Worker](docs/guides/self-host.md) · [Plugins](docs/guides/plugins.md)
 - [Uploads](docs/guides/uploads.md) · [Media references & delivery](docs/guides/media-references.md)
 - [Video processing](docs/guides/video-processing.md) · [Video player](docs/guides/video-player.md)
 - [Progress tracking](docs/guides/progress-tracking.md) · [Security](docs/guides/security.md)
+- [Retention and holds](docs/guides/object-lock.md) · [Upgrading to 1.1 and 1.2](docs/guides/upgrading.md)
 - [Framework examples](docs/guides/framework-examples.md) · [React components and hooks](docs/react)
 
 ## Development

@@ -17,6 +17,7 @@ type DevulturMedia = {
   filename?: string;                   // original name (display / download)
   width?: number;                      // intrinsic dimensions (no layout shift)
   height?: number;
+  key?: string;                        // the uploaded object's key (informational)
 };
 ```
 
