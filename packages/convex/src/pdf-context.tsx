@@ -2,6 +2,7 @@
 
 import React from "react";
 import type { PdfjsLoader, PdfjsModule } from "./pdf-render";
+import { mergePreviewLabels, type PreviewLabels } from "./preview-labels";
 
 export interface PdfPreviewConfig {
 	/**
@@ -11,19 +12,27 @@ export interface PdfPreviewConfig {
 	pdfjs?: PdfjsLoader;
 	/** URL of `pdf.worker.min.mjs`, set on `GlobalWorkerOptions.workerSrc` before a document opens. */
 	workerSrc?: string;
+	/** Labels for every `<Preview>` and `<PdfThumbnail>` below it; a component's own `labels` win over these. */
+	labels?: Partial<PreviewLabels>;
 }
 
 const PdfPreviewContext = React.createContext<PdfPreviewConfig>({});
 
 /**
- * Renders the PDFs of every `<Preview>` and `<PdfThumbnail>` below it with pdf.js, on a `<canvas>`.
+ * Renders the PDFs of every `<Preview>` and `<PdfThumbnail>` below it with pdf.js, on a `<canvas>`, and gives them
+ * default `labels`.
  *
  * @example
  * import { loadPdfjs } from "@devultur/convex/pdfjs";
  * <PdfPreviewProvider pdfjs={loadPdfjs}>{children}</PdfPreviewProvider>
  */
-export function PdfPreviewProvider({ pdfjs, workerSrc, children }: PdfPreviewConfig & { children: React.ReactNode }) {
-	const config = React.useMemo(() => ({ pdfjs, workerSrc }), [pdfjs, workerSrc]);
+export function PdfPreviewProvider({
+	pdfjs,
+	workerSrc,
+	labels,
+	children,
+}: PdfPreviewConfig & { children: React.ReactNode }) {
+	const config = React.useMemo(() => ({ pdfjs, workerSrc, labels }), [pdfjs, workerSrc, labels]);
 	return <PdfPreviewContext.Provider value={config}>{children}</PdfPreviewContext.Provider>;
 }
 
@@ -63,4 +72,10 @@ export function usePdfjs(workerSrcOverride?: string): PdfjsState {
 	if (loaded?.loader !== loader) return { status: "loading" };
 	if (!loaded.pdfjs) return { status: "unavailable" };
 	return { status: "ready", pdfjs: loaded.pdfjs, workerSrc: workerSrcOverride ?? workerSrc };
+}
+
+/** The English defaults, overridden by the nearest provider's `labels`, then by the component's own. */
+export function usePreviewLabels(labels?: Partial<PreviewLabels>): PreviewLabels {
+	const providerLabels = React.useContext(PdfPreviewContext).labels;
+	return mergePreviewLabels(providerLabels, labels);
 }

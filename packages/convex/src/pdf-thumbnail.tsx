@@ -3,10 +3,11 @@
 import React from "react";
 import type { DevulturMedia } from "@devultur/core";
 import { useMediaResource } from "./media-resource";
-import { usePdfjs } from "./pdf-context";
+import { usePdfjs, usePreviewLabels } from "./pdf-context";
 import { useIsVisible, usePageRender, usePdfDocument } from "./pdf-hooks";
 import { keepBytes } from "./pdf-preview";
 import type { PdfjsModule } from "./pdf-render";
+import type { PreviewLabels } from "./preview-labels";
 import { expectedContentType, previewKindOf } from "./preview-type";
 
 const DEFAULT_THUMBNAIL_WIDTH = 96;
@@ -25,11 +26,13 @@ export interface PdfThumbnailProps {
 	fallback?: React.ReactNode;
 	/** Shown until page 1 is drawn, including while off-screen. Default: nothing. */
 	loading?: React.ReactNode;
-	/** Accessible name of the thumbnail. Default: the filename. */
+	/** Title the accessible name is built from (`labels.thumbnail`). Default: the filename. */
 	title?: string;
 	className?: string;
 	/** Overrides the provider's `workerSrc`. */
 	pdfWorkerSrc?: string;
+	/** Overrides `thumbnail` and `untitledPdf`; wins over `PdfPreviewProvider`'s `labels`. English by default. */
+	labels?: Partial<PreviewLabels>;
 }
 
 /**
@@ -44,6 +47,7 @@ export function PdfThumbnail(props: PdfThumbnailProps) {
 	const containerRef = React.useRef<HTMLDivElement>(null);
 	const isVisible = useIsVisible(containerRef);
 	const pdfjsState = usePdfjs(props.pdfWorkerSrc);
+	const labels = usePreviewLabels(props.labels);
 	const expectedType = media ? expectedContentType(media, contentType) : null;
 	const isPdf = previewKindOf(expectedType) === "pdf";
 	const { value: bytes, error } = useMediaResource(media, {
@@ -64,7 +68,7 @@ export function PdfThumbnail(props: PdfThumbnailProps) {
 				workerSrc={pdfjsState.workerSrc}
 				bytes={bytes}
 				width={width}
-				label={props.title ?? media.filename ?? "PDF"}
+				label={labels.thumbnail(props.title ?? media.filename ?? labels.untitledPdf)}
 				fallback={fallback}
 				loading={loading}
 			/>
