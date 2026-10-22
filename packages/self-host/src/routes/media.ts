@@ -23,6 +23,7 @@ import { resolveWorkerVariant, workerVariantKey } from "../image/worker-transfor
 import { expiredRefusal, lockHeaders } from "../object-lock/delivery";
 import { getRequestState } from "../request-state";
 import type { WorkerApp } from "../types";
+import { applyContentSafety, contentSafety } from "./content-safety";
 import { cacheDelivered, type EdgeCopyTarget, matchEdgeCopy, publicEdgeCache } from "./edge-cache";
 import { handleKeyDelete, handleVideoDelete } from "./media-delete";
 import { objectExpiresAt, streamObject } from "./object-response";
@@ -47,6 +48,9 @@ function downloadDisposition(storedDisposition: string | undefined, key: string,
 }
 
 const media = new Hono<WorkerApp>();
+
+// `nosniff` on every response, and sandbox + attachment for types that would render as a document (content-safety.ts).
+media.use("*", contentSafety);
 
 media.get("/:key{.+}", async (context) => {
 	const key = context.req.param("key");
@@ -231,6 +235,8 @@ media.get("/:key{.+}", async (context) => {
 		headers.set("Content-Disposition", object.httpMetadata.contentDisposition);
 	}
 	if (isOwnerAccess) for (const [name, value] of await lockHeaders(context, key, object)) headers.set(name, value);
+	// Here too (not only in the middleware) so the edge copy stores them.
+	applyContentSafety(headers, key.split("/").pop() ?? "");
 
 	const { response, kind } = await streamObject({
 		bucket: context.env.MEDIA_BUCKET,

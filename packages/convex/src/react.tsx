@@ -29,11 +29,16 @@ import {
 import { useAction, useConvex, useMutation, useQuery } from "convex/react";
 import type { FunctionReference } from "convex/server";
 import { isSessionMismatch } from "./image-recovery";
+import { fetchMedia } from "./media-fetch";
 import { deriveUploadState, type UploadPhase } from "./media-upload-derive";
 
 export type { MediaUploadError, MediaUploadState, UploadProgress } from "@devultur/react";
 export type { CropUploadLabels, CropUploadProps, CropUploadRenderProps } from "./crop-upload";
 export { CropUpload } from "./crop-upload";
+export { MediaFetchError, type MediaFetchErrorCode } from "./media-fetch";
+export { type MediaObjectUrl, type UseMediaObjectUrlOptions, useMediaObjectUrl } from "./media-object-url";
+export { Preview, type PreviewProps } from "./preview";
+export type { PreviewKind } from "./preview-type";
 
 /** Transform/delivery options for media URLs (without `token`, which the context injects). */
 type MediaRenderOptions = Omit<MediaUrlOptions, "token">;
@@ -510,34 +515,42 @@ export function Image({
 	alt,
 	...imgProps
 }: ImageProps) {
-	const { url, reissueToken, sessionSecret } = useDevultur();
+	const { url, token, baseUrl, reissueToken, sessionSecret } = useDevultur();
 	const [failed, setFailed] = React.useState(false);
 	const [blobSrc, setBlobSrc] = React.useState<string | null>(null);
-	const retriedRef = React.useRef(false);
+	// Read when the fetch starts: a re-issued or renewed token must not re-run the fetch (each run downloads the file again).
+	const sessionRef = React.useRef({ token, reissueToken });
+	React.useEffect(() => {
+		sessionRef.current = { token, reissueToken };
+	});
 
 	const isPrivate = media?.visibility === "private";
+	const hasToken = token !== null;
 
-	// New media → resets the error/retry state (allows reloading and retrying from scratch).
+	// New media → resets the error state (allows reloading and retrying from scratch).
 	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional, reset when media changes.
 	React.useEffect(() => {
-		retriedRef.current = false;
 		setFailed(false);
 		setBlobSrc(null);
 	}, [media]);
 
 	// Private media: `<img src>` is native → can't send headers, so delivery with session binding
 	// would give a 401. Like video (hls.js) and captions, we recover it via `fetch` with `${SESSION_HEADER}`,
-	// turn it into an object URL, and THAT goes in the src. On a 401 `session_mismatch` we re-issue once: the
-	// new token changes `url`'s identity → this effect runs again with the fresh src. Public stays native.
+	// turn it into an object URL, and THAT goes in the src. It waits for the first viewer token; on a 401
+	// `session_mismatch` `fetchMedia` re-issues once and retries with the fresh token. Public stays native.
 	React.useEffect(() => {
-		if (!isPrivate || failed || !media) return;
+		if (!isPrivate || failed || !media || !hasToken) return;
 		let cancelled = false;
 		let objectUrl: string | null = null;
-		const targetUrl = url(media, { width, height, fit, format, quality });
+		if (!baseUrl) throw new Error("Devultur `url()` requires `baseUrl` on <DevulturProvider>");
+		const transforms = { width, height, fit, format, quality };
 		(async () => {
 			try {
-				const response = await fetch(targetUrl, {
-					headers: sessionSecret ? { [SESSION_HEADER]: sessionSecret } : undefined,
+				const response = await fetchMedia({
+					buildUrl: (viewerToken) => mediaUrl(baseUrl, media, { ...transforms, token: viewerToken }),
+					token: sessionRef.current.token,
+					sessionSecret,
+					reissueToken: sessionRef.current.reissueToken,
 				});
 				if (response.ok) {
 					objectUrl = URL.createObjectURL(await response.blob());
@@ -546,11 +559,6 @@ export function Image({
 						return;
 					}
 					setBlobSrc(objectUrl);
-					return;
-				}
-				if (response.status === 401 && !retriedRef.current && (await isSessionMismatch(response))) {
-					retriedRef.current = true;
-					await reissueToken(); // new token → `url` changes → the effect runs again with the fresh src.
 					return;
 				}
 			} catch {
@@ -562,7 +570,7 @@ export function Image({
 			cancelled = true;
 			if (objectUrl) URL.revokeObjectURL(objectUrl);
 		};
-	}, [isPrivate, failed, media, url, sessionSecret, reissueToken, width, height, fit, format, quality]);
+	}, [isPrivate, failed, media, hasToken, baseUrl, sessionSecret, width, height, fit, format, quality]);
 
 	// `<img>` doesn't expose the failure status. Public → direct fallback. Private goes through the blob-fetch
 	// above (which handles its own recovery); if the object URL still fails, it's definitive → fallback.
@@ -622,17 +630,14 @@ export function DownloadLink({ media, filename, children, ...anchorProps }: Down
 			// Public (or no media/baseUrl) → let the `<a>` navigate (tokenless, cacheable, no header).
 			if (media?.visibility !== "private" || !baseUrl) return;
 			event.preventDefault();
-			const headers = sessionSecret ? { [SESSION_HEADER]: sessionSecret } : undefined;
 			// URL with an explicit token → on retry we use the fresh token (the context's `url()` would stay
 			// stale inside the handler until the next render).
-			const buildUrl = (viewerToken?: string) =>
-				mediaUrl(baseUrl, media, { download: filename ?? true, token: viewerToken });
-			let response = await fetch(buildUrl(token ?? undefined), { headers });
-			// 401 `session_mismatch` → re-issue once and retry with the fresh token. Transparent.
-			if (response.status === 401 && (await isSessionMismatch(response))) {
-				const fresh = await reissueToken();
-				if (fresh) response = await fetch(buildUrl(fresh), { headers });
-			}
+			const response = await fetchMedia({
+				buildUrl: (viewerToken) => mediaUrl(baseUrl, media, { download: filename ?? true, token: viewerToken }),
+				token,
+				sessionSecret,
+				reissueToken,
+			});
 			if (!response.ok) return;
 			const objectUrl = URL.createObjectURL(await response.blob());
 			const anchor = document.createElement("a");
