@@ -57,6 +57,19 @@ export function openPdf(pdfjs: PdfjsModule, bytes: Uint8Array, workerSrc?: strin
 	return pdfjs.getDocument(source);
 }
 
+/** A PDF's page count, or `null` when pdf.js can't open it. The document is freed either way. */
+export async function countPages(pdfjs: PdfjsModule, file: Blob, workerSrc?: string): Promise<number | null> {
+	const task = openPdf(pdfjs, new Uint8Array(await file.arrayBuffer()), workerSrc);
+	try {
+		const document = await task.promise;
+		return document.numPages;
+	} catch {
+		return null;
+	} finally {
+		await task.destroy();
+	}
+}
+
 function isMobileDevice(): boolean {
 	if (typeof navigator === "undefined") return false;
 	// iPadOS reports a desktop Mac user agent, but has touch points.

@@ -1,8 +1,11 @@
-// Spanish messages for Devultur errors (`describeDevulturError(error, devulturErrorLabels)`) and attachment labels
-// (`<AttachmentCard labels={attachmentLabels} />`).
+// Spanish messages for Devultur errors (`describeDevulturError(error, devulturErrorLabels)`), attachment labels
+// (`<AttachmentCard labels={attachmentLabels} />`), the library's (`<MediaLibrary labels={mediaLibraryLabels} />`) and
+// the media picker's (`<MediaPicker labels={mediaPickerLabels} />`).
 import { type AttachmentKind, type AttachmentLabels, formatDuration, formatFileSize } from "../attachment-labels";
 import type { DevulturErrorLabels } from "../error-labels";
-import { formatBytes, formatDate } from "../error-labels";
+import { describeDevulturError, formatBytes, formatDate } from "../error-labels";
+import type { MediaLibraryLabels } from "../media-library-labels";
+import type { MediaPickerLabels } from "../media-picker-labels";
 
 const LOCALE = "es";
 
@@ -112,4 +115,47 @@ export const attachmentLabels: AttachmentLabels = {
 	download: "Descargar",
 	open: "Abrir vista previa",
 	untitled: "Archivo sin título",
+};
+
+export const mediaLibraryLabels: MediaLibraryLabels = {
+	search: "Buscar archivos",
+	searchPlaceholder: "Busca por título o nombre de archivo",
+	typeFilter: "Tipo",
+	allTypes: "Todos los tipos",
+	types: { image: "Imágenes", video: "Videos", file: "Archivos" },
+	results: "Archivos",
+	loading: "Cargando archivos…",
+	empty: "Todavía no hay archivos.",
+	noResults: (search) => `Nada coincide con «${search}».`,
+	loadMore: "Cargar más",
+	loadingMore: "Cargando…",
+	error: (error) => describeDevulturError(error, devulturErrorLabels) ?? "No se pudieron cargar los archivos.",
+	retry: "Reintentar",
+	size: (bytes) => formatFileSize(bytes, LOCALE),
+};
+
+export const mediaPickerLabels: MediaPickerLabels = {
+	upload: (multiple) => (multiple ? "Subir archivos" : "Subir un archivo"),
+	dropHint: (multiple) => (multiple ? "o suelta los archivos aquí" : "o suelta un archivo aquí"),
+	uploads: "Subidas",
+	progress: (filename) => `Subiendo ${filename}`,
+	percent: (percent) => `${percent} %`,
+	uploading: (filename) => `Subiendo ${filename}.`,
+	uploaded: (filename) => `${filename} se subió y quedó seleccionado.`,
+	cancel: "Cancelar",
+	cancelUpload: (filename) => `Cancelar la subida de ${filename}`,
+	cancelled: (filename) => `Se canceló la subida de ${filename}.`,
+	notAccepted: (filename) => `${filename} no es un tipo de archivo que se pueda elegir aquí.`,
+	uploadError: (error) => describeDevulturError(error, devulturErrorLabels) ?? "La subida falló. Vuelve a intentarlo.",
+	retry: "Reintentar",
+	dismiss: "Descartar",
+	selection: "Archivos seleccionados",
+	empty: "No hay nada seleccionado.",
+	remove: "Quitar",
+	removeItem: (name) => `Quitar ${name}`,
+	clear: "Limpiar",
+	replace: "Reemplazar",
+	selected: (name) => `${name} seleccionado.`,
+	removed: (name) => `${name} se quitó.`,
+	cleared: "Se limpió la selección.",
 };

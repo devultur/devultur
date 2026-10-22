@@ -19,7 +19,8 @@ package's source.
 - [Framework examples](guides/framework-examples.md)
 - [Convex component with a self-hosted Worker](../packages/convex/README.md#using-a-self-hosted-worker), its
   [media library](../packages/convex/README.md#media-library) (search, `useMediaLibrary`,
-  [`<MediaLibrary>`](../packages/convex/README.md#react-usemedialibrary-and-medialibrary)), [errors](../packages/convex/README.md#errors) and
+  [`<MediaLibrary>`](../packages/convex/README.md#react-usemedialibrary-and-medialibrary)),
+  [media picker](../packages/convex/README.md#media-picker), [errors](../packages/convex/README.md#errors) and
   [object lock](../packages/convex/README.md#object-lock)
 
 ## React

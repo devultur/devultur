@@ -54,6 +54,13 @@ export { MediaLibrary, type MediaLibraryPart, type MediaLibraryProps } from "./m
 export type { MediaLibraryItemState } from "./media-library-item";
 export { defaultMediaLibraryLabels, type MediaLibraryLabels } from "./media-library-labels";
 export { type MediaObjectUrl, type UseMediaObjectUrlOptions, useMediaObjectUrl } from "./media-object-url";
+export { MediaPicker, type MediaPickerProps } from "./media-picker";
+export { matchesAccept } from "./media-picker-accept";
+export { type MediaPickerState, useMediaPicker } from "./media-picker-context";
+export { defaultMediaPickerLabels, type MediaPickerLabels } from "./media-picker-labels";
+export type { MediaPickerLibraryProps } from "./media-picker-library";
+export type { MediaPickerSelectionProps } from "./media-picker-selection";
+export type { MediaPickerUploadProps } from "./media-picker-upload";
 export { type PdfPreviewConfig, PdfPreviewProvider } from "./pdf-context";
 export type { PdfjsLoader, PdfjsModule } from "./pdf-render";
 export { PdfThumbnail, type PdfThumbnailProps } from "./pdf-thumbnail";
@@ -66,6 +73,7 @@ export {
 	type UseMediaLibraryOptions,
 	useMediaLibrary,
 } from "./use-media-library";
+export type { MediaPickerUpload, MediaPickerUploads } from "./use-media-picker-uploads";
 export type { ViewerTokenArgs, ViewerTokenResult } from "./viewer-token";
 
 /** Transform/delivery options for media URLs (without `token`, which the context injects). */
