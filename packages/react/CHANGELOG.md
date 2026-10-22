@@ -1,5 +1,12 @@
 # @devultur/react
 
+## 1.4.1
+
+### Patch Changes
+
+- Updated dependencies [[`0fb3251`](https://github.com/devultur/devultur/commit/0fb3251b16689ee3558b793b7d4bb2dfb64bc051)]:
+  - @devultur/core@1.4.1
+
 ## 1.4.0
 
 ### Minor Changes
