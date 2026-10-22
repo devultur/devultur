@@ -95,6 +95,8 @@ export const devulturErrorLabels: DevulturErrorLabels = {
 	too_large: "El archivo es demasiado grande para la vista previa.",
 	unsupported_type: "Este tipo de archivo no tiene vista previa.",
 	type_mismatch: "El contenido del archivo no coincide con su tipo.",
+	token_unavailable: "No se pudo autorizar el acceso a este archivo. Vuelve a intentarlo.",
+	capability_unavailable: "Esta aplicación no puede hacer eso aquí.",
 };
 
 const KIND_TEXT: Record<AttachmentKind, string> = {

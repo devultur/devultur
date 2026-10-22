@@ -9,12 +9,10 @@ import {
 	type FailureReason,
 	MediaStatus,
 	type MediaStatusValue,
-	type MediaUrlOptions,
 	mediaCaptionPath,
 	mediaPath,
 	mediaUrl,
 	type ProcessingPhase,
-	SESSION_HEADER,
 	type Visibility,
 	visibilityFromKey,
 } from "@devultur/core";
@@ -27,10 +25,11 @@ import {
 } from "@devultur/react";
 import { useAction, useConvex, useMutation, useQuery } from "convex/react";
 import type { FunctionReference } from "convex/server";
-import { isSessionMismatch } from "./image-recovery";
-import { fetchMedia } from "./media-fetch";
+import { DevulturCapabilityError } from "./capability-error";
+import { fetchMedia, MediaFetchError, tokenUnavailableError } from "./media-fetch";
+import { type MediaRenderOptions, type MediaSession, useMediaSession, type ViewerTokenAction } from "./media-session";
 import { deriveUploadState, type UploadPhase } from "./media-upload-derive";
-import { useViewerToken, type ViewerTokenArgs } from "./viewer-token";
+import type { ViewerTokenArgs } from "./viewer-token";
 
 export type { MediaUploadError, MediaUploadState, UploadProgress } from "@devultur/react";
 export {
@@ -40,6 +39,7 @@ export {
 	formatDuration,
 	formatFileSize,
 } from "./attachment-labels";
+export { type DevulturCapability, DevulturCapabilityError } from "./capability-error";
 export type { CropUploadLabels, CropUploadProps, CropUploadRenderProps } from "./crop-upload";
 export { CropUpload } from "./crop-upload";
 export {
@@ -74,10 +74,7 @@ export {
 	useMediaLibrary,
 } from "./use-media-library";
 export type { MediaPickerUpload, MediaPickerUploads } from "./use-media-picker-uploads";
-export type { ViewerTokenArgs, ViewerTokenResult } from "./viewer-token";
-
-/** Transform/delivery options for media URLs (without `token`, which the context injects). */
-type MediaRenderOptions = Omit<MediaUrlOptions, "token">;
+export type { TokenStatus, ViewerTokenArgs, ViewerTokenResult } from "./viewer-token";
 
 type AnyAction = FunctionReference<"action">;
 type AnyMutation = FunctionReference<"mutation">;
@@ -130,26 +127,16 @@ interface UploadTarget {
 	visibility: Visibility;
 }
 
-interface DevulturContextValue {
-	token: string | null;
-	baseUrl: string | null;
-	/** Browser session secret → sent in `${SESSION_HEADER}` on every private delivery. */
-	sessionSecret: string;
+/**
+ * What `useDevultur()` returns. Under a `<DevulturViewerProvider>`, `uploadUrl`, `upload` and `deleteMedia` throw a
+ * `DevulturCapabilityError` (`capability_unavailable`).
+ */
+interface DevulturContextValue extends MediaSession {
 	uploadUrl: (file: File) => Promise<{ url: string; key: string }>;
 	/** Uploads a file (reporting progress), records it in the component, and returns the reference ready to save. */
 	upload: (file: File, options?: UploadOptions) => Promise<UploadedMedia>;
-	/** Delivery URL from a reference (non-hook → usable in handlers and `.map`). Token-transparent. */
-	url: (media: DevulturMedia, options?: MediaRenderOptions) => string;
-	/** Downloads a video's subtitle text for a locale (auth-transparent). */
-	getCaptionsText: (media: DevulturMedia, locale: string) => Promise<string>;
 	/** Deletes a media by reference: video → full folder; image/file → the object. */
 	deleteMedia: (media: DevulturMedia) => void;
-	/**
-	 * Re-issues the viewer token (new session fingerprint with the current UA/IP) and updates the context.
-	 * Single-flight: concurrent calls share the same issuance. Returns the new token (or null if it
-	 * failed). The render uses it to transparently recover from a 401 `session_mismatch`.
-	 */
-	reissueToken: () => Promise<string | null>;
 }
 
 interface ProgressContextValue {
@@ -178,21 +165,12 @@ interface DevulturProviderProps {
 	 * Your own viewer token action, used instead of `api.issueViewerToken`. It receives `{ sessionSecret, ...tokenArgs }`
 	 * and returns what the component's `issueViewerToken` returns.
 	 */
-	issueViewerToken?: FunctionReference<"action", "public", { sessionSecret: string }>;
+	issueViewerToken?: ViewerTokenAction;
 	children: React.ReactNode;
 }
 
 export function DevulturProvider({ api, baseUrl, tokenArgs, issueViewerToken, children }: DevulturProviderProps) {
-	// Client session secret: generated ONCE (in memory, per app session), bound to the token at
-	// issuance, and sent in `${SESSION_HEADER}` on every delivery → real session binding (works even
-	// when the token is issued server-side). Empty outside the browser (SSR) → no binding.
-	const [sessionSecret] = React.useState(() => (typeof crypto !== "undefined" ? crypto.randomUUID() : ""));
-	const issueViewerTokenAction = useAction(issueViewerToken ?? api.issueViewerToken);
-	const { token, reissueToken } = useViewerToken({
-		issueViewerToken: issueViewerTokenAction,
-		sessionSecret,
-		tokenArgs,
-	});
+	const session = useMediaSession({ issueViewerToken: issueViewerToken ?? api.issueViewerToken, tokenArgs, baseUrl });
 	const createUploadUrlAction = useAction(api.createUploadUrl);
 	const deleteMediaAction = useAction(api.deleteMedia);
 	// Fallback ref to respect the rules of hooks; only invoked if `api.confirmUpload` exists.
@@ -237,38 +215,6 @@ export function DevulturProvider({ api, baseUrl, tokenArgs, issueViewerToken, ch
 		[createUploadUrlAction, confirmUploadAction, api.confirmUpload],
 	);
 
-	const url = React.useCallback(
-		(media: DevulturMedia, options?: MediaRenderOptions): string => {
-			if (!baseUrl) throw new Error("Devultur `url()` requires `baseUrl` on <DevulturProvider>");
-			return mediaUrl(baseUrl, media, { ...options, token: token ?? undefined });
-		},
-		[baseUrl, token],
-	);
-
-	const getCaptionsText = React.useCallback(
-		async (media: DevulturMedia, locale: string): Promise<string> => {
-			if (!baseUrl) throw new Error("Devultur `getCaptionsText()` requires `baseUrl` on <DevulturProvider>");
-			const path = mediaCaptionPath(media, locale);
-			if (!path) throw new Error("getCaptionsText: the reference is not a video");
-			const isPrivate = media.visibility === "private";
-
-			const fetchWith = (viewerToken: string | undefined) =>
-				fetch(buildMediaUrl(baseUrl, path, { token: viewerToken }), {
-					headers: sessionSecret ? { [SESSION_HEADER]: sessionSecret } : undefined,
-				});
-
-			let response = await fetchWith(isPrivate ? (token ?? undefined) : undefined);
-			// 401 `session_mismatch` → re-issue once and retry. Transparent.
-			if (isPrivate && response.status === 401 && (await isSessionMismatch(response))) {
-				const fresh = await reissueToken();
-				if (fresh) response = await fetchWith(fresh);
-			}
-			if (!response.ok) throw new Error(`Captions fetch failed: ${response.status}`);
-			return response.text();
-		},
-		[baseUrl, token, reissueToken, sessionSecret],
-	);
-
 	const deleteMedia = React.useCallback(
 		(media: DevulturMedia) => {
 			// Video → deletes the whole folder (raw/hls/thumbnails/captions) + cleans up the component's records.
@@ -283,18 +229,8 @@ export function DevulturProvider({ api, baseUrl, tokenArgs, issueViewerToken, ch
 	);
 
 	const devulturValue = React.useMemo(
-		() => ({
-			token,
-			baseUrl: baseUrl ?? null,
-			sessionSecret,
-			uploadUrl,
-			upload,
-			url,
-			getCaptionsText,
-			deleteMedia,
-			reissueToken,
-		}),
-		[token, baseUrl, sessionSecret, uploadUrl, upload, url, getCaptionsText, deleteMedia, reissueToken],
+		() => ({ ...session, uploadUrl, upload, deleteMedia }),
+		[session, uploadUrl, upload, deleteMedia],
 	);
 
 	let content = (
@@ -380,15 +316,59 @@ function ProgressBridge({
 
 export function useDevultur(): DevulturContextValue {
 	const context = React.use(DevulturContext);
-	if (!context) throw new Error("useDevultur must be used within <DevulturProvider>");
+	if (!context) throw new Error("useDevultur must be used within <DevulturProvider> or <DevulturViewerProvider>");
 	return context;
 }
 
-/** The `api` passed to `<DevulturProvider>`: your app's exported Devultur functions. */
+/**
+ * The `api` passed to `<DevulturProvider>`: your app's exported Devultur functions. Under a `<DevulturViewerProvider>`
+ * it throws a `DevulturCapabilityError`.
+ */
 export function useDevulturApi(): DevulturApi {
 	const api = React.use(DevulturApiContext);
-	if (!api) throw new Error("useDevulturApi must be used within <DevulturProvider>");
-	return api;
+	if (api) return api;
+	if (React.use(DevulturContext)) throw new DevulturCapabilityError("api");
+	throw new Error("useDevulturApi must be used within <DevulturProvider>");
+}
+
+interface DevulturViewerProviderProps {
+	/** Media worker base (e.g. `https://media.your-domain.com`). */
+	baseUrl: string;
+	/** Your viewer token action. It receives `{ sessionSecret, ...tokenArgs }`, like `<DevulturProvider>`'s. */
+	issueViewerToken: ViewerTokenAction;
+	/** Extra arguments for `issueViewerToken`, compared by value (see `<DevulturProvider tokenArgs>`). */
+	tokenArgs?: ViewerTokenArgs;
+	children: React.ReactNode;
+}
+
+const VIEWER_ACTIONS: Pick<DevulturContextValue, "uploadUrl" | "upload" | "deleteMedia"> = {
+	uploadUrl: () => Promise.reject(new DevulturCapabilityError("uploadUrl")),
+	upload: () => Promise.reject(new DevulturCapabilityError("upload")),
+	deleteMedia: () => {
+		throw new DevulturCapabilityError("deleteMedia");
+	},
+};
+
+/**
+ * A provider for apps that only display media: it issues and renews the viewer token, so `<Image>`, `<Preview>`,
+ * `<DownloadLink>`, `useMediaObjectUrl` and the video hooks work, and it needs no upload or delete actions. `upload`,
+ * `uploadUrl` and `deleteMedia` throw a `DevulturCapabilityError`, as do the hooks that need the `api`
+ * (`useMediaUpload`, `useDevulturApi`, `<MediaLibrary>`, `<MediaPicker>`).
+ *
+ * @example
+ * <DevulturViewerProvider baseUrl={MEDIA_URL} issueViewerToken={api.admin.issueViewerToken} tokenArgs={{ workspaceId }}>
+ *   <Preview media={document.file} />
+ * </DevulturViewerProvider>
+ */
+export function DevulturViewerProvider({
+	baseUrl,
+	issueViewerToken,
+	tokenArgs,
+	children,
+}: DevulturViewerProviderProps) {
+	const session = useMediaSession({ issueViewerToken, tokenArgs, baseUrl });
+	const devulturValue = React.useMemo(() => ({ ...session, ...VIEWER_ACTIONS }), [session]);
+	return <DevulturContext value={devulturValue}>{children}</DevulturContext>;
 }
 
 export function useDevulturProgress(): ProgressContextValue {
@@ -490,6 +470,11 @@ interface DownloadLinkProps extends Omit<React.AnchorHTMLAttributes<HTMLAnchorEl
 	media: DevulturMedia | null | undefined;
 	/** Name it downloads as. Without this it uses the upload's original name. */
 	filename?: string;
+	/**
+	 * A private download that failed: `token_unavailable` right away when the viewer token couldn't be issued
+	 * (`useDevultur().retryToken()` tries again), `http_error` when the delivery refused it.
+	 */
+	onDownloadError?: (error: MediaFetchError) => void;
 	children: React.ReactNode;
 }
 
@@ -501,14 +486,18 @@ interface DownloadLinkProps extends Omit<React.AnchorHTMLAttributes<HTMLAnchorEl
  * binding the gate gives a 401. So, for private media, we intercept the click, blob-fetch with the header
  * (like private `<Image>`) and trigger the download from the object URL. Public keeps native navigation.
  */
-export function DownloadLink({ media, filename, children, ...anchorProps }: DownloadLinkProps) {
-	const { url, token, baseUrl, sessionSecret, reissueToken } = useDevultur();
+export function DownloadLink({ media, filename, onDownloadError, children, ...anchorProps }: DownloadLinkProps) {
+	const { url, token, tokenStatus, tokenError, baseUrl, sessionSecret, reissueToken } = useDevultur();
 
 	const handleClick = React.useCallback(
 		async (event: React.MouseEvent<HTMLAnchorElement>) => {
 			// Public (or no media/baseUrl) → let the `<a>` navigate (tokenless, cacheable, no header).
 			if (media?.visibility !== "private" || !baseUrl) return;
 			event.preventDefault();
+			if (tokenStatus === "error") {
+				onDownloadError?.(tokenUnavailableError(tokenError));
+				return;
+			}
 			// URL with an explicit token → on retry we use the fresh token (the context's `url()` would stay
 			// stale inside the handler until the next render).
 			const response = await fetchMedia({
@@ -517,7 +506,11 @@ export function DownloadLink({ media, filename, children, ...anchorProps }: Down
 				sessionSecret,
 				reissueToken,
 			});
-			if (!response.ok) return;
+			if (!response.ok) {
+				const status = response.status;
+				onDownloadError?.(new MediaFetchError("http_error", `Media fetch failed: ${status}`, status));
+				return;
+			}
 			const objectUrl = URL.createObjectURL(await response.blob());
 			const anchor = document.createElement("a");
 			anchor.href = objectUrl;
@@ -525,7 +518,7 @@ export function DownloadLink({ media, filename, children, ...anchorProps }: Down
 			anchor.click();
 			URL.revokeObjectURL(objectUrl);
 		},
-		[media, baseUrl, token, filename, sessionSecret, reissueToken],
+		[media, baseUrl, token, tokenStatus, tokenError, filename, sessionSecret, reissueToken, onDownloadError],
 	);
 
 	if (!media) return null;
@@ -742,8 +735,7 @@ export interface UseMediaUploadReturn {
 export function useMediaUpload(options?: UseMediaUploadOptions): UseMediaUploadReturn {
 	const { visibility, onComplete, onError, replaces, process, locales } = options ?? {};
 
-	const api = React.use(DevulturApiContext);
-	if (!api) throw new Error("useMediaUpload must be used within <DevulturProvider>");
+	const api = useDevulturApi();
 	const createUploadUrlAction = useAction(api.createUploadUrl);
 	const deleteMediaAction = useAction(api.deleteMedia);
 	// Fallback refs to respect the rules of hooks; only invoked if `api.confirmUpload` / `api.processVideo` exist.

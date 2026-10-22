@@ -165,6 +165,49 @@ The provider sends `{ sessionSecret, ...tokenArgs }` on the first issuance, on e
 provider drops the current token, private media wait for the new one, and a response for the previous arguments is
 ignored. Your action returns what the component's action returns: `{ token, expiresIn }` or the token string.
 
+### Display-only apps
+
+An app that only shows media (no uploads, no deletes) uses `<DevulturViewerProvider>`, which needs only the base URL
+and a viewer token action:
+
+```tsx
+import { DevulturViewerProvider, Preview } from "@devultur/convex/react";
+
+<DevulturViewerProvider
+  baseUrl={MEDIA_URL}
+  issueViewerToken={api.admin.issueWorkspaceViewerToken}
+  tokenArgs={{ workspaceId }}
+>
+  <Preview media={document.file} />
+</DevulturViewerProvider>;
+```
+
+`<Image>`, `<Preview>`, `<PdfThumbnail>`, `<DownloadLink>`, `<DocumentLink>`, `<AttachmentCard>`, `useMediaObjectUrl`,
+`useMediaUrl` and `useVideoProps` work under it. `useDevultur().upload`, `uploadUrl` and `deleteMedia`, and the hooks
+that need the `api` (`useDevulturApi`, `useMediaUpload`, `<MediaLibrary>`, `<MediaPicker>`), throw a
+`DevulturCapabilityError` whose `code` is `capability_unavailable`.
+
+### When the viewer token can't be issued
+
+`useDevultur()` tells where the viewer token stands:
+
+```tsx
+const { tokenStatus, tokenError, retryToken } = useDevultur();
+// tokenStatus: "idle" | "loading" | "ready" | "error"
+if (tokenStatus === "error") return <button onClick={retryToken}>Try again</button>; // tokenError has why
+```
+
+The status turns `"error"` when the action throws (your guard refused, for example) or returns no token, and stays
+there until `retryToken()`: a failed issuance isn't retried on its own. Meanwhile private media fails at once with the
+`MediaFetchError` code `token_unavailable` instead of loading: `useMediaObjectUrl` returns it as `error`,
+`<Preview>` passes it to its `fallback`, `<PdfThumbnail>` and `<Image>` render their `fallback` (`<Image onLoadError>`
+receives it), and `<DownloadLink onDownloadError>` receives it on click. They load once `retryToken()` gets a token.
+
+`<Preview>`'s video re-issues the token once when the delivery answers the playlist or a segment with a 401
+`session_mismatch`; after that, or on any other 401, it renders its `fallback` with `session_mismatch` or
+`token_unavailable`. `<VideoPlayer onError>` (from `@devultur/react`) reports these failures when you render the
+player yourself.
+
 ## Media library
 
 Every upload, whatever its kind, gets a record in the component's `media` table once its bytes are stored, so

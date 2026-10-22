@@ -40,6 +40,7 @@ return (
 | `containerRef` | `RefObject<HTMLElement \| null>` | — | Container used for fullscreen. |
 | `onProgress` | `(currentTime: number, percent: number) => void` | — | Fired as playback advances. |
 | `onEnded` | `() => void` | — | Fired when playback ends. |
+| `onError` | `(error: VideoPlayerError) => void` | — | Fired when the playlist or a segment can't load (a `401`, or an error hls.js can't recover from). |
 
 ## Returns
 

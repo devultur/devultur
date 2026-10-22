@@ -81,6 +81,9 @@ export const DEVULTUR_ERROR_CODES = [
 	"too_large",
 	"unsupported_type",
 	"type_mismatch",
+	"token_unavailable",
+	// `DevulturCapabilityError` (an action the provider wasn't given)
+	"capability_unavailable",
 ] as const;
 
 /** A stable error code: match on it, not on `message`. */

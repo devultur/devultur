@@ -26,6 +26,7 @@ export function VideoPlayer({
 	progressInterval,
 	onProgress,
 	onEnded,
+	onError,
 	metrics,
 	aspectRatio,
 	className,
@@ -41,6 +42,7 @@ export function VideoPlayer({
 		containerRef,
 		onProgress,
 		onEnded,
+		onError,
 		metrics,
 	});
 	const storyboardCues = useStoryboard({ src: storyboard, token, sessionSecret });

@@ -1,8 +1,7 @@
 "use client";
 
 import type React from "react";
-import type { DevulturMedia } from "@devultur/core";
-import { VideoPlayer } from "@devultur/react";
+import { type DevulturMedia, mediaPath } from "@devultur/core";
 import { MediaFetchError } from "./media-fetch";
 import { useMediaObjectUrl } from "./media-object-url";
 import { useMediaResource } from "./media-resource";
@@ -10,7 +9,8 @@ import { usePreviewLabels } from "./pdf-context";
 import { PdfPreview, type RenderFallback, VISUALLY_HIDDEN } from "./pdf-preview";
 import type { PreviewLabels } from "./preview-labels";
 import { expectedContentType, type PreviewKind, previewKindOf } from "./preview-type";
-import { DownloadLink, useDevultur, useVideoProps } from "./react";
+import { DownloadLink, useDevultur } from "./react";
+import { VideoPreview } from "./video-preview";
 
 /** Default cap for text previews: a `<pre>` with megabytes of text isn't a preview. */
 const DEFAULT_MAX_TEXT_BYTES = 1024 * 1024;
@@ -29,7 +29,8 @@ export interface PreviewProps {
 	/**
 	 * Shown for types that don't preview inline and when the fetch fails. Default: a `<DownloadLink>`.
 	 * As a function it receives why: a `MediaFetchError` when the fetch was refused (`http_error`, `too_large`,
-	 * `type_mismatch`) or the type doesn't preview inline (`unsupported_type`, nothing fetched), `null` otherwise
+	 * `type_mismatch`), the viewer token couldn't be issued (`token_unavailable`, nothing fetched), a video's session
+	 * was refused (`session_mismatch`) or the type doesn't preview inline (`unsupported_type`), `null` otherwise
 	 * (a network failure, a PDF pdf.js can't open, or the link after the `maxPages` note).
 	 */
 	fallback?: React.ReactNode | ((error: MediaFetchError | null) => React.ReactNode);
@@ -61,7 +62,6 @@ export interface PreviewProps {
 export function Preview({ media, contentType, fallback, loading, labels, ...viewProps }: PreviewProps) {
 	const text = usePreviewLabels(labels);
 	if (!media) return null;
-	if (media.kind === "video") return <VideoPreview media={media} className={viewProps.className} />;
 
 	const renderFallback: RenderFallback = (error) => {
 		const fetchError = error instanceof MediaFetchError ? error : null;
@@ -69,6 +69,16 @@ export function Preview({ media, contentType, fallback, loading, labels, ...view
 		if (fallback !== undefined) return fallback;
 		return <DefaultFallback media={media} error={fetchError} labels={text} />;
 	};
+	if (media.kind === "video") {
+		return (
+			<VideoPreview
+				key={mediaPath(media)}
+				media={media}
+				renderFallback={renderFallback}
+				className={viewProps.className}
+			/>
+		);
+	}
 	const expectedType = expectedContentType(media, contentType);
 	const kind = previewKindOf(expectedType);
 	if (!expectedType || !kind) return <>{renderFallback(unsupportedType(expectedType))}</>;
@@ -111,13 +121,6 @@ interface ViewProps extends Omit<PreviewProps, "contentType" | "fallback" | "lab
 	renderFallback: RenderFallback;
 	loading: React.ReactNode;
 	labels: PreviewLabels;
-}
-
-// Video never goes through a blob: the player streams HLS and sends the session header itself.
-function VideoPreview({ media, className }: { media: DevulturMedia; className?: string }) {
-	const videoProps = useVideoProps(media);
-	if (!videoProps) return null;
-	return <VideoPlayer {...videoProps} className={className} />;
 }
 
 function BinaryPreview({

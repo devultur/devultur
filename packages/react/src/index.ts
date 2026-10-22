@@ -33,6 +33,7 @@ export type {
 	UploadZoneRenderProps,
 	UseProgressOptions,
 	UseProgressReturn,
+	VideoPlayerError,
 	VideoPlayerProps,
 	VideoPlayerRef,
 	VideoPlayerRenderProps,
