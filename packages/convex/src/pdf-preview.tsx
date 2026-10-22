@@ -2,14 +2,15 @@
 
 import React from "react";
 import type { DevulturMedia } from "@devultur/core";
+import { pageCapError, renderFailedError } from "./media-fetch";
 import { useMediaResource } from "./media-resource";
 import { usePdfjs } from "./pdf-context";
 import { useIsVisible, usePageRender, usePdfDocument } from "./pdf-hooks";
 import type { PdfDocument, PdfjsModule } from "./pdf-render";
 import type { PreviewLabels } from "./preview-labels";
 
-/** Renders `<Preview>`'s fallback for what caused it: a fetch or pdf.js error, or `null` (the `maxPages` note). */
-export type RenderFallback = (error: Error | null) => React.ReactNode;
+/** Renders `<Preview>`'s fallback for what caused it: a fetch, network or render error, or the `maxPages` cap. */
+export type RenderFallback = (error: Error) => React.ReactNode;
 
 /** Hidden from sight, read by screen readers: the canvas carries no text of its own. */
 export const VISUALLY_HIDDEN: React.CSSProperties = {
@@ -95,7 +96,7 @@ function PdfCanvasDocument(props: PdfCanvasDocumentProps) {
 		if (document) setWidth(containerRef.current?.clientWidth ?? 0);
 	}, [document]);
 
-	if (error) return <>{renderFallback(error)}</>;
+	if (error) return <>{renderFallback(renderFailedError(error))}</>;
 	if (!document) return <>{loading}</>;
 	const shownPageCount = Math.min(document.numPages, Math.max(1, maxPages));
 	const isTruncated = shownPageCount < document.numPages;
@@ -119,7 +120,8 @@ function PdfCanvasDocument(props: PdfCanvasDocumentProps) {
 				))}
 			{isTruncated && (
 				<p>
-					{labels.pageCap(shownPageCount, document.numPages)} {renderFallback(null)}
+					{labels.pageCap(shownPageCount, document.numPages)}{" "}
+					{renderFallback(pageCapError(shownPageCount, document.numPages))}
 				</p>
 			)}
 		</div>

@@ -6,7 +6,7 @@
 import React from "react";
 import type { DevulturMedia } from "@devultur/core";
 import { VideoPlayer, type VideoPlayerError } from "@devultur/react";
-import { MediaFetchError, tokenUnavailableError } from "./media-fetch";
+import { MediaFetchError, networkError, renderFailedError, tokenUnavailableError } from "./media-fetch";
 import type { RenderFallback } from "./pdf-preview";
 import { useDevultur, useVideoProps } from "./react";
 
@@ -19,18 +19,21 @@ interface VideoPreviewProps {
 interface PlaybackFailure {
 	/** The token the player had: a new one (renewed, re-issued, retried) plays again. */
 	token: string | undefined;
-	error: MediaFetchError | null;
+	error: MediaFetchError;
 }
 
 const UNAUTHORIZED = 401;
+// hls.js names its network failures `…LoadError` / `…LoadTimeOut`; the rest are decoding or buffering failures.
+const HLS_NETWORK_FAILURE = /Load(Error|TimeOut)$/;
 
-function fetchErrorOf(error: VideoPlayerError): MediaFetchError | null {
+function fetchErrorOf(error: VideoPlayerError): MediaFetchError {
 	if (error.status === UNAUTHORIZED && error.code === "session_mismatch") {
 		return new MediaFetchError("session_mismatch", "The delivery refused this session's token", UNAUTHORIZED);
 	}
 	if (error.status === UNAUTHORIZED) return tokenUnavailableError();
 	if (error.status) return new MediaFetchError("http_error", `Video fetch failed: ${error.status}`, error.status);
-	return null;
+	if (HLS_NETWORK_FAILURE.test(error.details)) return networkError(error);
+	return renderFailedError(error);
 }
 
 export function VideoPreview({ media, renderFallback, className }: VideoPreviewProps) {

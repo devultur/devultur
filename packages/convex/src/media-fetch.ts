@@ -5,9 +5,9 @@ import { SESSION_HEADER } from "@devultur/core";
 import { isSessionMismatch } from "./image-recovery";
 import { trustedContentType } from "./preview-type";
 
-/** Why a media fetch was refused. Stable: match on it, not on `message`. */
+/** Why a media couldn't be fetched or shown. Stable: match on it, not on `message`. */
 export type MediaFetchErrorCode =
-	/** The delivery answered with a non-2xx status (`status` has it). */
+	/** The delivery answered with a non-2xx status (`status` has it), or never answered (a network failure: no `status`). */
 	| "http_error"
 	/** `Content-Length`, or the streamed body, exceeds `maxBytes`. */
 	| "too_large"
@@ -18,19 +18,47 @@ export type MediaFetchErrorCode =
 	/** No viewer token for private media: its issuance failed (`useDevultur().tokenError` has why) or was refused. */
 	| "token_unavailable"
 	/** The delivery refused the token for this browser session, also after a re-issue (video playback). */
-	| "session_mismatch";
+	| "session_mismatch"
+	/** A PDF has more pages than `maxPages`: only the first ones are shown (`details: { shown, total }`). */
+	| "page_cap"
+	/** The bytes arrived but couldn't be shown: pdf.js can't open the PDF, or the video can't be played. */
+	| "render_failed";
+
+/** `ErrorOptions` plus the code's `details`. */
+export interface MediaFetchErrorOptions extends ErrorOptions {
+	details?: Readonly<Record<string, unknown>>;
+}
 
 export class MediaFetchError extends Error {
 	readonly code: MediaFetchErrorCode;
-	/** HTTP status, for `http_error`. */
+	/** HTTP status, for `http_error` when the delivery answered. */
 	readonly status?: number;
+	/** The code's extra fields, e.g. `page_cap`'s `{ shown, total }`. */
+	readonly details?: Readonly<Record<string, unknown>>;
 
-	constructor(code: MediaFetchErrorCode, message: string, status?: number, options?: ErrorOptions) {
+	constructor(code: MediaFetchErrorCode, message: string, status?: number, options?: MediaFetchErrorOptions) {
 		super(message, options);
 		this.name = "MediaFetchError";
 		this.code = code;
 		this.status = status;
+		this.details = options?.details;
 	}
+}
+
+/** The fetch never got an answer (offline, DNS, a reset connection): `http_error` without `status`. */
+export function networkError(cause: unknown): MediaFetchError {
+	return new MediaFetchError("http_error", "Media fetch failed: no response", undefined, { cause });
+}
+
+/** A PDF past `maxPages`: the first `shown` of its `total` pages are shown. */
+export function pageCapError(shown: number, total: number): MediaFetchError {
+	const message = `Showing the first ${shown} of ${total} pages`;
+	return new MediaFetchError("page_cap", message, undefined, { details: { shown, total } });
+}
+
+/** The bytes arrived but couldn't be shown (`cause`: pdf.js's or the player's error). */
+export function renderFailedError(cause: unknown): MediaFetchError {
+	return new MediaFetchError("render_failed", "The media couldn't be rendered", undefined, { cause });
 }
 
 /** Private media can't be fetched: the viewer token couldn't be issued (`cause`: the issuance's error). */

@@ -4,11 +4,13 @@ import { describe, expect, it } from "vitest";
 import { DEVULTUR_ERROR_CODES } from "./error-codes";
 import { type DevulturErrorLabels, describeDevulturError, devulturErrorLabels } from "./error-labels";
 import { devulturErrorLabels as spanishLabels } from "./locales/es";
-import { MediaFetchError } from "./media-fetch";
+import { devulturErrorLabels as formalSpanishLabels } from "./locales/es-formal";
+import { MediaFetchError, pageCapError } from "./media-fetch";
 
 const LOCALES: Array<[string, DevulturErrorLabels]> = [
 	["English", devulturErrorLabels],
 	["Spanish", spanishLabels],
+	["Formal Spanish", formalSpanishLabels],
 ];
 
 function refusal(code: string, details?: Record<string, unknown>) {
@@ -41,6 +43,13 @@ describe("describeDevulturError", () => {
 		);
 		const apiError = new DevulturApiError("x", 413, "file_too_large", 2_000_000, { limit: 2_000_000 });
 		expect(describeDevulturError(apiError)).toBe("The file exceeds the maximum size (2 MB).");
+	});
+
+	it("describes a page cap with its counts", () => {
+		expect(describeDevulturError(pageCapError(500, 1_200))).toBe("Only the first 500 of 1,200 pages are shown.");
+		expect(describeDevulturError(pageCapError(3, 10), formalSpanishLabels)).toBe(
+			"Solo se muestran las primeras 3 de 10 páginas.",
+		);
 	});
 
 	it("overrides some labels and keeps the defaults for the rest", () => {

@@ -2,7 +2,7 @@
 
 import type React from "react";
 import { type DevulturMedia, mediaPath } from "@devultur/core";
-import { MediaFetchError } from "./media-fetch";
+import { MediaFetchError, networkError } from "./media-fetch";
 import { useMediaObjectUrl } from "./media-object-url";
 import { useMediaResource } from "./media-resource";
 import { usePreviewLabels } from "./pdf-context";
@@ -27,13 +27,15 @@ export interface PreviewProps {
 	/** Size cap for text previews. Default 1 MiB. */
 	maxTextBytes?: number;
 	/**
-	 * Shown for types that don't preview inline and when the fetch fails. Default: a `<DownloadLink>`.
-	 * As a function it receives why: a `MediaFetchError` when the fetch was refused (`http_error`, `too_large`,
-	 * `type_mismatch`), the viewer token couldn't be issued (`token_unavailable`, nothing fetched), a video's session
-	 * was refused (`session_mismatch`) or the type doesn't preview inline (`unsupported_type`), `null` otherwise
-	 * (a network failure, a PDF pdf.js can't open, or the link after the `maxPages` note).
+	 * Shown for types that don't preview inline, when the fetch or render fails, and after the `maxPages` note.
+	 * Default: a `<DownloadLink>`. As a function it receives why, always a `MediaFetchError` (never `null`: it's only
+	 * called with a cause): `http_error` when the delivery refused the fetch (`status`) or never answered (a network
+	 * failure, no `status`), `too_large`, `type_mismatch`, `token_unavailable` (no viewer token, nothing fetched),
+	 * `session_mismatch` (a video's session was refused), `unsupported_type` (the type doesn't preview inline, nothing
+	 * fetched), `render_failed` (pdf.js can't open the PDF, or the video can't be played) or `page_cap` (the link after
+	 * the `maxPages` note, with `details: { shown, total }`).
 	 */
-	fallback?: React.ReactNode | ((error: MediaFetchError | null) => React.ReactNode);
+	fallback?: React.ReactNode | ((error: MediaFetchError) => React.ReactNode);
 	/** Shown while a file loads. Default: `labels.loading`, visually hidden, in a `role="status"`. `null` → nothing. */
 	loading?: React.ReactNode;
 	/** Accessible name of the preview (`alt`, `title`, `aria-label`). Default: the filename (text: none). */
@@ -64,7 +66,8 @@ export function Preview({ media, contentType, fallback, loading, labels, ...view
 	if (!media) return null;
 
 	const renderFallback: RenderFallback = (error) => {
-		const fetchError = error instanceof MediaFetchError ? error : null;
+		// The views hand over `MediaFetchError`s; anything else is a fetch that never got an answer.
+		const fetchError = error instanceof MediaFetchError ? error : networkError(error);
 		if (typeof fallback === "function") return fallback(fetchError);
 		if (fallback !== undefined) return fallback;
 		return <DefaultFallback media={media} error={fetchError} labels={text} />;
@@ -95,13 +98,13 @@ const unsupportedType = (contentType: string | null | undefined) =>
 
 interface DefaultFallbackProps {
 	media: DevulturMedia;
-	error: MediaFetchError | null;
+	error: MediaFetchError;
 	labels: PreviewLabels;
 }
 
 function DefaultFallback({ media, error, labels }: DefaultFallbackProps) {
 	return (
-		<DownloadLink media={media} title={error ? labels.error(error.code) : undefined}>
+		<DownloadLink media={media} title={labels.error(error.code)}>
 			{media.filename ?? labels.download}
 		</DownloadLink>
 	);

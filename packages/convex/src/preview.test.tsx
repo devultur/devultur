@@ -99,6 +99,30 @@ describe("<Preview>", () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
+	it("hands a network failure to the fallback as http_error without a status", async () => {
+		fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+		renderPreview(
+			<Preview
+				media={privateFile("photo.png")}
+				fallback={(error) => <p>{`Fallback: ${error.code} ${error.status ?? "no status"}`}</p>}
+			/>,
+		);
+
+		expect(await screen.findByText("Fallback: http_error no status")).toBeTruthy();
+	});
+
+	it("hands a refused fetch to the fallback as http_error with its status", async () => {
+		fetchMock.mockResolvedValue(new Response("gone", { status: 404 }));
+		renderPreview(
+			<Preview
+				media={privateFile("photo.png")}
+				fallback={(error) => <p>{`Fallback: ${error.code} ${error.status}`}</p>}
+			/>,
+		);
+
+		expect(await screen.findByText("Fallback: http_error 404")).toBeTruthy();
+	});
+
 	it("caps binary previews at 50 MiB by default", async () => {
 		fetchMock.mockResolvedValue(
 			new Response("%PDF", {

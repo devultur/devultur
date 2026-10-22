@@ -11,6 +11,11 @@ export type DevulturErrorLabel = string | ((details: DevulturErrorDetails) => st
 
 export type DevulturErrorLabels = Record<DevulturErrorCode, DevulturErrorLabel>;
 
+/** A label's text for `details` (default none): a string as is, a function called with them. */
+export function labelText(label: DevulturErrorLabel, details: DevulturErrorDetails = {}): string {
+	return typeof label === "function" ? label(details) : label;
+}
+
 /** `bytes` as `25 MB` / `800 kB` in `locale`. */
 export function formatBytes(bytes: number, locale: string): string {
 	const isMegabytes = bytes >= 1_000_000;
@@ -116,6 +121,12 @@ export const devulturErrorLabels: DevulturErrorLabels = {
 	unsupported_type: "This file type can't be previewed.",
 	type_mismatch: "The file's content doesn't match its type.",
 	token_unavailable: "Access to this file couldn't be granted. Try again.",
+	page_cap: (details) => {
+		const { shown, total } = details;
+		if (typeof shown !== "number" || typeof total !== "number") return "Only the first pages are shown.";
+		return `Only the first ${shown.toLocaleString("en")} of ${total.toLocaleString("en")} pages are shown.`;
+	},
+	render_failed: "The file couldn't be displayed.",
 	capability_unavailable: "This app can't do that here.",
 };
 
@@ -135,7 +146,9 @@ function codedErrorOf(error: unknown): ErrorDescriptor | null {
 	if (!(error instanceof Error)) return null;
 	const { code, status, details, limit } = error as CodedError;
 	const statusField = typeof status === "number" ? { status } : {};
-	if (error.name === "MediaFetchError" && typeof code === "string") return { code, details: statusField };
+	if (error.name === "MediaFetchError" && typeof code === "string") {
+		return { code, details: { ...asRecord(details), ...statusField } };
+	}
 	if (error.name === "DevulturCapabilityError") return { code: "capability_unavailable", details: {} };
 	if (error.name !== "DevulturApiError") return null;
 	const limitField = typeof limit === "number" ? { limit } : {};
@@ -159,6 +172,5 @@ export function describeDevulturError(error: unknown, labels?: Partial<DevulturE
 	const descriptor = descriptorOf(error);
 	if (!descriptor) return null;
 	const code: DevulturErrorCode = isDevulturErrorCode(descriptor.code) ? descriptor.code : "worker_error";
-	const label = labels?.[code] ?? devulturErrorLabels[code];
-	return typeof label === "function" ? label(descriptor.details) : label;
+	return labelText(labels?.[code] ?? devulturErrorLabels[code], descriptor.details);
 }

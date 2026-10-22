@@ -63,7 +63,7 @@ const unauthorized = (code?: string) => ({
 function renderVideo() {
 	return render(
 		<DevulturProvider api={api as never} baseUrl="https://media.example">
-			<Preview media={video} fallback={(error) => <span>Fallback: {error?.code ?? "none"}</span>} />
+			<Preview media={video} fallback={(error) => <span>Fallback: {error.code}</span>} />
 		</DevulturProvider>,
 	);
 }
@@ -103,6 +103,20 @@ describe("<Preview> video errors", () => {
 
 		act(() => livePlayer().emitError(unauthorized("token_rejected")));
 		expect(await screen.findByText("Fallback: token_unavailable")).toBeTruthy();
+	});
+
+	it("hands http_error to the fallback when the playlist never got an answer", async () => {
+		await renderPlayingVideo();
+
+		act(() => livePlayer().emitError({ fatal: true, details: "manifestLoadError" }));
+		expect(await screen.findByText("Fallback: http_error")).toBeTruthy();
+	});
+
+	it("hands render_failed to the fallback when the video can't be played", async () => {
+		await renderPlayingVideo();
+
+		act(() => livePlayer().emitError({ fatal: true, details: "bufferAppendError" }));
+		expect(await screen.findByText("Fallback: render_failed")).toBeTruthy();
 	});
 
 	it("keeps playing through errors hls.js recovers from", async () => {

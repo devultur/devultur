@@ -13,7 +13,7 @@ export interface PreviewLabels {
 	loading: string;
 	/** Note after the last rendered page when a PDF has more than `maxPages`; `fallback` follows it. */
 	pageCap: (shown: number, total: number) => string;
-	/** `title` of the default fallback's download link when a fetch was refused or the type can't be previewed. */
+	/** `title` of the default fallback's download link, for why it's shown (see `<Preview>`'s `fallback`). */
 	error: (code: MediaFetchErrorCode) => string;
 	/** Accessible name of a `<PdfThumbnail>`, from its title. */
 	thumbnail: (title: string) => string;
@@ -32,6 +32,8 @@ const ERROR_TEXT: Record<MediaFetchErrorCode, string> = {
 	type_mismatch: "The file's content doesn't match its type.",
 	token_unavailable: "Access to this file couldn't be granted. Try again.",
 	session_mismatch: "Your session changed. Reload the page.",
+	page_cap: "Download the file to see every page.",
+	render_failed: "The file couldn't be displayed.",
 };
 
 export const defaultPreviewLabels: PreviewLabels = {
