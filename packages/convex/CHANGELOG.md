@@ -1,5 +1,19 @@
 # @devultur/convex
 
+## 1.3.1
+
+### Patch Changes
+
+- [#39](https://github.com/devultur/devultur/pull/39) [`7478775`](https://github.com/devultur/devultur/commit/7478775e924357a7553bbc66f6a16d6b0da530f3) Thanks [@demarchenac](https://github.com/demarchenac)! - `<Preview>`, `<PdfThumbnail>` and `PdfPreviewProvider` take `labels` (`Partial<PreviewLabels>`), so every string a
+  preview shows or announces can be localized: the PDF document and page names, the loading announcement, the page-cap
+  note, the default fallback's link text and per-error `title`, and the thumbnail's name. A component's `labels` win over
+  the provider's, which win over `defaultPreviewLabels` (English). `<Preview>`'s `fallback` can also be a function of the
+  `MediaFetchError` that caused it (`unsupported_type` when the type doesn't preview inline, `null` when no fetch was
+  refused). Without `loading`, a visually hidden `role="status"` now announces `labels.loading`.
+- Updated dependencies []:
+  - @devultur/core@1.3.1
+  - @devultur/react@1.3.1
+
 ## 1.3.0
 
 ### Minor Changes
