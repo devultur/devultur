@@ -5,6 +5,7 @@ import type { DevulturMedia } from "@devultur/core";
 import { VideoPlayer } from "@devultur/react";
 import { useMediaObjectUrl } from "./media-object-url";
 import { useMediaResource } from "./media-resource";
+import { PdfPreview } from "./pdf-preview";
 import { expectedContentType, type PreviewKind, previewKindOf } from "./preview-type";
 import { DownloadLink, useDevultur, useVideoProps } from "./react";
 
@@ -29,10 +30,13 @@ export interface PreviewProps {
 	/** Accessible name of the preview (`alt`, `title`, `aria-label`). Default: the filename (text: none). */
 	title?: string;
 	className?: string;
+	/** URL of pdf.js's worker for this preview; overrides `PdfPreviewProvider`'s `workerSrc`. */
+	pdfWorkerSrc?: string;
 }
 
 /**
- * Renders a media inline by its content type: images in an `<img>`, PDFs in an `<iframe>`, audio in an `<audio>`,
+ * Renders a media inline by its content type: images in an `<img>`, PDFs on `<canvas>` pages with pdf.js under a
+ * `PdfPreviewProvider` (otherwise in an `<iframe>`), audio in an `<audio>`,
  * plain text, CSV and JSON in a `<pre>`, and video in the streaming `<VideoPlayer>`. Everything else (HTML, SVG,
  * XML, unknown types) and every refused fetch render `fallback`. Private media is token-transparent.
  *
@@ -51,6 +55,10 @@ export function Preview({ media, contentType, fallback, ...viewProps }: PreviewP
 
 	const props = { ...viewProps, media, expectedType, fallback: fallbackNode };
 	if (kind === "text") return <TextPreview {...props} />;
+	if (kind === "pdf") {
+		const { maxBytes = DEFAULT_MAX_BYTES, loading = null } = props;
+		return <PdfPreview {...props} maxBytes={maxBytes} loading={loading} />;
+	}
 	return <BinaryPreview {...props} kind={kind} />;
 }
 
@@ -76,7 +84,7 @@ function BinaryPreview({
 	loading = null,
 	title,
 	className,
-}: ViewProps & { kind: Exclude<PreviewKind, "text"> }) {
+}: ViewProps & { kind: Exclude<PreviewKind, "text" | "pdf"> }) {
 	const { url } = useDevultur();
 	// An `<img>` never runs script, so a public image keeps its cacheable delivery URL. Everything else, public too, is
 	// fetched: `contentType` makes the hook refuse a response whose type disagrees and create the blob with
@@ -91,18 +99,8 @@ function BinaryPreview({
 	if (kind === "image") {
 		return <img src={objectUrl} alt={label} width={media.width} height={media.height} className={className} />;
 	}
-	if (kind === "audio") {
-		// biome-ignore lint/a11y/useMediaCaption: an uploaded audio file has no caption track to offer.
-		return <audio src={objectUrl} controls aria-label={label} className={className} />;
-	}
-	// `<iframe>` over `<object type="application/pdf">`: the blob's type is already forced to `application/pdf`, so
-	// `<object>`'s `type` adds nothing, while `<iframe>` loads like a navigation in every browser (iOS Safari shows only
-	// a first-page image in an `<object>`) and takes a `title` as its accessible name.
-	// No `sandbox`: Chrome refuses to load its PDF viewer in a sandboxed frame and Firefox's viewer needs scripts, so a
-	// sandbox breaks every PDF. The protection is the type: a blob typed `application/pdf` opens in the browser's PDF
-	// viewer, never as HTML, so a non-PDF body fails to parse instead of running script in the app's origin.
-	// `no-referrer`: the viewer never learns the app page that framed the document.
-	return <iframe src={objectUrl} title={label} referrerPolicy="no-referrer" className={className} />;
+	// biome-ignore lint/a11y/useMediaCaption: an uploaded audio file has no caption track to offer.
+	return <audio src={objectUrl} controls aria-label={label} className={className} />;
 }
 
 const decodeText = (bytes: Uint8Array<ArrayBuffer>) => new TextDecoder().decode(bytes);

@@ -37,6 +37,9 @@ export type { CropUploadLabels, CropUploadProps, CropUploadRenderProps } from ".
 export { CropUpload } from "./crop-upload";
 export { MediaFetchError, type MediaFetchErrorCode } from "./media-fetch";
 export { type MediaObjectUrl, type UseMediaObjectUrlOptions, useMediaObjectUrl } from "./media-object-url";
+export { type PdfPreviewConfig, PdfPreviewProvider } from "./pdf-context";
+export type { PdfjsLoader, PdfjsModule } from "./pdf-render";
+export { PdfThumbnail, type PdfThumbnailProps } from "./pdf-thumbnail";
 export { Preview, type PreviewProps } from "./preview";
 export type { PreviewKind } from "./preview-type";
 
