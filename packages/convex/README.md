@@ -12,7 +12,8 @@ pnpm exec devultur-init
 ```
 
 `devultur-init` adds the component to `convex/convex.config.ts` (mounted with `httpPrefix: "/devultur/"`, see
-[Webhook route](#webhook-route)), creates `convex/devultur.ts` with the exposed functions, and prints the Convex env
+[Webhook route](#webhook-route)), creates `convex/devultur.ts` with the exposed functions behind a sign-in guard (see
+[Guarding the component's functions](#guarding-the-components-functions)), and prints the Convex env
 vars to set (your media Worker's URL and credential).
 
 ## Webhook route
@@ -66,6 +67,48 @@ function CoverUpload({ onSaved }) {
   return <input type="file" onChange={async (event) => onSaved(await upload(event.target.files![0]))} />;
 }
 ```
+
+## Guarding the component's functions
+
+`defineDevulturFunctions(devultur, { guard })` returns the functions your app exposes to the browser (`createUploadUrl`,
+`confirmUpload`, `issueViewerToken`, `getMedia`, `listMediaPage`, `deleteMedia`, `deleteVideo`, `processVideo` and the
+progress functions), and each one awaits `guard(ctx, { name, kind, args })` before it runs. Throw from the guard to
+deny the call. Export the functions your app uses, one by one:
+
+```typescript
+// convex/devultur.ts
+import { Devultur, defineDevulturFunctions } from "@devultur/convex";
+import { ConvexError } from "convex/values";
+import { components } from "./_generated/api";
+
+const devultur = new Devultur(components.devultur);
+
+export const { createUploadUrl, confirmUpload, issueViewerToken, getMedia, listMediaPage, deleteMedia } =
+  defineDevulturFunctions(devultur, {
+    guard: async (ctx, operation) => {
+      const identity = await ctx.auth.getUserIdentity();
+      if (!identity) throw new ConvexError("Sign in first");
+      // `operation` narrows on `name`: its `args` are that function's arguments.
+      if (operation.name === "deleteMedia" && !(await canDelete(ctx, identity, operation.args.key))) {
+        throw new ConvexError("You can't delete this file");
+      }
+      return { userId: identity.subject };
+    },
+  });
+```
+
+- `kind` is `"query"`, `"mutation"` or `"action"`, and `ctx` is that kind's context (every one has `ctx.auth`).
+- The guard may return `{ userId }`: `issueViewerToken` then issues the viewer token for that user (its subject)
+  instead of the shared `viewer` one. The browser never names it: the exposed function only takes `sessionSecret`.
+- `visibility: "internal"` registers them as internal functions, for your own actions and mutations to call.
+- `config` takes what `Devultur.exposeApi` does (transcode preset, caption locales, upload lock).
+- Each function keeps its arguments and result types, so `api.devultur.confirmUpload` is typed as before and
+  `<DevulturProvider api={api.devultur}>` takes them as it takes `exposeApi`'s.
+
+> **`Devultur.exposeApi` has no auth.** It returns the same functions with no guard: anyone who can reach your Convex
+> deployment can create upload URLs, confirm uploads, list the whole library and delete media. It keeps working, but
+> use it only for a deployment where every caller is trusted, or move to `defineDevulturFunctions`, which takes the
+> same `config`.
 
 ## Upload progress
 
@@ -162,15 +205,16 @@ export const imagesPage = query({
 // React: usePaginatedQuery(api.library.imagesPage, {}, { initialNumItems: 24 })
 ```
 
-`Devultur.exposeApi` also returns a `listMediaPage` query (`{ type?, paginationOpts }`). It lists every user's media,
-so export it only when every caller may see the whole library.
+`defineDevulturFunctions` also returns a `listMediaPage` query (`{ type?, paginationOpts }`). It lists every user's
+media, so its guard decides who may see the whole library (see
+[Guarding the component's functions](#guarding-the-components-functions)).
 
 A record is written only after the Worker confirms the object exists, so an abandoned upload never shows up:
 
 1. After its PUT, the client calls `confirmUpload({ key, filename, width, height })`. The component asks the Worker
    for the object (a `HEAD`) and records its size and content type. `useDevultur().upload()` and `useMediaUpload` do
    this for you when the `api` you pass `<DevulturProvider>` has `confirmUpload` (add it to the functions you export
-   from `Devultur.exposeApi` in `convex/devultur.ts`). From your server: `devultur.confirmUpload(ctx, { key })`.
+   from `defineDevulturFunctions` in `convex/devultur.ts`). From your server: `devultur.confirmUpload(ctx, { key })`.
 2. `createUploadUrl` also schedules the same check for 25 hours later, past the longest an upload can take. An upload
    whose client never confirmed is recorded then; one that was never stored, or was deleted, isn't.
 
@@ -178,11 +222,9 @@ A record's `key` is the media id for every kind (what `getMedia` takes), and `ob
 `confirmUpload` only accepts upload keys (`{visibility}/{image|file}/{id}/{name}`, `{visibility}/video/{id}/raw/{name}`)
 and is idempotent: a video's transcode state stays as it is.
 
-`confirmUpload`, like every function `exposeApi` returns (and the `devultur-init` template exports), has no auth of
-its own: anyone who can call your Convex deployment can call it. Wrap it with your app's auth, as you would the other
-exposed functions: export your own action that checks `ctx.auth` and then calls `devultur.confirmUpload(ctx, { key })`.
-The caller only names the key: the record's visibility, size and content type come from the Worker's `HEAD` of the
-object, never from the arguments.
+`confirmUpload` runs your guard first, like every function `defineDevulturFunctions` returns. The caller only names
+the key: the record's visibility, size and content type come from the Worker's `HEAD` of the object, never from the
+arguments.
 
 `deleteMedia` removes an image's or a file's record once the Worker
 deleted the object (a delete refused by a lock keeps it). `deleteVideo` removes a video's.
@@ -262,6 +304,41 @@ try {
 
 `isDevulturError(error)` is the matching type guard. Errors that aren't Worker refusals, such as a network failure,
 are rethrown unchanged.
+
+### Error messages
+
+`describeDevulturError(error, labels?)` turns an error into a message for your users: a component action's refusal,
+a `DevulturApiError` from `@devultur/core`, or a `MediaFetchError` from a preview or download. It returns `null` for
+any other error, so your app keeps its own fallback. A code it doesn't know gets the generic `worker_error` message.
+
+`devulturErrorLabels` is the English map, typed `Record<DevulturErrorCode, string | ((details) => string)>`:
+`DevulturErrorCode` is the union of every stable code (`DEVULTUR_ERROR_CODES` lists them), and a function label reads
+the error's details, such as `file_too_large`'s `limit`. `@devultur/convex/locales/es` exports the Spanish map under
+the same name:
+
+```tsx
+import { describeDevulturError } from "@devultur/convex";
+import { devulturErrorLabels as spanishLabels } from "@devultur/convex/locales/es";
+
+const deleteMedia = useAction(api.devultur.deleteMedia);
+
+try {
+  await deleteMedia({ key });
+} catch (error) {
+  // "Este archivo está protegido hasta el 15 jun 2030 y no se puede modificar ni eliminar antes de esa fecha."
+  setMessage(describeDevulturError(error, spanishLabels) ?? "Algo salió mal.");
+}
+```
+
+A failed browser PUT (`upload()`, `useMediaUpload`) rejects with `UploadHttpError`, which carries the HTTP status
+only: match on its `status` for those.
+
+Pass a partial map to change some messages and keep the rest, or a full one for another language (typed
+`DevulturErrorLabels`, so a missing code fails to compile):
+
+```ts
+describeDevulturError(error, { ...spanishLabels, lock_conflict: "Alguien más acaba de cambiarlo." });
+```
 
 ## Object lock
 

@@ -1,5 +1,6 @@
-// Reading a Worker refusal in your app. Component actions (`components.devultur.*`, and the functions `exposeApi`
-// returns) throw `ConvexError<DevulturErrorData>` when the media Worker refuses a request:
+// Reading a Worker refusal in your app. Component actions (`components.devultur.*`, and the functions
+// `defineDevulturFunctions` and `exposeApi` return) throw `ConvexError<DevulturErrorData>` when the media Worker refuses
+// a request (`describeDevulturError` turns one into a message for your users):
 //
 // ```ts
 // try {

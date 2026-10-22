@@ -127,7 +127,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       issueViewerToken: FunctionReference<
         "action",
         "internal",
-        { sessionSecret?: string },
+        { sessionSecret?: string; userId?: string },
         any,
         Name
       >;
