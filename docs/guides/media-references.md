@@ -97,6 +97,66 @@ For background images, pass `render` instead of forcing an `<img>`:
 <Image media={hero.image} render={<div className="hero aspect-[4/3]" />} />
 ```
 
+### Previewing private files
+
+`<Preview>` shows a file inline, picking the element from its content type: an image in an `<img>`, a PDF in an
+`<iframe>`, audio in `<audio controls>`, plain text, CSV and JSON as text in a `<pre>`, and video in the streaming
+`<VideoPlayer>`. Anything else renders `fallback` (by default a `<DownloadLink>`):
+
+```tsx
+import { Preview } from "@devultur/convex/react";
+
+<Preview
+  media={document.file}           // DevulturMedia | null
+  maxBytes={20_000_000}           // larger files render the fallback
+  loading={<Spinner />}
+  className="h-[80vh] w-full"
+/>
+```
+
+The content type comes from `contentType` when you pass it (e.g. the type you stored with the file), otherwise from
+the filename's extension. Text previews are capped at 1 MiB (`maxTextBytes`).
+
+For your own markup, `useMediaObjectUrl` returns an in-memory URL for any media:
+
+```tsx
+import { useMediaObjectUrl } from "@devultur/convex/react";
+
+const { objectUrl, isLoading, error } = useMediaObjectUrl(document.file, {
+  enabled: isSelected,            // nothing is fetched until the row is selected
+  contentType: "application/pdf", // the response must agree; the object URL is created with this type
+  maxBytes: 20_000_000,           // refused by Content-Length, and while streaming
+});
+if (objectUrl) return <iframe src={objectUrl} title={document.file.filename} />;
+```
+
+Private media is fetched with the session header (one token re-issue and retry on a `401 session_mismatch`, as
+`<Image>` does) into an object URL that is revoked when `media` changes and on unmount; the in-flight fetch is
+aborted too. Public media returns its delivery URL without fetching. `error` is a `MediaFetchError` with a stable
+`code`: `http_error` (with `status`), `too_large`, `type_mismatch` or `unsupported_type`.
+
+**Security.** A `blob:` URL is same-origin with your app: an uploaded HTML or SVG file rendered from one runs its
+scripts with your app's cookies and storage. So only an allowlist renders inline:
+
+| Renders as | Content types |
+| --- | --- |
+| `<img>` | `image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/avif` |
+| `<iframe>` | `application/pdf` |
+| `<audio>` | `audio/mpeg`, `audio/mp4`, `audio/aac`, `audio/ogg`, `audio/wav`, `audio/webm`, `audio/flac` |
+| `<pre>` (text, escaped) | `text/plain`, `text/csv`, `application/json` |
+| `<VideoPlayer>` | video media (streamed, never a blob) |
+
+Everything else, including `text/html`, `image/svg+xml`, `application/xml` and `application/xhtml+xml`, falls back to
+a download. The file's known type and the response's `Content-Type` must both be allowlisted and render the same way
+(a `.pdf` served as `text/html` falls back), and the blob is created with the allowlisted type, never the server's
+verbatim: the client-side counterpart of `X-Content-Type-Options: nosniff`. Without a `contentType` option,
+`useMediaObjectUrl` keeps the response's type only when it's on the list and labels anything else
+`application/octet-stream`, which downloads instead of rendering.
+
+The PDF `<iframe>` has no `sandbox`: browsers refuse to run their PDF viewer in a sandboxed frame. A blob typed
+`application/pdf` always opens in the PDF viewer, so a body that isn't a PDF fails to parse instead of running.
+Public media renders from its delivery URL, so serve media from its own origin, not your app's.
+
 ### Imperative escape hatch
 
 For handlers or a hand-built `srcset`, use the non-hook builder from context:
