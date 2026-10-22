@@ -32,10 +32,11 @@ import { getRequestState } from "../request-state";
 import type { MultipartPending, UploadPending, WorkerApp } from "../types";
 import { derivedAssetPending } from "./derived-upload";
 import {
+	checkFirstPart,
 	MULTIPART_PENDING_TTL_SECONDS,
+	recordFirstPart,
 	shouldSniffUpload,
-	unverifiedContent,
-	verifyFirstPart,
+	unverifiedFirstPart,
 } from "./upload-content-check";
 import {
 	allowedUploadMetadata,
@@ -171,7 +172,7 @@ async function handleMultipartCreate(context: UploadContext, key: string, target
 		...(enc ? { enc } : {}),
 		...(declaredSha256 ? { sha256: declaredSha256 } : {}),
 		// The type is fixed now, before any byte: part 1 is checked against it when it arrives.
-		...(shouldSniffUpload(context, key, pending) ? { isContentUnverified: true } : {}),
+		...(shouldSniffUpload(context, key, pending, pending.contentType) ? { checksFirstPart: true } : {}),
 	};
 	await context.env.MEDIA_KV.put(kvKey, JSON.stringify({ ...pending, multipart }), {
 		expirationTtl: MULTIPART_PENDING_TTL_SECONDS,
@@ -223,13 +224,14 @@ export async function handleMultipartPart(context: UploadContext): Promise<Respo
 	}
 	const partChecksumFailure = await checkPartSha256(context, multipart, body);
 	if (partChecksumFailure) return partChecksumFailure;
-	const contentFailure = await verifyFirstPart(context, active, partNumber, body);
+	const contentFailure = await checkFirstPart(context, active, key, partNumber, body);
 	if (contentFailure) return contentFailure;
 	const storedPart = await encryptPart(context, pending, multipart, partNumber, body);
 	if (!storedPart) return context.json({ error: "Encryption key not found for this upload" }, 500);
 
 	const multipartUpload = context.env.MEDIA_BUCKET.resumeMultipartUpload(pending.storageKey, multipart.uploadId);
 	const uploaded = await multipartUpload.uploadPart(partNumber, storedPart);
+	await recordFirstPart(context, active, partNumber, uploaded.etag);
 	return context.json({ partNumber: uploaded.partNumber, etag: uploaded.etag });
 }
 
@@ -241,7 +243,7 @@ async function handleMultipartComplete(context: UploadContext, key: string): Pro
 
 	const parts = normalizeCompletedParts(multipart, body?.parts);
 	if (!parts) return context.json({ error: "parts must list every part exactly once", code: "invalid_parts" }, 400);
-	const unverified = unverifiedContent(context, multipart);
+	const unverified = unverifiedFirstPart(context, multipart, parts);
 	if (unverified) return unverified;
 
 	// R2 has no conditional complete: an asset that appeared, or a lock set, after the create gets rejected here

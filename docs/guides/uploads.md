@@ -48,8 +48,10 @@ public without an explicit decision.
 
 ## Content verification
 
-The Worker checks that a file's first bytes match the `contentType` it was created with. A PNG that is really an SVG,
-or a PDF that is really an HTML page, gets `415 content_type_mismatch` and nothing is stored:
+The Worker checks a file's first bytes against the `contentType` it was created with. By default it only refuses
+markup under an inert type: a PNG that is really an SVG, or a PDF that is really an HTML page, gets
+`415 content_type_mismatch` and nothing is stored. Any other mismatch (a JPEG saved as `.png`) is stored with its
+declared type and logged.
 
 ```typescript
 const res = await fetch(url, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
@@ -59,11 +61,11 @@ if (res.status === 415) {
 }
 ```
 
-For a large (multipart) upload, part 1 is checked and a mismatch aborts the whole upload. `uploadToCapabilityUrl`
+For a large (multipart) upload, part 1 is checked and a rejected one aborts the whole upload. `uploadToCapabilityUrl`
 (`@devultur/core`) throws a `DevulturApiError` with `code: "content_type_mismatch"`, and `@devultur/react`'s uploads an
-`UploadHttpError` with `status: 415`. Types the Worker can't check are kept as
-declared. The Worker's `contentSniffing` rule can store mismatches as `application/octet-stream` instead, or turn the
-check off: see [Content verification](security.md#content-verification).
+`UploadHttpError` with `status: 415`. Types the Worker can't check are kept as declared. The Worker's
+`contentSniffing` rule can reject every mismatch, store mismatches as `application/octet-stream`, or turn the check off:
+see [Content verification](security.md#content-verification).
 
 ## UploadZone component
 

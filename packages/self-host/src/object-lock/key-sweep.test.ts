@@ -45,10 +45,12 @@ function encryptedWorker() {
 			body: sniffableBytes("application/pdf", PART_BYTES),
 		});
 		expect(part.status).toBe(200);
+		// The part 1 the Worker checked: the complete must name its etag.
+		const { etag } = (await part.json()) as { etag: string };
 		const complete = () =>
 			worker.send(`${uploadUrl}&multipart=complete`, {
 				method: "POST",
-				body: JSON.stringify({ uploadId, parts: [{ partNumber: 1, etag: "e" }] }),
+				body: JSON.stringify({ uploadId, parts: [{ partNumber: 1, etag }] }),
 			});
 		return { uploadId, complete };
 	};

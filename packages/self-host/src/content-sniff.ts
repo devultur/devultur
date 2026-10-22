@@ -1,15 +1,28 @@
 // Content sniffing: do the first bytes of an upload match the Content-Type it declares? A hand-rolled signature table
 // (no dependency, nothing parsed past a few fixed offsets) for the types the Worker serves inline. A type outside the
 // table is `unverifiable`: it keeps its declared type, and delivery already sandboxes the risky ones.
-// Scriptable content (HTML, SVG, XML) is checked first, so a "PDF", "image" or "text" upload that is really a document
-// a browser would run is always a mismatch. The sniff never upgrades a type into a scriptable one.
+// Scriptable content (HTML, SVG, XML; see markup-sniff.ts) is checked first, so a "PDF", "image" or "text" upload that
+// is really a document a browser would run is always a mismatch, flagged `isScriptable`. The sniff never upgrades a
+// type into a scriptable one.
+import {
+	decodesStrictly,
+	detectEmbeddedMarkup,
+	detectMarkupBefore,
+	detectScriptable,
+	isBinaryDataByte,
+	leadingText,
+	MARKUP_WINDOW_BYTES,
+	utf16Encoding,
+} from "./markup-sniff";
+
+export { detectScriptable } from "./markup-sniff";
 
 /** Bytes the sniff reads: enough for every signature below (the WHATWG sniffing header is 1445). */
 export const SNIFF_HEAD_BYTES = 4096;
 
 export type SniffResult =
 	| { verdict: "match" }
-	| { verdict: "mismatch"; detected: string }
+	| { verdict: "mismatch"; detected: string; isScriptable: boolean }
 	| { verdict: "unverifiable" };
 
 type Signature = (head: Uint8Array) => boolean;
@@ -37,14 +50,15 @@ const riff =
 		hasBytesAt(head, 0, ascii("RIFF")) && hasBytesAt(head, 8, ascii(form));
 
 const PDF_HEADER = ascii("%PDF-");
-// The PDF spec allows the header anywhere in the first 1024 bytes.
-const isPdf: Signature = (head) => {
-	const searchEnd = Math.min(head.length, 1024) - PDF_HEADER.length;
+// The PDF spec allows the header anywhere in the first 1024 bytes. -1 when it isn't there.
+function pdfHeaderOffset(head: Uint8Array): number {
+	const searchEnd = Math.min(head.length, MARKUP_WINDOW_BYTES) - PDF_HEADER.length;
 	for (let offset = 0; offset <= searchEnd; offset++) {
-		if (hasBytesAt(head, offset, PDF_HEADER)) return true;
+		if (hasBytesAt(head, offset, PDF_HEADER)) return offset;
 	}
-	return false;
-};
+	return -1;
+}
+const isPdf: Signature = (head) => pdfHeaderOffset(head) >= 0;
 
 // ISO-BMFF (`ftyp` box at offset 4): its major brand and the compatible brands that follow.
 function ftypBrands(head: Uint8Array): string[] | null {
@@ -102,27 +116,6 @@ const isMp3: Signature = (head) =>
 const isZip: Signature = (head) =>
 	hasBytesAt(head, 0, [0x50, 0x4b, 0x03, 0x04]) || hasBytesAt(head, 0, [0x50, 0x4b, 0x05, 0x06]);
 
-function utf16Encoding(head: Uint8Array): "utf-16le" | "utf-16be" | null {
-	if (hasBytesAt(head, 0, [0xff, 0xfe])) return "utf-16le";
-	if (hasBytesAt(head, 0, [0xfe, 0xff])) return "utf-16be";
-	return null;
-}
-
-// WHATWG "binary data bytes": control characters no text file contains.
-function isBinaryDataByte(byte: number): boolean {
-	return byte <= 0x08 || byte === 0x0b || (byte >= 0x0e && byte <= 0x1a) || (byte >= 0x1c && byte <= 0x1f);
-}
-
-function decodesStrictly(head: Uint8Array, encoding: string): boolean {
-	try {
-		// `stream: true`: a multibyte sequence cut at the end of the head isn't an error.
-		new TextDecoder(encoding, { fatal: true }).decode(head, { stream: true });
-		return true;
-	} catch {
-		return false;
-	}
-}
-
 /**
  * Text a person could have written: no binary control bytes (UTF-8, or a legacy 8-bit encoding such as a Windows-1252
  * CSV export), or UTF-16 with its BOM.
@@ -133,34 +126,9 @@ const isText: Signature = (head) => {
 	return !head.some(isBinaryDataByte);
 };
 
-function leadingText(head: Uint8Array): string {
-	const decoded = new TextDecoder(utf16Encoding(head) ?? "utf-8").decode(head.subarray(0, 1024), { stream: true });
-	return decoded.replace(/^﻿/, "").trimStart();
-}
-
 // JSON is UTF-8 (RFC 8259): text that decodes strictly and opens an object or an array.
 const isJson: Signature = (head) =>
 	!head.some(isBinaryDataByte) && decodesStrictly(head, "utf-8") && /^[{[]/.test(leadingText(head));
-
-const SCRIPTABLE_PREFIXES: Array<[prefix: string, family: string]> = [
-	["<!doctype html", "html"],
-	["<html", "html"],
-	["<head", "html"],
-	["<body", "html"],
-	["<script", "html"],
-	["<iframe", "html"],
-	["<svg", "svg"],
-	["<?xml", "xml"],
-];
-
-/** `html`, `svg` or `xml` when the head is a document a browser would render and run, otherwise null. */
-export function detectScriptable(head: Uint8Array): string | null {
-	const start = leadingText(head).slice(0, 512).toLowerCase();
-	const found = SCRIPTABLE_PREFIXES.find(([prefix]) => start.startsWith(prefix));
-	if (!found) return null;
-	if (found[1] === "xml" && start.includes("<svg")) return "svg";
-	return found[1];
-}
 
 // Only names what a mismatching upload looks like, for the error body: the first signature that fits wins.
 const FAMILIES: Array<[family: string, signature: Signature]> = [
@@ -224,13 +192,41 @@ function essenceOf(contentType: string): string {
 	return contentType.split(";")[0]?.trim().toLowerCase() ?? "";
 }
 
+const TEXT_TYPES = new Set([
+	"text/plain",
+	"text/csv",
+	"text/markdown",
+	"text/tab-separated-values",
+	"application/json",
+]);
+
+// Markup past the start: before a PDF's header (any HTML-sniffing tag) or anywhere in the window of a PDF or text file
+// (distinct tags only). Images and media start with their magic number, so the leading check covers them.
+function embeddedMarkup(essence: string, head: Uint8Array): string | null {
+	if (essence === "application/pdf") {
+		const headerOffset = pdfHeaderOffset(head);
+		const before = detectMarkupBefore(head, headerOffset < 0 ? MARKUP_WINDOW_BYTES : headerOffset);
+		return before ?? detectEmbeddedMarkup(head);
+	}
+	return TEXT_TYPES.has(essence) ? detectEmbeddedMarkup(head) : null;
+}
+
+const SCRIPTABLE_FAMILIES = new Set(["html", "svg", "xml"]);
+
+const mismatch = (detected: string): SniffResult => ({
+	verdict: "mismatch",
+	detected,
+	isScriptable: SCRIPTABLE_FAMILIES.has(detected),
+});
+
 /** Does `head` (the first bytes of the plaintext, ≤4 KB are read) match `declaredType`? */
 export function sniffContent(declaredType: string, head: Uint8Array): SniffResult {
-	const signature = SIGNATURES.get(essenceOf(declaredType));
+	const essence = essenceOf(declaredType);
+	const signature = SIGNATURES.get(essence);
 	if (!signature) return { verdict: "unverifiable" };
 	const sample = head.subarray(0, SNIFF_HEAD_BYTES);
-	const scriptable = detectScriptable(sample);
-	if (scriptable) return { verdict: "mismatch", detected: scriptable };
+	const scriptable = detectScriptable(sample) ?? embeddedMarkup(essence, sample);
+	if (scriptable) return mismatch(scriptable);
 	if (signature(sample)) return { verdict: "match" };
-	return { verdict: "mismatch", detected: detectFamily(sample) };
+	return mismatch(detectFamily(sample));
 }

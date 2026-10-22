@@ -119,7 +119,7 @@ describe("sniffContent: mismatches", () => {
 		["image/png", new Uint8Array(), "empty"],
 		["video/mp4", new Uint8Array(64), "binary"],
 	])("%s that is %s", (declared, head, detected) => {
-		expect(sniffContent(declared, head)).toEqual({ verdict: "mismatch", detected });
+		expect(sniffContent(declared, head)).toEqual({ verdict: "mismatch", detected, isScriptable: false });
 	});
 });
 
@@ -139,28 +139,73 @@ describe("sniffContent: scriptable content disguised as an inert type", () => {
 			(declared) => disguises.map(([content, detected]) => [declared, content, detected] as const),
 		),
 	)("%s declaring %s", (declared, content, detected) => {
-		expect(sniffContent(declared, bytes(content))).toEqual({ verdict: "mismatch", detected });
+		expect(sniffContent(declared, bytes(content))).toEqual({ verdict: "mismatch", detected, isScriptable: true });
 	});
 
 	it("sees through a UTF-8 BOM and leading whitespace", () => {
 		const head = bytes([0xef, 0xbb, 0xbf], "  \r\n<script>alert(1)</script>");
-		expect(sniffContent("text/plain", head)).toEqual({ verdict: "mismatch", detected: "html" });
+		expect(sniffContent("text/plain", head)).toEqual({ verdict: "mismatch", detected: "html", isScriptable: true });
 	});
 
 	it("sees through UTF-16 with its BOM", () => {
 		const utf16le = [0xff, 0xfe, ...Array.from("<svg/>").flatMap((char) => [char.charCodeAt(0), 0])];
-		expect(sniffContent("text/plain", bytes(utf16le))).toEqual({ verdict: "mismatch", detected: "svg" });
-	});
-
-	it("catches HTML in front of a PDF header (a polyglot)", () => {
-		expect(sniffContent("application/pdf", bytes("<html><script>x</script>%PDF-1.7"))).toEqual({
+		expect(sniffContent("text/plain", bytes(utf16le))).toEqual({
 			verdict: "mismatch",
-			detected: "html",
+			detected: "svg",
+			isScriptable: true,
 		});
 	});
 
-	it("doesn't flag text that only mentions a tag", () => {
+	it("doesn't call a file markup for a tag past its start", () => {
 		expect(detectScriptable(bytes("Use the <svg> element"))).toBeNull();
+	});
+});
+
+describe("sniffContent: markup inside a PDF or text window", () => {
+	const html = { verdict: "mismatch", detected: "html", isScriptable: true };
+
+	it.each([
+		"<html><script>x</script>%PDF-1.7",
+		"%\n<b>%PDF-1.7",
+		"%\n<p>hi</p>%PDF-1.7",
+		"%\n<!-- x -->%PDF-1.7",
+		"junk <a href=x>%PDF-1.7",
+		"garbage\n<h1>title</h1>\n%PDF-1.7",
+	])("any HTML-sniffing tag before the PDF header: %s", (content) => {
+		expect(sniffContent("application/pdf", bytes(content))).toEqual(html);
+	});
+
+	it("a distinct tag after the PDF header, within the first 1024 bytes", () => {
+		expect(sniffContent("application/pdf", bytes("%PDF-1.7\n%\n<script >alert(1)</script>"))).toEqual(html);
+		expect(sniffContent("application/pdf", bytes("%PDF-1.7\n", new Array(1100).fill(0x20), "<script>"))).toEqual({
+			verdict: "match",
+		});
+	});
+
+	it("an embedded SVG", () => {
+		expect(sniffContent("application/pdf", bytes("%PDF-1.7\n<svg onload=alert(1)>"))).toMatchObject({
+			detected: "svg",
+		});
+	});
+
+	it("a distinct tag anywhere in a text file", () => {
+		expect(sniffContent("text/plain", bytes("Hello\n\n<script>steal()</script>"))).toEqual(html);
+		expect(sniffContent("text/csv", bytes("a,b\n1,<iframe src=x>\n"))).toEqual(html);
+	});
+
+	it.each([
+		"if a <b then swap",
+		"a<b,c<d\n",
+		"Use <bold> for emphasis, <a2> is a cell",
+		"Paragraph <p and br",
+		"Use the <style-guide> doc",
+	])("not prose that only looks like a tag: %s", (content) => {
+		expect(sniffContent("text/plain", bytes(content))).toEqual({ verdict: "match" });
+	});
+
+	it("short tags only count at the start of a text file", () => {
+		expect(sniffContent("text/plain", bytes("<b>bold</b> text"))).toEqual(html);
+		expect(sniffContent("text/plain", bytes("some <b>bold</b> text"))).toEqual({ verdict: "match" });
 	});
 });
 

@@ -132,35 +132,65 @@ type:
 | `text/plain`, `text/csv`, `text/markdown` | Text: no NUL or other binary control bytes |
 | `application/json` | UTF-8 text that starts with `{` or `[` (after a BOM and whitespace) |
 
-Whatever the declared type, a file that starts with `<!doctype html`, `<html`, `<script`, `<svg` or `<?xml` (after a
-BOM and whitespace, in any case) is a mismatch: a "PDF", image or text file that is really HTML, SVG or XML never gets
-stored under the inert type. A type outside the table (`text/html`, `image/svg+xml`, `application/octet-stream`, …)
-isn't checked; it keeps its declared type, and delivery sandboxes the risky ones.
+**Markup** is what a browser would render as a document and run. A file counts as markup when:
 
-On a mismatch the upload answers `415` and stores nothing:
+- it starts (after a BOM and whitespace, in any case) with `<?xml`, `<svg`, `<!doctype html`, `<!--` or one of the
+  WHATWG HTML-sniffing tags (`<html`, `<head`, `<script`, `<iframe`, `<h1`, `<div`, `<font`, `<table`, `<a`, `<style`,
+  `<title`, `<b`, `<body`, `<br`, `<p`) followed by a space or `>`;
+- a declared PDF has any of those before its `%PDF-` header;
+- a declared PDF or text file has a distinct tag (`<script`, `<iframe`, `<html`, `<svg`, `<style`, …) followed by a
+  space or `>` anywhere in its first 1024 bytes. Prose like "a <b then c" or "Use <bold>" isn't markup.
 
-```json
-{ "code": "content_type_mismatch", "declared": "application/pdf", "detected": "html", "error": "…" }
-```
-
-A multipart upload's type is fixed when it starts, so the Worker checks part 1 when it arrives. A mismatch aborts the
-whole upload (the R2 session, its parts, the pending upload and its encryption key), and
-`POST ?multipart=complete` answers `409 content_unverified` until part 1 has passed. The SDKs send part 1 first.
+A type outside the table (`text/html`, `image/svg+xml`, `application/octet-stream`, …) isn't checked: it keeps its
+declared type, and delivery sandboxes the risky ones.
 
 The `contentSniffing` [rule](self-host.md#rules) picks what a mismatch gets:
 
 | `contentSniffing` | Mismatch |
 | --- | --- |
-| `"reject"` (default) | `415 content_type_mismatch`, nothing stored |
-| `"octet-stream"` | A single PUT is stored as `application/octet-stream` (delivered as a sandboxed attachment). A multipart upload is still rejected. |
+| `"scriptable"` (default) | `415 content_type_mismatch` when the bytes are markup; any other mismatch (a PNG that is a JPEG, an MP4 that is a WebM) is stored with its declared type |
+| `"reject"` | `415 content_type_mismatch` for every mismatch |
+| `"octet-stream"` | A single PUT is stored as `application/octet-stream` (delivered as a sandboxed attachment). A multipart upload is rejected. |
 | `"off"` | Not checked |
 
 ```typescript
-export default createWorker({ plugins: defaultPlugins({ contentSniffing: "octet-stream" }) });
+export default createWorker({ plugins: defaultPlugins({ contentSniffing: "reject" }) });
 ```
 
-A transcode's outputs (HLS playlists and segments, MP4 renditions, posters, storyboards) are written by the Worker's
-runner and never checked.
+A rejected upload stores nothing and answers:
+
+```json
+{ "code": "content_type_mismatch", "declared": "application/pdf", "detected": "html", "error": "…" }
+```
+
+Every mismatch, whatever the mode does with it, is logged as one line you can search your Worker logs for:
+
+```text
+[content-sniff] {"declared":"image/png","detected":"jpeg","key":"public/image/…/photo.png","action":"accepted"}
+```
+
+`action` is `accepted`, `rejected` or `stored_as_octet_stream`. Before you switch to `reject` or `octet-stream`, check
+the log for files you'd turn away. Real files the stricter modes reject or retype:
+
+- images with the wrong extension (a JPEG saved as `.png`), and HEIC photos labelled `image/jpeg`;
+- password-protected DOCX, XLSX and PPTX files, which are OLE containers rather than zip;
+- PDFs whose `%PDF-` header comes after byte 1024;
+- JSON that is a bare scalar (`"text"`, `42`) or UTF-16;
+
+In every mode except `off`, a text file that starts with `<?xml` (an XML export saved as `.txt`) is markup and is
+rejected.
+
+A multipart upload's type is fixed when it starts, so the Worker checks every upload of part 1 when it arrives,
+retries included. A rejected part 1 aborts the whole upload (the R2 session, its parts, the pending upload and its
+encryption key). The Worker records the etag of the part 1 it checked, and `POST ?multipart=complete` answers
+`409 content_unverified` unless the complete names that part 1. The SDKs send part 1 first, and `uploadMultipart`
+makes up to 3 attempts at a complete that gets `content_unverified`, with a growing delay, since the record can take
+a moment to reach every location.
+
+A transcode's outputs (HLS playlists and segments, MP4 renditions, posters, storyboards) are never checked, as long as
+the runner writes them with its own type for that folder (`application/vnd.apple.mpegurl` or `video/mp2t` under
+`hls/`, `video/mp4` under `mp4/`, `image/jpeg` under `thumbnails/`, `image/jpeg` or `text/vtt` under `storyboard/`).
+Any other type on those paths is checked like a client upload.
 
 ## Serve media from its own origin
 

@@ -250,8 +250,10 @@ export interface MultipartPending {
 	enc?: string;
 	/** sha256 of the whole file declared at create: each part must carry its own (`x-devultur-sha256`). */
 	sha256?: string;
-	/** Part 1 hasn't been checked against the declared type yet: the complete is refused until it is. */
-	isContentUnverified?: boolean;
+	/** Part 1 is checked against the declared type: the complete must name the part 1 that passed. */
+	checksFirstPart?: boolean;
+	/** Etag of the part 1 that was checked (the last one uploaded). */
+	firstPartEtag?: string;
 }
 
 export interface TranscodeRequest {

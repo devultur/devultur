@@ -6,7 +6,7 @@
 //   POST   ?multipart=complete          { uploadId, parts }     → { key, size }
 //   DELETE ?uploadId=…                                          → aborts
 // The URL remains the authenticated POST /v1/upload capability: no call carries a credential.
-import { errorFromResponse } from "./api-error";
+import { DevulturApiError, errorFromResponse } from "./api-error";
 import { SHA256_HEADER, sha256Hex } from "./integrity";
 
 /**
@@ -219,6 +219,27 @@ async function uploadParts(
 	return parts.sort((a, b) => a.partNumber - b.partNumber);
 }
 
+// The worker answers `409 content_unverified` until the part 1 it checked is visible where the complete runs (its
+// upload state is eventually consistent across locations): the complete is retried with a growing delay.
+const COMPLETE_ATTEMPTS = 3;
+const COMPLETE_RETRY_DELAY_MS = 1000;
+
+async function completeMultipart(
+	uploadUrl: string,
+	body: { uploadId: string; parts: MultipartPart[] },
+	signal: AbortSignal | undefined,
+): Promise<CapabilityUploadResult> {
+	for (let attempt = 1; ; attempt++) {
+		try {
+			return await postJson<CapabilityUploadResult>(multipartCompleteUrl(uploadUrl), body, signal);
+		} catch (error) {
+			const isUnverified = error instanceof DevulturApiError && error.code === "content_unverified";
+			if (!isUnverified || attempt >= COMPLETE_ATTEMPTS) throw error;
+			await new Promise((resolve) => setTimeout(resolve, COMPLETE_RETRY_DELAY_MS * attempt));
+		}
+	}
+}
+
 /**
  * Uploads `file` in parts to the worker's capability URL. On any failure (or abort), aborts the
  * multipart upload on the worker (best-effort) and rethrows the original error.
@@ -232,11 +253,7 @@ export async function uploadMultipart(
 	const session = await postJson<MultipartSession>(multipartCreateUrl(uploadUrl), createBody, options.signal);
 	try {
 		const parts = await uploadParts(uploadUrl, file, session, options);
-		const result = await postJson<CapabilityUploadResult>(
-			multipartCompleteUrl(uploadUrl),
-			{ uploadId: session.uploadId, parts },
-			options.signal,
-		);
+		const result = await completeMultipart(uploadUrl, { uploadId: session.uploadId, parts }, options.signal);
 		options.onProgress?.(100);
 		return result;
 	} catch (error) {

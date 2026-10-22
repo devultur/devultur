@@ -26,6 +26,24 @@ export function isDerivedAssetKey(key: string): boolean {
 	return DERIVED_ASSET_KEY.test(key);
 }
 
+// The types the runner writes in each folder of a video's outputs (HLS renditions nest one level down).
+const DERIVED_TYPES_BY_FOLDER: Record<string, Set<string>> = {
+	hls: new Set(["application/vnd.apple.mpegurl", "video/mp2t"]),
+	mp4: new Set(["video/mp4"]),
+	thumbnails: new Set(["image/jpeg"]),
+	storyboard: new Set(["image/jpeg", "text/vtt"]),
+};
+const DERIVED_OUTPUT_KEY = /^(?:public|private)\/video\/[A-Za-z0-9-]+\/(hls|mp4|thumbnails|storyboard)\/.+$/;
+
+/**
+ * A transcode output the runner writes: a derived key with the type the runner uses for that folder. Its bytes are the
+ * Worker's own, so they skip content sniffing; any other type on a derived key is checked like a client upload.
+ */
+export function isTrustedDerivedOutput(key: string, contentType: string): boolean {
+	const folder = DERIVED_OUTPUT_KEY.exec(key)?.[1];
+	return folder !== undefined && (DERIVED_TYPES_BY_FOLDER[folder]?.has(contentType) ?? false);
+}
+
 /** A video has one raw (a few at most): one list page covers them. */
 const RAW_LIST_LIMIT = 100;
 
