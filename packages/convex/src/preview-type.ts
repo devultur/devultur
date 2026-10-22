@@ -8,7 +8,7 @@
 // that executes. Anything else falls back to a download.
 import type { DevulturMedia } from "@devultur/core";
 
-/** How a content type renders inline: `<img>`, `<iframe>`, `<audio>` or text in a `<pre>`. */
+/** How a content type renders inline: `<img>`, a PDF view (pdf.js canvases or `<iframe>`), `<audio>` or `<pre>`. */
 export type PreviewKind = "image" | "pdf" | "audio" | "text";
 
 /** Never SVG (it carries script), never HTML/XML/XHTML. Video goes through the streaming player, not a blob. */

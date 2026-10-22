@@ -99,8 +99,8 @@ For background images, pass `render` instead of forcing an `<img>`:
 
 ### Previewing private files
 
-`<Preview>` shows a file inline, picking the element from its content type: an image in an `<img>`, a PDF in an
-`<iframe>`, audio in `<audio controls>`, plain text, CSV and JSON as text in a `<pre>`, and video in the streaming
+`<Preview>` shows a file inline, picking the element from its content type: an image in an `<img>`, a PDF on
+`<canvas>` pages with pdf.js (or in an `<iframe>` without it, see [PDFs](#pdfs-with-pdfjs)), audio in `<audio controls>`, plain text, CSV and JSON as text in a `<pre>`, and video in the streaming
 `<VideoPlayer>`. Anything else renders `fallback` (by default a `<DownloadLink>`):
 
 ```tsx
@@ -143,7 +143,7 @@ scripts with your app's cookies and storage. So only an allowlist renders inline
 | Renders as | Content types |
 | --- | --- |
 | `<img>` | `image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/avif` |
-| `<iframe>` | `application/pdf` |
+| pdf.js `<canvas>` (or `<iframe>`) | `application/pdf` |
 | `<audio>` | `audio/mpeg`, `audio/mp4`, `audio/aac`, `audio/ogg`, `audio/wav`, `audio/webm`, `audio/flac` |
 | `<pre>` (text, escaped) | `text/plain`, `text/csv`, `application/json` |
 | `<VideoPlayer>` | video media (streamed, never a blob) |
@@ -160,12 +160,94 @@ way. Only a public image keeps its delivery URL, because an `<img>` never runs s
 layer: anything outside its safe-inline list is served sandboxed and as an attachment (see
 [Security](security.md#serving-uploaded-files-safely)).
 
-The PDF `<iframe>` has no `sandbox`: browsers refuse to run their PDF viewer in a sandboxed frame. A blob typed
-`application/pdf` always opens in the PDF viewer, so a body that isn't a PDF fails to parse instead of running. The
-frame has `referrerPolicy="no-referrer"`.
+#### PDFs with pdf.js
 
-If your app sends a Content Security Policy, previews need `blob:` in `img-src`, `media-src` and `frame-src`. Allow it
-only on the pages that show previews (e.g. `frame-src 'self' blob:` on the review page), not app-wide.
+Install [`pdfjs-dist`](https://www.npmjs.com/package/pdfjs-dist) (an optional peer dependency, `>=6.2.108`) and wrap
+the app, or just the pages with previews, in a `PdfPreviewProvider`:
+
+```bash
+pnpm add pdfjs-dist
+```
+
+```tsx
+import { PdfPreviewProvider } from "@devultur/convex/react";
+import { loadPdfjs } from "@devultur/convex/pdfjs";
+
+<PdfPreviewProvider pdfjs={loadPdfjs}>
+  <Preview media={document.file} className="w-full" />
+</PdfPreviewProvider>
+```
+
+Why: the browser's own viewer isn't the same everywhere. iOS Safari shows only the first page of a PDF in an
+`<iframe>`, and a sandboxed frame blocks Chrome's viewer altogether. With pdf.js every browser gets the same
+scrollable pages:
+
+- Pages render to `<canvas>` lazily, as they near the viewport, at the container's width and the screen's pixel
+  density, capped at 5,242,880 canvas pixels on phones and tablets (larger canvases render blank on iOS).
+- pdf.js gets the bytes of the same verified fetch, never a URL, so it fetches nothing itself and never sees a token.
+- No annotation layer is built and `enableScripting: false` is passed, so PDF JavaScript never runs (versions before
+  6.2.108 could run it with scripting on, CVE-2026-16633). `isEvalSupported: false` is passed too, though pdf.js 6
+  no longer has that `eval` path (CVE-2024-4367).
+- Each page's text is in the page for screen readers; the document is labeled with its title and page count. Text
+  isn't selectable.
+- At most `maxPages` pages render (default 500): a small file can declare millions. Past it, a "showing the first N of
+  M pages" note and `fallback` follow the pages.
+- The document and its worker are destroyed, and pending renders cancelled, when `media` changes and on unmount.
+
+`loadPdfjs` imports the **legacy build** (`pdfjs-dist/legacy/build/pdf.mjs`), which runs on Safari and iOS 18+; the
+modern build needs iOS 26.2. It lives in its own entry, `@devultur/convex/pdfjs`, so apps without `pdfjs-dist` never
+bundle an import they can't resolve. Without a provider, or when the import fails, PDFs render in the `<iframe>`
+below, from the same bytes.
+
+`<PdfThumbnail>` draws only page 1 on a small canvas, for lists and upload queues. Nothing is fetched until the row
+nears the viewport; without pdf.js it renders `fallback`:
+
+```tsx
+import { PdfThumbnail } from "@devultur/convex/react";
+
+<PdfThumbnail media={row.file} width={64} fallback={<FileIcon />} />
+```
+
+**The worker.** `loadPdfjs` points `GlobalWorkerOptions.workerSrc` at
+`new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs", import.meta.url)` unless you set one. Bundlers resolve that
+differently, so set it from your own code when the default doesn't load (`workerSrc` on the provider, or
+`pdfWorkerSrc` on one `<Preview>` / `<PdfThumbnail>`):
+
+- **Vite and TanStack Start**: import the worker as an asset.
+
+  ```tsx
+  import workerSrc from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
+
+  <PdfPreviewProvider pdfjs={loadPdfjs} workerSrc={workerSrc}>
+  ```
+
+  Vite pre-bundles dependencies, which breaks `import.meta.url` inside them in dev; the `?url` import avoids that.
+- **Next.js**: render previews on the client only (`dynamic(() => import("./preview"), { ssr: false })`, or a
+  `"use client"` component). Next 15+ usually resolves the default worker URL without config; if the worker
+  doesn't load (or on older versions), copy `pdf.worker.min.mjs` into `public/` and pass
+  `workerSrc="/pdf.worker.min.mjs"`.
+- **Anything else**: serve `node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs` as a static file and pass its URL.
+
+To load pdf.js your own way (another build, a CDN you host), pass any loader:
+`pdfjs={() => import("pdfjs-dist/legacy/build/pdf.mjs")}`.
+
+**The `<iframe>` fallback.** It has no `sandbox`: browsers refuse to run their PDF viewer in a sandboxed frame. A
+blob typed `application/pdf` always opens in the PDF viewer, so a body that isn't a PDF fails to parse instead of
+running. The frame has `referrerPolicy="no-referrer"`.
+
+#### Content Security Policy
+
+If your app sends a CSP, previews need, on the pages that show them (not app-wide):
+
+| Directive | Needed for |
+| --- | --- |
+| `img-src blob:` | images |
+| `media-src blob:` | audio |
+| `worker-src 'self' blob:` | pdf.js's worker (`'self'` for a same-origin worker file; add its origin if you host it elsewhere) |
+| `frame-src blob:` | only the `<iframe>` fallback, when pdf.js isn't installed |
+
+pdf.js needs no `'unsafe-eval'`; `'wasm-unsafe-eval'` lets it decode JPEG 2000 and JBIG2 images with WebAssembly
+(it falls back to JavaScript without it).
 
 ### Imperative escape hatch
 
