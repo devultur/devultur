@@ -8,6 +8,7 @@ import {
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { updateRequestState } from "../request-state";
+import { sniffableBytes } from "../test-fixtures";
 import type { WorkerApp } from "../types";
 import { upload } from "./upload";
 import { expectedPartBytes, normalizeCompletedParts } from "./upload-multipart";
@@ -143,6 +144,13 @@ function bytes(length: number, seed = 7): Uint8Array<ArrayBuffer> {
 	return out;
 }
 
+/** `bytes()` that open with an MP4 `ftyp` box, so part 1 passes the content check. */
+function mp4Bytes(length: number, seed?: number): Uint8Array<ArrayBuffer> {
+	const out = bytes(length, seed);
+	out.set(sniffableBytes("video/mp4", 0));
+	return out;
+}
+
 describe("multipart upload routes", () => {
 	it("requires the pending capability (no pending → 404, nothing created in R2)", async () => {
 		const { create, uploads } = setup();
@@ -168,7 +176,7 @@ describe("multipart upload routes", () => {
 		const tooShort = await putPart("up-1", 1, bytes(10));
 		expect(tooShort.status).toBe(400);
 
-		const plaintext = bytes(PART + 100);
+		const plaintext = mp4Bytes(PART + 100);
 		const first = await putPart("up-1", 1, plaintext.slice(0, PART));
 		const second = await putPart("up-1", 2, plaintext.slice(PART));
 		expect(await first.json()).toEqual({ partNumber: 1, etag: "etag-1" });
@@ -213,7 +221,7 @@ describe("multipart upload routes", () => {
 			security: { encrypt: true },
 		});
 		await create(PART + 100);
-		const plaintext = bytes(PART + 100, 3);
+		const plaintext = mp4Bytes(PART + 100, 3);
 		await putPart("up-1", 1, plaintext.slice(0, PART));
 		await putPart("up-1", 2, plaintext.slice(PART));
 		await complete("up-1", [

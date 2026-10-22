@@ -358,6 +358,7 @@ export default createWorker({
 | `maxFileLifetimeSeconds` | Longest lifetime of an uploaded file, in seconds: the default TTL and a ceiling (a shorter `expiresIn` still wins). For a demo or scratch Worker whose uploads clean themselves up. A [locked](object-lock.md#retention-vs-expiry) file still expires (viewers get `410`) but isn't deleted until its lock ends. |
 | `uploadMetadata` | String map added to the R2 `customMetadata` of every uploaded object (for example which app uploaded it). Keys the Worker owns (`security`, `enc`, `expiresAt`, `derivedFrom`, `lock`, `sha256*`) are dropped. |
 | `lock` | Default lock of an uploaded file: retention and hold (see [Retention and holds](object-lock.md)). An upload or its upload token overrides it. |
+| `contentSniffing` | What an upload whose bytes contradict its declared type gets: `reject` (default, `415 content_type_mismatch`), `octet-stream` or `off`. See [Content verification](security.md#content-verification). |
 | `transcode.presets` | Named presets and the default one, used when a request names no preset |
 | `transcode.maxResolution` | Highest rung of the HLS ladder (`720p`, `1080p`, `4k`) |
 | `transcode.deleteOriginalOnSuccess` | Delete the original once a transcode completes. It's never deleted after a failure, nor while it's [locked](object-lock.md#transcoding-a-locked-video). |

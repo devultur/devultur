@@ -67,7 +67,16 @@ export interface WorkerConfig {
 	 */
 	lock?: ObjectLock;
 	transcode?: TranscodeConfig;
+	/**
+	 * What an upload whose first bytes contradict its declared Content-Type gets (a "PDF" that is HTML, a "PNG" that is
+	 * SVG): `reject` answers `415 content_type_mismatch` and stores nothing, `octet-stream` stores a single PUT as
+	 * `application/octet-stream` instead (a multipart upload is still rejected: R2 fixes its type when it starts), `off`
+	 * skips the check. A transcode's outputs are never checked. Unset: `reject`.
+	 */
+	contentSniffing?: ContentSniffingMode;
 }
+
+export type ContentSniffingMode = "reject" | "octet-stream" | "off";
 
 /** What an auth plugin established about the request's credential. */
 export interface RequestAccess {

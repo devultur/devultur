@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkerPlugin } from "../plugin";
 import type { LockChangeRequest } from "../plugin-hooks";
+import { withSignature } from "../test-fixtures";
 import { loggedAudits } from "./audit-test-support";
 import { HOLD_PAGE_SIZE } from "./hold";
 import { lockedFixture, RAW_KEY } from "./worker-fixture";
@@ -168,7 +169,11 @@ describe("POST /v1/lock/hold", () => {
 			body: JSON.stringify({ filename: "deed.pdf", contentType: "application/pdf", hold: true }),
 		});
 		const { key, uploadUrl } = (await created.json()) as { key: string; uploadUrl: string };
-		const put = await send(uploadUrl, { method: "PUT", body: "pdf", headers: { "Content-Type": "application/pdf" } });
+		const put = await send(uploadUrl, {
+			method: "PUT",
+			body: withSignature("application/pdf", "pdf"),
+			headers: { "Content-Type": "application/pdf" },
+		});
 		expect(put.status).toBe(200);
 		await settle();
 

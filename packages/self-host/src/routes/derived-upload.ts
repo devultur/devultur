@@ -66,6 +66,7 @@ export async function derivedAssetPending(context: Context<WorkerApp>, key: stri
 	return {
 		contentType: DERIVED_CONTENT_TYPES.has(declared) ? declared : "application/octet-stream",
 		storageKey: storageKey(context, key),
+		isDerived: true,
 		...(security ? { security } : {}),
 		...(expiresAt ? { expiresAt } : {}),
 	};

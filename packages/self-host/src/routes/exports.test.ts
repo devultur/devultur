@@ -4,13 +4,14 @@ import { exportsWorker } from "../exports-test-harness";
 import { verifyViewerToken } from "../helpers";
 import type { PluginHooks } from "../plugin-hooks";
 import type { DownloadLinkInfo } from "../route-result";
+import { withSignature } from "../test-fixtures";
 import { uploadPendingIdOf, uploadPendingKvKey } from "./upload-pending";
 
 // Private exports in self-host: assets with a client path under an upload token's prefix, conditional
 // overwrite, TTL (410 when expired), single-use download links (DO), and asset deletion along with its L4 material.
 
 const GRANT: UploadGrant = { tokenId: "jti-1", pathPrefix: "asset/exports/inst-1/", visibility: "private" };
-const BYTES = new TextEncoder().encode("zip bytes");
+const BYTES = withSignature("application/zip", "zip bytes");
 
 type Worker = ReturnType<typeof exportsWorker>;
 
@@ -256,7 +257,7 @@ describe("single-use download links", () => {
 		expect((await worker.send(path, { method: "HEAD" })).status).toBe(405);
 		const partial = await worker.send(path, { headers: { Range: "bytes=0-2" } });
 		expect(partial.status).toBe(206);
-		expect(new TextDecoder().decode(await partial.arrayBuffer())).toBe("zip");
+		expect(new Uint8Array(await partial.arrayBuffer())).toEqual(BYTES.subarray(0, 3));
 	});
 
 	it("expires, 404s unknown ids and refuses missing or expired files", async () => {

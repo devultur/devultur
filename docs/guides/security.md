@@ -99,8 +99,11 @@ response:
 
 - `X-Content-Type-Options: nosniff` on every response: the browser never upgrades a declared type into one that
   executes.
-- For any type outside the safe-inline list, also `Content-Security-Policy: sandbox` (no script, an opaque origin)
-  and `Content-Disposition: attachment` (opening it downloads it; a stored filename is kept).
+- For any type outside the safe-inline list, also `Content-Security-Policy: sandbox; default-src 'none'` (no script,
+  an opaque origin, no subresource) and `Content-Disposition: attachment` (opening it downloads it; a stored filename
+  is kept).
+- `Cross-Origin-Resource-Policy: cross-origin` on public media, so a page that requires it (`Cross-Origin-Embedder-Policy`)
+  can still embed it. Private media and download links don't set it.
 
 Safe inline: `image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/avif`, `video/*`, `audio/*`,
 `application/pdf`, `text/plain`, `text/csv`, `application/json`, `text/vtt` and HLS playlists. Everything else is
@@ -110,6 +113,65 @@ edge copies keep these headers. An `<img>` still shows an SVG, since images igno
 
 On the client, `<Preview>` and `useMediaObjectUrl` verify types themselves; see [Previewing private
 files](media-references.md#previewing-private-files).
+
+## Content verification
+
+The declared `Content-Type` comes from the client, so the Worker also checks the bytes. Before it stores an upload, it
+reads the first 4 KB of the plaintext (before encryption) and compares them with a signature table for the declared
+type:
+
+| Declared type | Expected bytes |
+| --- | --- |
+| `application/pdf` | `%PDF-` in the first 1024 bytes |
+| `image/png`, `image/jpeg`, `image/gif`, `image/webp` | Their magic numbers |
+| `image/avif`, `image/heic`, `image/heif` | An ISO-BMFF `ftyp` box with an AVIF or HEIF brand |
+| `video/mp4`, `video/quicktime`, `video/x-m4v`, `audio/mp4`, `audio/x-m4a` | An ISO-BMFF `ftyp` box (or a classic QuickTime atom) |
+| `video/webm`, `audio/webm`, `video/x-matroska` | EBML with a `webm` (or `matroska`) DocType |
+| `audio/mpeg`, `audio/ogg`, `audio/wav`, `audio/flac` | ID3 or an MPEG frame sync, `OggS`, `RIFF…WAVE`, `fLaC` |
+| `application/zip`, DOCX, XLSX, PPTX | A zip archive (`PK\x03\x04`) |
+| `text/plain`, `text/csv`, `text/markdown` | Text: no NUL or other binary control bytes |
+| `application/json` | UTF-8 text that starts with `{` or `[` (after a BOM and whitespace) |
+
+Whatever the declared type, a file that starts with `<!doctype html`, `<html`, `<script`, `<svg` or `<?xml` (after a
+BOM and whitespace, in any case) is a mismatch: a "PDF", image or text file that is really HTML, SVG or XML never gets
+stored under the inert type. A type outside the table (`text/html`, `image/svg+xml`, `application/octet-stream`, …)
+isn't checked; it keeps its declared type, and delivery sandboxes the risky ones.
+
+On a mismatch the upload answers `415` and stores nothing:
+
+```json
+{ "code": "content_type_mismatch", "declared": "application/pdf", "detected": "html", "error": "…" }
+```
+
+A multipart upload's type is fixed when it starts, so the Worker checks part 1 when it arrives. A mismatch aborts the
+whole upload (the R2 session, its parts, the pending upload and its encryption key), and
+`POST ?multipart=complete` answers `409 content_unverified` until part 1 has passed. The SDKs send part 1 first.
+
+The `contentSniffing` [rule](self-host.md#rules) picks what a mismatch gets:
+
+| `contentSniffing` | Mismatch |
+| --- | --- |
+| `"reject"` (default) | `415 content_type_mismatch`, nothing stored |
+| `"octet-stream"` | A single PUT is stored as `application/octet-stream` (delivered as a sandboxed attachment). A multipart upload is still rejected. |
+| `"off"` | Not checked |
+
+```typescript
+export default createWorker({ plugins: defaultPlugins({ contentSniffing: "octet-stream" }) });
+```
+
+A transcode's outputs (HLS playlists and segments, MP4 renditions, posters, storyboards) are written by the Worker's
+runner and never checked.
+
+## Serve media from its own origin
+
+The headers above keep an uploaded file from running script, and content verification keeps it from passing as another
+type. The origin is the last line: serve media from a host of its own, never from your app's origin (a `/media/*`
+route proxied on `app.example.com`). Anything that slips through then runs in the media origin, without your app's
+cookies, storage or same-origin APIs.
+
+When the media host is a subdomain of your app's domain (`media.example.com` next to `app.example.com`), the two are the
+same site. Don't scope auth cookies to the parent domain (`Domain=example.com`): leave out `Domain` so each cookie stays
+on the host that set it, and the media host never receives your users' sessions.
 
 ## Retention and holds
 

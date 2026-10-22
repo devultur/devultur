@@ -69,6 +69,7 @@ export {
 	workerSecretAuth,
 } from "./plugins";
 export {
+	type ContentSniffingMode,
 	getRequestState,
 	isAuthenticated,
 	type Json,

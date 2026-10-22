@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { updateRequestState } from "../request-state";
+import { sniffableBytes } from "../test-fixtures";
 import type { WorkerApp } from "../types";
 import { media } from "./media";
 import { upload } from "./upload";
@@ -57,7 +58,7 @@ function workerSetup() {
 	const putObject = (key: string, contentType: string) =>
 		app.request(
 			`http://worker/v1/upload/${key}`,
-			{ method: "PUT", body: new Uint8Array(64), headers: { "Content-Type": contentType } },
+			{ method: "PUT", body: sniffableBytes(contentType), headers: { "Content-Type": contentType } },
 			env,
 		);
 

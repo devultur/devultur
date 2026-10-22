@@ -32,19 +32,21 @@ import { getRequestState } from "../request-state";
 import type { MultipartPending, UploadPending, WorkerApp } from "../types";
 import { derivedAssetPending } from "./derived-upload";
 import {
+	MULTIPART_PENDING_TTL_SECONDS,
+	shouldSniffUpload,
+	unverifiedContent,
+	verifyFirstPart,
+} from "./upload-content-check";
+import {
 	allowedUploadMetadata,
-	digestBody,
-	headerSha256,
+	checkPartSha256,
 	integrityMetadata,
 	lockMetadata,
-	sha256Mismatch,
 	targetFailure,
 } from "./upload-integrity";
 import { derivedSessionKvKey, lookupUploadPending, type ResolvedPending, uploadNotFound } from "./upload-pending";
 import { isUploadTargetError, resolveDeclaredSha256 } from "./upload-target";
 
-// A large upload can take longer than the single PUT's one-hour pending window.
-const MULTIPART_PENDING_TTL_SECONDS = 24 * 60 * 60;
 // R2's (and S3's) limit on parts per upload.
 const MAX_PART_COUNT = 10_000;
 
@@ -168,6 +170,8 @@ async function handleMultipartCreate(context: UploadContext, key: string, target
 		partSize,
 		...(enc ? { enc } : {}),
 		...(declaredSha256 ? { sha256: declaredSha256 } : {}),
+		// The type is fixed now, before any byte: part 1 is checked against it when it arrives.
+		...(shouldSniffUpload(context, key, pending) ? { isContentUnverified: true } : {}),
 	};
 	await context.env.MEDIA_KV.put(kvKey, JSON.stringify({ ...pending, multipart }), {
 		expirationTtl: MULTIPART_PENDING_TTL_SECONDS,
@@ -219,6 +223,8 @@ export async function handleMultipartPart(context: UploadContext): Promise<Respo
 	}
 	const partChecksumFailure = await checkPartSha256(context, multipart, body);
 	if (partChecksumFailure) return partChecksumFailure;
+	const contentFailure = await verifyFirstPart(context, active, partNumber, body);
+	if (contentFailure) return contentFailure;
 	const storedPart = await encryptPart(context, pending, multipart, partNumber, body);
 	if (!storedPart) return context.json({ error: "Encryption key not found for this upload" }, 500);
 
@@ -235,6 +241,8 @@ async function handleMultipartComplete(context: UploadContext, key: string): Pro
 
 	const parts = normalizeCompletedParts(multipart, body?.parts);
 	if (!parts) return context.json({ error: "parts must list every part exactly once", code: "invalid_parts" }, 400);
+	const unverified = unverifiedContent(context, multipart);
+	if (unverified) return unverified;
 
 	// R2 has no conditional complete: an asset that appeared, or a lock set, after the create gets rejected here
 	// (best-effort: a lock set between this check and the complete isn't seen, the window decision 2 of #3 accepts).
@@ -253,32 +261,6 @@ async function handleMultipartComplete(context: UploadContext, key: string): Pro
 	await afterUploadWrite(context, key, pending, write, multipart.enc);
 	const integrity = multipart.sha256 ? { sha256: multipart.sha256, sha256Verified: false } : {};
 	return context.json({ key, size: object.size, ...integrity });
-}
-
-// With a declared sha256, each part carries its own (of the plaintext) and it's verified before storing it: the
-// final object is exactly the bytes the client hashed, part by part.
-async function checkPartSha256(
-	context: UploadContext,
-	multipart: MultipartPending,
-	body: ArrayBuffer,
-): Promise<Response | null> {
-	const partSha256 = headerSha256(context);
-	if (partSha256 === null) {
-		return context.json({ error: "x-devultur-sha256 must be a 64-character hex string", code: "invalid_sha256" }, 400);
-	}
-	if (multipart.sha256 && !partSha256) {
-		return context.json(
-			{
-				error: "Each part must carry its x-devultur-sha256 when the upload declares one",
-				code: "part_sha256_required",
-			},
-			400,
-		);
-	}
-	if (!partSha256) return null;
-	const digest = await digestBody(body, undefined, partSha256);
-	if ("mismatch" in digest) return sha256Mismatch(context, digest.mismatch.expected, digest.mismatch.actual);
-	return null;
 }
 
 /** `POST /v1/upload/<key>?multipart=create|complete`. */

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { updateRequestState } from "../request-state";
 import type { WorkerApp } from "../types";
-import { contentSafety, isSafeInlineType } from "./content-safety";
+import { contentSafety, isSafeInlineType, SANDBOX_CSP } from "./content-safety";
 import { media } from "./media";
 
 const BYTES = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
@@ -74,7 +74,7 @@ describe("delivery content safety", () => {
 
 		expect(res.status).toBe(200);
 		expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
-		expect(res.headers.get("Content-Security-Policy")).toBe("sandbox");
+		expect(res.headers.get("Content-Security-Policy")).toBe(SANDBOX_CSP);
 		expect(res.headers.get("Content-Disposition")).toMatch(/^attachment/);
 	});
 
@@ -114,7 +114,7 @@ describe("delivery content safety", () => {
 		expect(video.headers.get("Content-Security-Policy")).toBeNull();
 		expect(page.status).toBe(206);
 		expect(page.headers.get("Content-Range")).toBe("bytes 0-1/10");
-		expect(page.headers.get("Content-Security-Policy")).toBe("sandbox");
+		expect(page.headers.get("Content-Security-Policy")).toBe(SANDBOX_CSP);
 	});
 
 	it("stores the headers in the edge copy", async () => {
@@ -125,7 +125,7 @@ describe("delivery content safety", () => {
 
 		expect(puts).toHaveLength(1);
 		expect(puts[0]!.headers.get("X-Content-Type-Options")).toBe("nosniff");
-		expect(puts[0]!.headers.get("Content-Security-Policy")).toBe("sandbox");
+		expect(puts[0]!.headers.get("Content-Security-Policy")).toBe(SANDBOX_CSP);
 		expect(puts[0]!.headers.get("Content-Disposition")).toMatch(/^attachment/);
 	});
 
@@ -139,7 +139,7 @@ describe("delivery content safety", () => {
 
 		expect(await res.text()).toBe("<script>");
 		expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
-		expect(res.headers.get("Content-Security-Policy")).toBe("sandbox");
+		expect(res.headers.get("Content-Security-Policy")).toBe(SANDBOX_CSP);
 	});
 
 	it("applies to any router it guards (download links use it)", async () => {
@@ -150,8 +150,36 @@ describe("delivery content safety", () => {
 		const res = await app.request("https://acme.example.com/abc");
 
 		expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
-		expect(res.headers.get("Content-Security-Policy")).toBe("sandbox");
+		expect(res.headers.get("Content-Security-Policy")).toBe(SANDBOX_CSP);
 		expect(res.headers.get("Content-Disposition")).toMatch(/^attachment/);
+	});
+});
+
+describe("cross-origin embedding", () => {
+	it("sandboxes without loading any subresource", () => {
+		expect(SANDBOX_CSP).toBe("sandbox; default-src 'none'");
+	});
+
+	it.each([
+		["public/image/i1/photo.png", "image/png"],
+		["public/video/v1/hls/master.m3u8", "application/vnd.apple.mpegurl"],
+		["public/file/f1/page.html", "text/html"],
+	])("lets any site embed public %s", async (key, contentType) => {
+		const res = await request(key, { contentType });
+
+		expect(res.headers.get("Cross-Origin-Resource-Policy")).toBe("cross-origin");
+	});
+
+	it("leaves private media and download links without it", async () => {
+		const app = new Hono();
+		app.use("*", contentSafety);
+		app.get("*", () => new Response("x", { headers: { "Content-Type": "image/png" } }));
+
+		const link = await app.request("https://acme.example.com/v1/download/abc");
+		const privateMedia = await app.request("https://acme.example.com/v1/media/private/image/i1/photo.png");
+
+		expect(link.headers.get("Cross-Origin-Resource-Policy")).toBeNull();
+		expect(privateMedia.headers.get("Cross-Origin-Resource-Policy")).toBeNull();
 	});
 });
 

@@ -3,12 +3,15 @@ import { decodeEncryptionMeta, decryptChunk, importEncryptionKey } from "@devult
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { updateRequestState } from "../request-state";
+import { sniffableBytes } from "../test-fixtures";
 import type { WorkerApp } from "../types";
 import { upload } from "./upload";
 
-function bytes(length: number): Uint8Array<ArrayBuffer> {
+// Opens with the signature of `signedAs` so the content check passes; null for a type the Worker doesn't sniff.
+function bytes(length: number, signedAs: string | null = "image/jpeg"): Uint8Array<ArrayBuffer> {
 	const out = new Uint8Array(length);
 	for (let i = 0; i < length; i++) out[i] = (i * 91 + 13) % 256;
+	if (signedAs) out.set(sniffableBytes(signedAs, 0));
 	return out;
 }
 
@@ -115,7 +118,7 @@ describe("upload L4 encryption", () => {
 			["private/video/vid1/hls/thumbnail.jpg", "image/jpeg"],
 		] as const) {
 			const { app, env, keysPut, mediaPut } = uploadSetup({ security: { encrypt: true } });
-			await put(app, env, videoKey, bytes(128), ct);
+			await put(app, env, videoKey, bytes(128, ct), ct);
 			expect(keysPut, videoKey).toHaveBeenCalledTimes(1);
 			// The key lives at `${storageKey}/${keyId}` = the object's own path + keyId.
 			expect(keysPut.mock.calls[0][0], videoKey).toMatch(new RegExp(`^${videoKey}/`));
@@ -129,7 +132,7 @@ describe("upload L4 encryption", () => {
 			["private/video/vid1/hls/720p.m3u8", "application/vnd.apple.mpegurl"],
 		] as const) {
 			const { app, env, keysPut, mediaPut } = uploadSetup({ security: { encrypt: true } });
-			await put(app, env, hlsKey, bytes(64), ct);
+			await put(app, env, hlsKey, bytes(64, null), ct);
 			expect(keysPut, hlsKey).not.toHaveBeenCalled();
 			expect(storedCall(mediaPut)[2].customMetadata?.enc, hlsKey).toBeUndefined();
 		}
