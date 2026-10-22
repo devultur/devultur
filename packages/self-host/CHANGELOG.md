@@ -4,6 +4,26 @@
 
 ### Minor Changes
 
+- [#35](https://github.com/devultur/devultur/pull/35) [`beea095`](https://github.com/devultur/devultur/commit/beea095) Thanks [@demarchenac](https://github.com/demarchenac)! - Uploads are checked against their declared Content-Type. The Worker reads the first 4 KB of the plaintext and compares
+  them with a signature table (PDF, PNG, JPEG, GIF, WebP, AVIF, HEIF, MP4/MOV/M4A, WebM/Matroska, MP3, Ogg, WAV, FLAC,
+  zip-based documents, plain text, CSV and JSON). Types outside the table keep their declared type, and a transcode's
+  outputs, written with the runner's own types, are never checked.
+
+  **The default (`contentSniffing: "scriptable"`) only rejects markup:** a "PDF", image or text upload that is really
+  HTML, SVG or XML answers `415 content_type_mismatch` (with `declared` and `detected`) and stores nothing. Any other
+  mismatch is stored with its declared type, as before. Every mismatch is logged as
+  `[content-sniff] {declared, detected, key, action}`. You can opt into `"reject"` (415 for every mismatch),
+  `"octet-stream"` (a mismatching single PUT is stored as `application/octet-stream`) or `"off"` with
+  `defaultPlugins({ contentSniffing })`. The security guide lists the real files the stricter modes turn away.
+
+  For a multipart upload, every upload of part 1 is checked: a rejected one aborts the upload and deletes its pending
+  upload and encryption key. `complete` answers `409 content_unverified` unless it names the part 1 that was checked.
+  `uploadMultipart` (`@devultur/core`) makes up to 3 attempts at a complete that gets `content_unverified`, with a
+  growing delay.
+
+  Delivery also adds `Cross-Origin-Resource-Policy: cross-origin` to public media, and the sandbox policy for risky types
+  is now `Content-Security-Policy: sandbox; default-src 'none'`.
+
 - [#32](https://github.com/devultur/devultur/pull/32) [`dd5ba94`](https://github.com/devultur/devultur/commit/dd5ba94825a5aca1134f7ffd1bf3ca2fa89a7eaa) Thanks [@demarchenac](https://github.com/demarchenac)! - **Behaviour change:** media delivery (`GET /v1/media/*`) and download-link responses now carry
   `X-Content-Type-Options: nosniff`. A file whose type is outside the safe-inline list (images except SVG, `video/*`,
   `audio/*`, PDF, plain text, CSV, JSON, VTT, HLS playlists) is also served with `Content-Security-Policy: sandbox` and
