@@ -1,5 +1,31 @@
 # @devultur/convex
 
+## 1.3.0
+
+### Minor Changes
+
+- [#34](https://github.com/devultur/devultur/pull/34) [`54b4667`](https://github.com/devultur/devultur/commit/54b4667585ebf79e79f70e698702f9410c6c312e) Thanks [@demarchenac](https://github.com/demarchenac)! - Render PDF previews with pdf.js. Under a `PdfPreviewProvider` (with `loadPdfjs` from the new `@devultur/convex/pdfjs`
+  entry, or any loader), `<Preview>` draws PDFs on `<canvas>` pages with the pdf.js legacy build: pages render lazily as
+  they near the viewport, within a 5,242,880-pixel canvas cap on mobile, from the bytes of the verified fetch (pdf.js
+  never gets a URL), with `enableScripting: false`, at most `maxPages` pages (default 500), and each page's text for screen readers. `pdfWorkerSrc` (or the
+  provider's `workerSrc`) sets the worker. Without pdf.js, PDFs keep rendering in an `<iframe>`. New `<PdfThumbnail>`
+  draws page 1 on a small canvas, fetching only once visible. `pdfjs-dist >=6.2.108` is an optional peer dependency.
+
+- [#32](https://github.com/devultur/devultur/pull/32) [`dd5ba94`](https://github.com/devultur/devultur/commit/dd5ba94825a5aca1134f7ffd1bf3ca2fa89a7eaa) Thanks [@demarchenac](https://github.com/demarchenac)! - Preview media inline. `useMediaObjectUrl(media, { enabled, maxBytes, contentType })` fetches a private file with the
+  session header into an object URL (one token re-issue on a 401 `session_mismatch`, revoked on media change and
+  unmount, aborted in flight); with `contentType`, public media is fetched and verified too. `<Preview media>` renders
+  images, PDFs, audio, text and video by content type from an allowlist (50 MiB default cap for binary previews), never
+  frames an unverified URL, and falls back to a `<DownloadLink>` for anything else, including HTML, SVG and XML.
+
+  `<Image>` with private media now waits for the first viewer token, and after a token re-issue fetches once (the 401
+  and one retry) instead of fetching again when the token changes.
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @devultur/core@1.3.0
+  - @devultur/react@1.3.0
+
 ## 1.2.0
 
 ### Patch Changes
