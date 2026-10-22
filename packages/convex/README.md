@@ -86,6 +86,42 @@ The PUT goes through `XMLHttpRequest` (`fetch` reports no upload progress), in p
 optional field of `DevulturMedia` and of `dv.media()`. It is informational: delivery URLs are derived from `id`,
 `kind`, `visibility` and `filename`.
 
+## Multiple workspaces
+
+An app that shows private media from several workspaces (an admin console that previews each one, for example) can
+send extra arguments with every viewer token request. Pass them in `tokenArgs`, and pass your own action in
+`issueViewerToken`: the component's `issueViewerToken` accepts only `sessionSecret`.
+
+```typescript
+// convex/admin.ts
+import { v } from "convex/values";
+import { components } from "./_generated/api";
+import { action } from "./_generated/server";
+
+export const issueWorkspaceViewerToken = action({
+  args: { sessionSecret: v.string(), workspaceId: v.id("workspaces") },
+  handler: async (ctx, { sessionSecret, workspaceId }) => {
+    await assertWorkspaceAccess(ctx, workspaceId); // your own check
+    return ctx.runAction(components.devultur.public.issueViewerToken, { sessionSecret });
+  },
+});
+```
+
+```tsx
+<DevulturProvider
+  api={api.devultur}
+  issueViewerToken={api.admin.issueWorkspaceViewerToken}
+  tokenArgs={{ workspaceId }}
+>
+  <WorkspaceMedia />
+</DevulturProvider>
+```
+
+The provider sends `{ sessionSecret, ...tokenArgs }` on the first issuance, on each renewal and on each re-issue.
+`tokenArgs` are compared by value, so a new object with the same values changes nothing. When they change, the
+provider drops the current token, private media wait for the new one, and a response for the previous arguments is
+ignored. Your action returns what the component's action returns: `{ token, expiresIn }` or the token string.
+
 ## Media library
 
 Every upload, whatever its kind, gets a record in the component's `media` table once its bytes are stored, so
