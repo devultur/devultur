@@ -1,5 +1,12 @@
 # @devultur/example-plugins
 
+## 0.0.7
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @devultur/self-host@1.3.1
+
 ## 0.0.6
 
 ### Patch Changes
