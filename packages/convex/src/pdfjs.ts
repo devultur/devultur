@@ -1,6 +1,6 @@
 // `@devultur/convex/pdfjs`: the default pdf.js loader for `PdfPreviewProvider`, and `countPdfPages` for uploads. A
 // separate entry so that apps without `pdfjs-dist` installed never bundle an import their bundler can't resolve.
-import { openPdf, type PdfjsLoader, type PdfjsModule } from "./pdf-render";
+import { countPages, type PdfjsLoader, type PdfjsModule } from "./pdf-render";
 
 /** The worker next to the legacy build, resolved by your bundler from this package. */
 export const defaultPdfWorkerSrc = () => new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs", import.meta.url).href;
@@ -25,13 +25,5 @@ export async function loadPdfjs(): Promise<PdfjsModule> {
  */
 export async function countPdfPages(file: Blob, options?: { loadPdfjs?: PdfjsLoader }): Promise<number | null> {
 	const pdfjs = await (options?.loadPdfjs ?? loadPdfjs)();
-	const task = openPdf(pdfjs, new Uint8Array(await file.arrayBuffer()));
-	try {
-		const document = await task.promise;
-		return document.numPages;
-	} catch {
-		return null;
-	} finally {
-		await task.destroy();
-	}
+	return countPages(pdfjs, file);
 }

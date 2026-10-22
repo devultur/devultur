@@ -29,6 +29,15 @@ export interface MediaLibraryProps {
 	type?: MediaType;
 	/** Keeps the chosen item selected (`aria-selected`, `data-selected`), as a picker. Default `false`. */
 	selectable?: boolean;
+	/**
+	 * The selected records' keys (the media ids), controlled by the app: with it, the library shows these as selected
+	 * instead of the last one chosen. Implies `selectable`.
+	 */
+	selectedKeys?: readonly string[];
+	/** Several items can be selected at once (`aria-multiselectable`), for `selectedKeys`. Default `false`. */
+	multiple?: boolean;
+	/** Shows only the records it returns `true` for, of each loaded page (a page can then show fewer items). */
+	filter?: (record: MediaRecord) => boolean;
 	/** Replaces an item's content (thumbnail, name and size). The item itself stays the focusable option. */
 	renderItem?: (record: MediaRecord, state: MediaLibraryItemState) => React.ReactNode;
 	/** Records per page. Default 24. */
@@ -75,7 +84,8 @@ export function MediaLibrary(props: MediaLibraryProps) {
 	const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
 	const type = props.type ?? (chosenType === "" ? undefined : chosenType);
 	const { onSelect } = props;
-	const isSelectable = props.selectable ?? false;
+	const isSelectable = props.selectable ?? props.selectedKeys !== undefined;
+	const selectedKeys = props.selectedKeys ?? (selectedKey === null ? [] : [selectedKey]);
 
 	const handleChoose = React.useCallback(
 		(record: MediaRecord) => {
@@ -128,7 +138,7 @@ export function MediaLibrary(props: MediaLibraryProps) {
 					labels={labels}
 					classNames={classNames}
 					isSelectable={isSelectable}
-					selectedKey={selectedKey}
+					selectedKeys={selectedKeys}
 					onChoose={handleChoose}
 				/>
 			</LibraryErrorBoundary>
@@ -136,19 +146,20 @@ export function MediaLibrary(props: MediaLibraryProps) {
 	);
 }
 
-interface LibraryResultsProps extends Omit<MediaLibraryProps, "labels" | "onSelect"> {
+interface LibraryResultsProps extends Omit<MediaLibraryProps, "labels" | "onSelect" | "selectedKeys"> {
 	search: string;
 	labels: MediaLibraryLabels;
 	classNames: MediaLibraryClassNames;
 	isSelectable: boolean;
-	selectedKey: string | null;
+	selectedKeys: readonly string[];
 	onChoose: (record: MediaRecord) => void;
 }
 
 function LibraryResults(props: LibraryResultsProps) {
 	const { labels, classNames } = props;
 	const library = useMediaLibrary({ type: props.type, search: props.search, pageSize: props.pageSize });
-	const roving = useRovingFocus(library.items.length);
+	const items = props.filter ? library.items.filter(props.filter) : library.items;
+	const roving = useRovingFocus(items.length);
 
 	if (library.status === "LoadingFirstPage") {
 		return (
@@ -157,7 +168,7 @@ function LibraryResults(props: LibraryResultsProps) {
 			</p>
 		);
 	}
-	if (library.items.length === 0) {
+	if (items.length === 0) {
 		return (
 			<p role="status" className={partClass("status", classNames)}>
 				{library.search ? labels.noResults(library.search) : labels.empty}
@@ -173,16 +184,17 @@ function LibraryResults(props: LibraryResultsProps) {
 				role="listbox"
 				aria-label={labels.results}
 				aria-busy={isLoadingMore || undefined}
+				aria-multiselectable={props.multiple || undefined}
 				className={partClass("list", classNames)}
 				style={LIST_STYLE}
 				onKeyDown={roving.handleKeyDown}
 			>
-				{library.items.map((record, index) => (
+				{items.map((record, index) => (
 					<MediaLibraryItem
 						key={record.key}
 						ref={roving.itemRef(index)}
 						record={record}
-						isSelected={props.isSelectable && record.key === props.selectedKey}
+						isSelected={props.isSelectable && props.selectedKeys.includes(record.key)}
 						isActive={index === roving.activeIndex}
 						tabIndex={roving.tabIndex(index)}
 						pdfThumbnails={props.pdfThumbnails ?? false}

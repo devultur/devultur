@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import type { PdfjsLoader, PdfjsModule } from "./pdf-render";
+import { countPages, type PdfjsLoader, type PdfjsModule } from "./pdf-render";
 import { mergePreviewLabels, type PreviewLabels } from "./preview-labels";
 
 export interface PdfPreviewConfig {
@@ -72,6 +72,25 @@ export function usePdfjs(workerSrcOverride?: string): PdfjsState {
 	if (loaded?.loader !== loader) return { status: "loading" };
 	if (!loaded.pdfjs) return { status: "unavailable" };
 	return { status: "ready", pdfjs: loaded.pdfjs, workerSrc: workerSrcOverride ?? workerSrc };
+}
+
+/** Counts a PDF's pages: a file's page count, or `null` when it can't be read. */
+export type PdfPageCounter = (file: Blob) => Promise<number | null>;
+
+/**
+ * A page counter on the nearest `PdfPreviewProvider`'s pdf.js, imported on the first count; `null` when none is
+ * configured.
+ */
+export function usePdfPageCounter(): PdfPageCounter | null {
+	const { pdfjs: loader, workerSrc } = React.useContext(PdfPreviewContext);
+	return React.useMemo(() => {
+		if (!loader) return null;
+		return async (file: Blob) => {
+			const pdfjs = await loadOnce(loader);
+			if (!pdfjs) return null;
+			return countPages(pdfjs, file, workerSrc);
+		};
+	}, [loader, workerSrc]);
 }
 
 /** The English defaults, overridden by the nearest provider's `labels`, then by the component's own. */

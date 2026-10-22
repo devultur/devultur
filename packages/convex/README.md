@@ -345,6 +345,9 @@ import { MediaLibrary } from "@devultur/convex/react";
 | `onSelect(record, media)` | Called on a click, Enter or Space. `media` is `mediaFromRecord(record)`, `null` for a record without a visibility. |
 | `type` | Only this type; the type filter is hidden. |
 | `selectable` | Keeps the chosen item selected (`aria-selected`, `data-selected`), for a picker. Default `false`. |
+| `selectedKeys` | The selected records' keys (media ids), controlled: shown as selected instead of the last one chosen. Implies `selectable`. |
+| `multiple` | Several items can be selected (`aria-multiselectable`), with `selectedKeys`. |
+| `filter(record)` | Shows only the records it returns `true` for, of each loaded page (a page can then show fewer items). |
 | `renderItem(record, { media, isSelected, isActive })` | Replaces an item's content; the item stays the focusable option. |
 | `pdfThumbnails` | Draws page 1 of PDFs with `<PdfThumbnail>` (inside a `PdfPreviewProvider`). Off by default, because each thumbnail downloads its PDF. |
 | `pageSize` | Records per page. Default 24. |
@@ -362,32 +365,161 @@ tune the grid: `--devultur-library-item-width` (160px, the narrowest column), `-
 `--devultur-library-item-gap` (0.25rem), `--devultur-library-thumbnail-height` (120px) and
 `--devultur-library-accent` (`currentColor`, the selected item's ring).
 
-The strings are English by default. Spanish, for example:
+The strings are English by default; `@devultur/convex/locales/es` exports Spanish ones:
 
 ```tsx
-import { describeDevulturError } from "@devultur/convex";
-import { devulturErrorLabels } from "@devultur/convex/locales/es";
-import { formatFileSize, type MediaLibraryLabels } from "@devultur/convex/react";
+import { mediaLibraryLabels } from "@devultur/convex/locales/es";
 
-const libraryLabels: Partial<MediaLibraryLabels> = {
-  search: "Buscar archivos",
-  searchPlaceholder: "Busca por título o nombre de archivo",
-  typeFilter: "Tipo",
-  allTypes: "Todos los tipos",
-  types: { image: "Imágenes", video: "Videos", file: "Archivos" },
-  results: "Archivos",
-  loading: "Cargando archivos…",
-  empty: "Todavía no hay archivos.",
-  noResults: (search) => `Nada coincide con «${search}».`,
-  loadMore: "Cargar más",
-  loadingMore: "Cargando…",
-  error: (error) => describeDevulturError(error, devulturErrorLabels) ?? "No se pudieron cargar los archivos.",
-  retry: "Reintentar",
-  size: (bytes) => formatFileSize(bytes, "es"),
-};
-
-<MediaLibrary labels={libraryLabels} onSelect={handleSelect} />;
+<MediaLibrary labels={mediaLibraryLabels} onSelect={handleSelect} />;
 ```
+
+## Media picker
+
+`<MediaPicker>` is what a content editor uses to fill a media field: it uploads new files (with progress, cancel and
+retry), browses and searches the library (`<MediaLibrary>`), and shows the selection (`<AttachmentCard>`, with an
+inline `<Preview>`). It returns `DevulturMedia` references through `onChange`, ready for a `dv.media()` field: a
+library item's reference carries its `key`, `title`, `alt`, `tags`, size and page count; a new upload's carries its
+`key`, size and page count, and is selected as soon as it uploads.
+
+It needs `createUploadUrl`, `listMediaPage` and `searchMedia` in `<DevulturProvider api>` (and `confirmUpload`, so
+uploads show in the library).
+
+```tsx
+import { MediaPicker } from "@devultur/convex/react";
+
+<MediaPicker accept={["image/*"]} value={cover} onChange={setCover} />;
+<MediaPicker multiple value={attachments} onChange={setAttachments} />; // arrays in and out
+```
+
+| Prop | |
+| --- | --- |
+| `value` | The selection, controlled: a `DevulturMedia` or `null` (an array with `multiple`). Omitted, the picker keeps its own. |
+| `onChange(value)` | Called on an upload, a pick from the library, a removal and a clear. |
+| `multiple` | Several items: uploads add to the selection, and a library item toggles. Default `false`: a new pick replaces the item. |
+| `accept` | File types, as `<input accept>` takes them (`image/*`, `application/pdf`, `.pdf`). Filters the files to upload and the library's items, and sets the library's type filter when every pattern is of one type. |
+| `type` | Only `image`, `video` or `file` in the library; without `accept`, also what can be uploaded. |
+| `labels` | Any of the picker's strings (`MediaPickerLabels`). |
+| `libraryLabels`, `attachmentLabels` | The library's and the cards' strings. |
+| `className` | Added to the root's `devultur-media-picker` class. |
+| `children` | The layout (below). Default: the upload, the library and the selection. |
+
+Under a `PdfPreviewProvider` with `pdfjs`, the picker reads a PDF's page count before it uploads it and records it
+with the upload (`pageCount`). Without one, PDFs upload without it.
+
+### Layout
+
+The picker renders inline and has no dialog of its own. Its parts are `<MediaPicker.Upload>`, `<MediaPicker.Library>`
+and `<MediaPicker.Selection>`; put them in any markup of yours, or pass a function as `children` to get the picker's
+state (`selected`, `uploads`, `select`, `remove`, `clear`, `openFileDialog`, ...). `useMediaPicker()` returns the same
+state, to build a part of your own.
+
+```tsx
+<MediaPicker multiple value={files} onChange={setFiles}>
+  {(picker) => (
+    <div className="grid grid-cols-[2fr_1fr] gap-4">
+      <MediaPicker.Library pageSize={12} />
+      <aside>
+        <MediaPicker.Upload />
+        <MediaPicker.Selection headingLevel={2} />
+        <p>{picker.selected.length} selected</p>
+      </aside>
+    </div>
+  )}
+</MediaPicker>
+```
+
+### In a dialog, for a form field
+
+A form keeps the reference in its state and saves it with the rest; the dialog only edits a draft of it. Here with a
+native `<dialog>` (it traps focus and closes on Escape); any dialog component works the same way.
+
+```tsx
+import type { DevulturMedia } from "@devultur/core";
+import { MediaPicker } from "@devultur/convex/react";
+import { useMutation } from "convex/react";
+import { api } from "../convex/_generated/api";
+
+function CoverField({ value, onChange }: { value: DevulturMedia | null; onChange: (cover: DevulturMedia | null) => void }) {
+  const dialogRef = React.useRef<HTMLDialogElement>(null);
+  const [draft, setDraft] = React.useState(value);
+
+  const handleOpen = () => {
+    setDraft(value);
+    dialogRef.current?.showModal();
+  };
+  const handleConfirm = () => {
+    onChange(draft);
+    dialogRef.current?.close();
+  };
+
+  return (
+    <>
+      <span>{value?.title ?? value?.filename ?? "No cover"}</span>
+      <button type="button" onClick={handleOpen}>Choose a cover</button>
+      <dialog ref={dialogRef} aria-labelledby="cover-dialog-title">
+        <h2 id="cover-dialog-title">Cover</h2>
+        <MediaPicker accept={["image/*"]} value={draft} onChange={setDraft} />
+        <button type="button" onClick={() => dialogRef.current?.close()}>Cancel</button>
+        <button type="button" onClick={handleConfirm}>Use this image</button>
+      </dialog>
+    </>
+  );
+}
+
+function ArticleForm({ article }: { article: { _id: string; title: string; cover: DevulturMedia | null } }) {
+  const save = useMutation(api.articles.update); // args: { id, title, cover: dv.media("image").optional() }
+  const [title, setTitle] = React.useState(article.title);
+  const [cover, setCover] = React.useState(article.cover);
+
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    save({ id: article._id, title, cover: cover ?? undefined });
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input value={title} onChange={(event) => setTitle(event.target.value)} aria-label="Title" />
+      <CoverField value={cover} onChange={setCover} />
+      <button type="submit">Save</button>
+    </form>
+  );
+}
+```
+
+Inside a `<form>`, every button of the picker is `type="button"`, so none of them submits it.
+
+### Accessibility
+
+The upload button opens the file chooser; dropping files on the upload area is the pointer shortcut. Each upload
+shows a labelled `<progress>`, a cancel button and, when it fails, its error in a `role="alert"` (by default a
+Devultur error's message, see [Error messages](#error-messages)), with retry and dismiss. A polite live region
+announces an upload's start, end and cancellation, and each selection and removal. After an upload, a removal and a
+clear, focus moves to the selection's region (`<section>` named by its heading), so a keyboard user lands on the
+result. The library keeps its keyboard navigation, with `aria-multiselectable` under `multiple`.
+
+### Labels
+
+The strings are English by default (`defaultMediaPickerLabels`). Spanish:
+
+```tsx
+import { attachmentLabels, mediaLibraryLabels, mediaPickerLabels } from "@devultur/convex/locales/es";
+
+<MediaPicker
+  labels={mediaPickerLabels}
+  libraryLabels={mediaLibraryLabels}
+  attachmentLabels={attachmentLabels}
+  value={cover}
+  onChange={setCover}
+/>;
+```
+
+### Styling
+
+The picker sets no styles but the library's layout. Each part has a class (`devultur-media-picker`,
+`devultur-media-picker__upload`, `devultur-media-picker__selection`, and the library's own) and its elements have
+`data-part` attributes (`upload`, `drop-hint`, `uploads`, `filename`, `percent`, `error`, `items`, `empty`,
+`actions`, `replace`, `clear`); the upload area has `data-dragging` while files are dragged over it, and each upload
+`data-status` (`uploading` or `failed`).
 
 ## Using a self-hosted Worker
 
