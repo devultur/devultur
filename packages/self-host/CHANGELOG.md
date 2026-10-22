@@ -1,5 +1,21 @@
 # @devultur/self-host
 
+## 1.3.0
+
+### Minor Changes
+
+- [#32](https://github.com/devultur/devultur/pull/32) [`dd5ba94`](https://github.com/devultur/devultur/commit/dd5ba94825a5aca1134f7ffd1bf3ca2fa89a7eaa) Thanks [@demarchenac](https://github.com/demarchenac)! - **Behaviour change:** media delivery (`GET /v1/media/*`) and download-link responses now carry
+  `X-Content-Type-Options: nosniff`. A file whose type is outside the safe-inline list (images except SVG, `video/*`,
+  `audio/*`, PDF, plain text, CSV, JSON, VTT, HLS playlists) is also served with `Content-Security-Policy: sandbox` and
+  `Content-Disposition: attachment`, so opening an uploaded HTML, SVG, XML or JavaScript file downloads it instead of
+  running its scripts on the media origin. Edge copies store the headers, and copies cached before this release get
+  them on the way out. Playback, captions, images, PDFs and range requests are unchanged.
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @devultur/core@1.3.0
+
 ## 1.2.0
 
 ### Minor Changes
