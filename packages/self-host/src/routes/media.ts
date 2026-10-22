@@ -236,7 +236,7 @@ media.get("/:key{.+}", async (context) => {
 	}
 	if (isOwnerAccess) for (const [name, value] of await lockHeaders(context, key, object)) headers.set(name, value);
 	// Here too (not only in the middleware) so the edge copy stores them.
-	applyContentSafety(headers, key.split("/").pop() ?? "");
+	applyContentSafety(headers, key.split("/").pop() ?? "", !isPrivate);
 
 	const { response, kind } = await streamObject({
 		bucket: context.env.MEDIA_BUCKET,

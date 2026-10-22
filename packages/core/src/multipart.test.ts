@@ -127,6 +127,57 @@ describe("uploadMultipart", () => {
 		expect(methods).toContain("DELETE ?uploadId=u1");
 	});
 
+	it("retries a complete the worker can't verify yet, then gives up after 3 tries", async () => {
+		vi.useFakeTimers();
+		const completeResponses = [409, 409, 200];
+		let completeCount = 0;
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (url: string) => {
+				if (url.includes("multipart=create")) return json(200, { uploadId: "u1", partSize: 4, partCount: 1 });
+				if (!url.includes("multipart=complete")) return json(200, {});
+				const status = completeResponses[completeCount++] ?? 409;
+				return status === 200 ? json(200, { key: "k", size: 4 }) : json(409, { code: "content_unverified" });
+			}),
+		);
+		const uploadPart = async () => ({ partNumber: 1, etag: "e1" });
+
+		const uploaded = uploadMultipart(UPLOAD_URL, new Blob([new Uint8Array(4)]), { uploadPart });
+		await vi.runAllTimersAsync();
+		expect(await uploaded).toEqual({ key: "k", size: 4 });
+		expect(completeCount).toBe(3);
+
+		completeResponses.length = 0;
+		completeCount = 0;
+		const refused = expect(
+			uploadMultipart(UPLOAD_URL, new Blob([new Uint8Array(4)]), { uploadPart }),
+		).rejects.toMatchObject({ status: 409, code: "content_unverified" });
+		await vi.runAllTimersAsync();
+		await refused;
+		expect(completeCount).toBe(3);
+		vi.useRealTimers();
+	});
+
+	it("doesn't retry any other complete failure", async () => {
+		let completeCount = 0;
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (url: string) => {
+				if (url.includes("multipart=create")) return json(200, { uploadId: "u1", partSize: 4, partCount: 1 });
+				if (!url.includes("multipart=complete")) return json(200, {});
+				completeCount++;
+				return json(400, { code: "invalid_parts" });
+			}),
+		);
+
+		await expect(
+			uploadMultipart(UPLOAD_URL, new Blob([new Uint8Array(4)]), {
+				uploadPart: async () => ({ partNumber: 1, etag: "e1" }),
+			}),
+		).rejects.toMatchObject({ code: "invalid_parts" });
+		expect(completeCount).toBe(1);
+	});
+
 	it("surfaces the worker's structured rejection from create", async () => {
 		vi.stubGlobal(
 			"fetch",

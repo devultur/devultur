@@ -22,6 +22,7 @@ import {
 import { getRequestState, isAuthenticated } from "../request-state";
 import type { RawStorageClass, UploadPending, UploadRequest, WorkerApp } from "../types";
 import { inheritedExpiresAt } from "./derived-upload";
+import { checkSinglePutContent, OCTET_STREAM } from "./upload-content-check";
 import {
 	allowedUploadMetadata,
 	digestBody,
@@ -48,11 +49,11 @@ import {
 import {
 	claimTokenFileSlot,
 	effectiveMaxBytes,
-	inferMediaType,
 	isUploadTargetError,
 	resolveDeclaredSha256,
 	resolveExpiresAt,
 	resolveObjectCacheControl,
+	resolveUploadMediaType,
 	resolveUploadTarget,
 } from "./upload-target";
 
@@ -67,25 +68,8 @@ upload.post("/", async (context) => {
 		return context.json({ error: "filename and contentType are required" }, 400);
 	}
 
-	const inferredType = inferMediaType(body.contentType);
-	// A declared `mediaType` that CONTRADICTS the content type is an inconsistent request → 400. This stops
-	// the client from picking another type's rule/path (e.g. declaring `video` with an `image/png` to dodge
-	// the image rule, or having a PNG end up on the video path). If the content type can't be inferred
-	// (text/*, audio/*, …), the declared one is used — there's nothing to compare it against.
-	if (body.mediaType && inferredType && body.mediaType !== inferredType) {
-		return context.json(
-			{
-				error: `mediaType "${body.mediaType}" does not match content type ${body.contentType}`,
-				code: "media_type_mismatch",
-			},
-			400,
-		);
-	}
-	// An asset (client path) accepts any content type: if it can't be inferred, the `file` rule applies.
-	const mediaType = body.mediaType ?? inferredType ?? (isAssetRequest ? MediaType.FILE : null);
-	if (!mediaType) {
-		return context.json({ error: `Unsupported content type: ${body.contentType}` }, 400);
-	}
+	const mediaType = resolveUploadMediaType(body.mediaType, body.contentType, isAssetRequest);
+	if (isUploadTargetError(mediaType)) return targetFailure(context, mediaType);
 
 	// Upload rules from the config. `mediaType` is already tied to the
 	// content type (or it couldn't be inferred), so rule, path and kind use the same type. The
@@ -167,6 +151,7 @@ upload.post("/", async (context) => {
 		...(cacheControl ? { cacheControl } : {}),
 		...(scope.config?.uploadMetadata ? { uploadMetadata: scope.config.uploadMetadata } : {}),
 		...(lock ? { lock } : {}),
+		...(scope.config?.contentSniffing ? { contentSniffing: scope.config.contentSniffing } : {}),
 	};
 	// Keyed by a random id that only the returned URL carries (see upload-pending.ts), never by the key itself.
 	const pendingId = newUploadPendingId();
@@ -214,10 +199,10 @@ upload.put("/:key{.+}", async (context) => {
 	const resourceSecurity: SecurityPolicy | undefined =
 		pending?.security ?? parseSecurityHeader(context.req.header(RESOURCE_SECURITY_HEADER));
 
-	const contentType = context.req.header("Content-Type") ?? "application/octet-stream";
+	const declaredContentType = context.req.header("Content-Type") ?? OCTET_STREAM;
 
-	if (expectedContentType && contentType !== expectedContentType) {
-		return context.json({ error: `Expected Content-Type ${expectedContentType}, got ${contentType}` }, 400);
+	if (expectedContentType && declaredContentType !== expectedContentType) {
+		return context.json({ error: `Expected Content-Type ${expectedContentType}, got ${declaredContentType}` }, 400);
 	}
 
 	// Size gate on the real content-length (the effective cap from the config rule, resolved in the
@@ -248,6 +233,10 @@ upload.put("/:key{.+}", async (context) => {
 		return context.json({ error: "x-devultur-sha256 must be a 64-character hex string", code: "invalid_sha256" }, 400);
 	}
 	if ("mismatch" in digest) return sha256Mismatch(context, digest.mismatch.expected, digest.mismatch.actual);
+	// The plaintext's first bytes against the declared type, before anything is written (see upload-content-check.ts).
+	const content = checkSinglePutContent(context, { key, pending, contentType: declaredContentType, body });
+	if ("rejected" in content) return content.rejected;
+	const { contentType } = content;
 
 	// Effective resource policy (upload override → config default → secure-default). The
 	// binding is persisted as metadata so the gate can read it per-resource; `encrypt` decides whether

@@ -1,7 +1,7 @@
 import type { MediaType, ObjectLock, ResolvedLock, SecurityPolicy, TranscodeSpec, Visibility } from "@devultur/core";
 import type { UploadGrant } from "./export-types";
 import type { PluginHooks } from "./plugin-hooks";
-import type { PluginContext, RequestState } from "./request-state";
+import type { ContentSniffingMode, PluginContext, RequestState } from "./request-state";
 import type { RouteResult } from "./route-result";
 import type { TranscodeContainerNamespace } from "./transcode/cloudflare";
 
@@ -235,6 +235,10 @@ export interface UploadPending {
 	uploadMetadata?: Record<string, string>;
 	/** Lock resolved in the POST → the object's `customMetadata.lock`, in the same write as its bytes. */
 	lock?: ResolvedLock;
+	/** `config.contentSniffing` of the POST: the credential-less PUT applies it. */
+	contentSniffing?: ContentSniffingMode;
+	/** A transcode output's on-the-fly pending (the Worker's own bytes): its content isn't sniffed. */
+	isDerived?: boolean;
 }
 
 export interface MultipartPending {
@@ -246,6 +250,10 @@ export interface MultipartPending {
 	enc?: string;
 	/** sha256 of the whole file declared at create: each part must carry its own (`x-devultur-sha256`). */
 	sha256?: string;
+	/** Part 1 is checked against the declared type: the complete must name the part 1 that passed. */
+	checksFirstPart?: boolean;
+	/** Etag of the part 1 that was checked (the last one uploaded). */
+	firstPartEtag?: string;
 }
 
 export interface TranscodeRequest {

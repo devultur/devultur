@@ -1,12 +1,13 @@
 import { reprDigest, sha256Hex } from "@devultur/core";
 import { describe, expect, it } from "vitest";
 import { exportsWorker } from "../exports-test-harness";
+import { sniffableBytes, withSignature } from "../test-fixtures";
 
 // Plaintext sha256: the single PUT computes it and verifies it against what was declared; multipart stores the
 // DECLARED one (`sha256Verified: false`) and verifies each part against its own. GET/HEAD return it (`x-devultur-sha256` +
 // `Repr-Digest`).
 
-const PAYLOAD = new TextEncoder().encode("export package for institution 1");
+const PAYLOAD = withSignature("application/zip", "export package for institution 1");
 
 async function createUpload(worker: ReturnType<typeof exportsWorker>, extra: Record<string, unknown> = {}) {
 	const res = await worker.postJson("/v1/upload", {
@@ -93,6 +94,7 @@ describe("multipart sha256 (declared, per-part verified)", () => {
 	const PART = 16 * 1024 * 1024;
 	const SIZE = PART + 10;
 	const file = new Uint8Array(SIZE).map((_, index) => index % 251);
+	file.set(sniffableBytes("application/zip", 0));
 	const partBytes = (partNumber: number) => file.slice((partNumber - 1) * PART, Math.min(partNumber * PART, SIZE));
 
 	async function startMultipart(worker: ReturnType<typeof exportsWorker>, sha256?: string) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { memoryBucket, SIGN_SECRET } from "../exports-test-harness";
 import { createWorker, type WorkerPlugin } from "../index";
+import { withSignature } from "../test-fixtures";
 import { isOpenRoute } from "./worker-secret-auth";
 import { TEST_WORKER_SECRET, WORKER_SECRETS, withWorkerAuth } from "./worker-secret-auth-test-env";
 
@@ -157,7 +158,11 @@ describe("upload URLs are capabilities", () => {
 	it("accepts the bytes of an upload that an authenticated POST created, without a credential", async () => {
 		const worker = setup();
 		const { key, uploadUrl } = await createUpload(worker);
-		const res = await worker.send(uploadUrl, { method: "PUT", body: "png", headers: { "Content-Type": "image/png" } });
+		const res = await worker.send(uploadUrl, {
+			method: "PUT",
+			body: withSignature("image/png", "png"),
+			headers: { "Content-Type": "image/png" },
+		});
 		expect(res.status).toBe(200);
 		expect(worker.mediaBucket.objects.has(key)).toBe(true);
 	});

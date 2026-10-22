@@ -5,7 +5,7 @@ import type { Context } from "hono";
 import { deletePrefix } from "../helpers";
 import { variantPrefix } from "../image/transform-plan";
 import { encodeLockMetadata, LOCK_METADATA_KEY } from "../object-lock/state";
-import type { WorkerApp } from "../types";
+import type { MultipartPending, WorkerApp } from "../types";
 import type { UploadTargetError } from "./upload-target";
 
 type UploadContext = Context<WorkerApp>;
@@ -84,6 +84,32 @@ export async function digestBody(
 	const expected = declared ?? header;
 	if (expected && expected !== actual) return { mismatch: { expected, actual } };
 	return { sha256: actual };
+}
+
+// With a declared sha256, each part of a multipart upload carries its own (of the plaintext) and it's verified before
+// storing it: the final object is exactly the bytes the client hashed, part by part.
+export async function checkPartSha256(
+	context: UploadContext,
+	multipart: MultipartPending,
+	body: ArrayBuffer,
+): Promise<Response | null> {
+	const partSha256 = headerSha256(context);
+	if (partSha256 === null) {
+		return context.json({ error: "x-devultur-sha256 must be a 64-character hex string", code: "invalid_sha256" }, 400);
+	}
+	if (multipart.sha256 && !partSha256) {
+		return context.json(
+			{
+				error: "Each part must carry its x-devultur-sha256 when the upload declares one",
+				code: "part_sha256_required",
+			},
+			400,
+		);
+	}
+	if (!partSha256) return null;
+	const digest = await digestBody(body, undefined, partSha256);
+	if ("mismatch" in digest) return sha256Mismatch(context, digest.mismatch.expected, digest.mismatch.actual);
+	return null;
 }
 
 /** The lock metadata for the object (`{}` when it isn't locked). */

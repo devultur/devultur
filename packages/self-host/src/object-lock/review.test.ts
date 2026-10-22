@@ -5,6 +5,7 @@ import { exportsWorker } from "../exports-test-harness";
 import { createWorker } from "../index";
 import { defaultPlugins } from "../plugins";
 import { withWorkerAuth } from "../plugins/worker-secret-auth-test-env";
+import { withSignature } from "../test-fixtures";
 import { signJobTicket } from "../transcode/job-ticket";
 import { loggedAudits } from "./audit-test-support";
 import { lockedFixture, RAW_KEY } from "./worker-fixture";
@@ -29,7 +30,7 @@ async function uploadPdf(
 	const { key, uploadUrl } = (await created.json()) as { key: string; uploadUrl: string };
 	const put = await send(uploadUrl, {
 		method: "PUT",
-		body: "same bytes",
+		body: withSignature("application/pdf", "same bytes"),
 		headers: { "Content-Type": "application/pdf" },
 	});
 	expect(put.status).toBe(200);
@@ -42,7 +43,11 @@ describe("1. deleting an asset keeps the keys of an asset nested under its path"
 		const upload = async (path: string) => {
 			const created = await worker.postJson("/v1/upload", { contentType: "application/zip", path });
 			const { key, uploadUrl } = (await created.json()) as { key: string; uploadUrl: string };
-			await worker.send(uploadUrl, { method: "PUT", body: "zip", headers: { "Content-Type": "application/zip" } });
+			await worker.send(uploadUrl, {
+				method: "PUT",
+				body: withSignature("application/zip", "zip"),
+				headers: { "Content-Type": "application/zip" },
+			});
 			return key;
 		};
 		const parent = await upload("exports/a");

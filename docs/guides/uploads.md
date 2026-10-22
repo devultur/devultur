@@ -46,6 +46,27 @@ const workbook = await media.createUploadUrl({
 Resolution order: **upload override → router default → `private`**. Nothing is
 public without an explicit decision.
 
+## Content verification
+
+The Worker checks a file's first bytes against the `contentType` it was created with. By default it only refuses
+markup under an inert type: a PNG that is really an SVG, or a PDF that is really an HTML page, gets
+`415 content_type_mismatch` and nothing is stored. Any other mismatch (a JPEG saved as `.png`) is stored with its
+declared type and logged.
+
+```typescript
+const res = await fetch(url, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
+if (res.status === 415) {
+  const { declared, detected } = await res.json(); // e.g. "application/pdf", "html"
+  // Tell the user the file isn't what its extension says.
+}
+```
+
+For a large (multipart) upload, part 1 is checked and a rejected one aborts the whole upload. `uploadToCapabilityUrl`
+(`@devultur/core`) throws a `DevulturApiError` with `code: "content_type_mismatch"`, and `@devultur/react`'s uploads an
+`UploadHttpError` with `status: 415`. Types the Worker can't check are kept as declared. The Worker's
+`contentSniffing` rule can reject every mismatch, store mismatches as `application/octet-stream`, or turn the check off:
+see [Content verification](security.md#content-verification).
+
 ## UploadZone component
 
 `UploadZone` handles drag-and-drop, progress, and the presigned PUT for you:

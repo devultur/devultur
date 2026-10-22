@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { updateRequestState } from "../request-state";
+import { sniffableBytes } from "../test-fixtures";
 import type { RawStorageClass, WorkerApp } from "../types";
 import { upload } from "./upload";
 
@@ -48,7 +49,11 @@ function setup(rawStorageClass?: RawStorageClass) {
 		return created.key;
 	}
 	async function putBytes(key: string, contentType: string) {
-		await send(`${uploadUrls.get(key)}`, { method: "PUT", headers: { "Content-Type": contentType }, body: "bytes" });
+		await send(`${uploadUrls.get(key)}`, {
+			method: "PUT",
+			headers: { "Content-Type": contentType },
+			body: sniffableBytes(contentType),
+		});
 		return putOptions.get(`prefix-a/${key}`)?.storageClass;
 	}
 	async function createMultipart(key: string) {

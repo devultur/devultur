@@ -1,6 +1,7 @@
 import { CACHE_CONTROL_PRESETS, DEFAULT_ASSET_CACHE_CONTROL } from "@devultur/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { exportsWorker } from "../exports-test-harness";
+import { withSignature } from "../test-fixtures";
 import { edgeCacheTag } from "./edge-cache";
 
 // Public files with a client-supplied path (a sync script): per-object `Cache-Control` (explicit, a prefix rule,
@@ -82,7 +83,11 @@ describe("Cache-Control per object", () => {
 			cacheControl: "no-cache",
 		});
 		const { key, uploadUrl } = (await created.json()) as { key: string; uploadUrl: string };
-		await worker.send(uploadUrl, { method: "PUT", body: CSS, headers: { "Content-Type": "application/pdf" } });
+		await worker.send(uploadUrl, {
+			method: "PUT",
+			body: withSignature("application/pdf", "pdf"),
+			headers: { "Content-Type": "application/pdf" },
+		});
 		expect(storedCacheControl(worker, key)).toBeUndefined();
 		const res = await worker.send(`/v1/media/${key}`);
 		expect(res.headers.get("Cache-Control")).toBe(CACHE_CONTROL_PRESETS.immutable);
@@ -96,7 +101,11 @@ describe("Cache-Control per object", () => {
 			cacheControl: "public, max-age=60, s-maxage=600",
 		});
 		const { uploadUrl } = (await created.json()) as { uploadUrl: string };
-		await worker.send(uploadUrl, { method: "PUT", body: CSS, headers: { "Content-Type": "application/zip" } });
+		await worker.send(uploadUrl, {
+			method: "PUT",
+			body: withSignature("application/zip", "zip"),
+			headers: { "Content-Type": "application/zip" },
+		});
 		const res = await worker.send("/v1/media/private/asset/exports/a.zip");
 		expect(res.headers.get("Cache-Control")).toBe("private, max-age=60");
 	});

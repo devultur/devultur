@@ -171,3 +171,22 @@ export function inferMediaType(contentType: string): MediaType | null {
 	if (contentType.startsWith("application/")) return MediaType.FILE;
 	return null;
 }
+
+/**
+ * The media type an upload's rule, path and kind use. A declared `mediaType` that CONTRADICTS the content type is an
+ * inconsistent request → 400: the client can't pick another type's rule or path (declaring `video` with an `image/png`
+ * to dodge the image rule). If the content type can't be inferred (text/*, audio/*, …), the declared one is used, and
+ * an asset (client path) falls back to the `file` rule.
+ */
+export function resolveUploadMediaType(
+	declared: MediaType | undefined,
+	contentType: string,
+	isAssetRequest: boolean,
+): MediaType | UploadTargetError {
+	const inferredType = inferMediaType(contentType);
+	if (declared && inferredType && declared !== inferredType) {
+		return failure(400, "media_type_mismatch", `mediaType "${declared}" does not match content type ${contentType}`);
+	}
+	const mediaType = declared ?? inferredType ?? (isAssetRequest ? MediaType.FILE : null);
+	return mediaType ?? failure(400, "unsupported_content_type", `Unsupported content type: ${contentType}`);
+}

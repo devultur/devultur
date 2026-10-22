@@ -9,6 +9,7 @@ import { createWorker } from "./index";
 import { KEYS_BUCKET_MISSING_CODE } from "./keys-bucket";
 import { defaultPlugins } from "./plugins";
 import { WORKER_SECRETS, withWorkerAuth } from "./plugins/worker-secret-auth-test-env";
+import { sniffableBytes } from "./test-fixtures";
 import type { TranscodeContainerNamespace } from "./transcode/cloudflare";
 import type { WorkerEnv } from "./types";
 
@@ -101,8 +102,11 @@ describe("POST /v1/upload (upload URL issuance)", () => {
 });
 
 describe("PUT /v1/upload/<key> (single upload)", () => {
-	const putBytes = (send: ReturnType<typeof setup>["send"], key: string, contentType = "image/jpeg") =>
-		send(`/v1/upload/${key}`, { method: "PUT", body: new Uint8Array(64), headers: { "Content-Type": contentType } });
+	// An HLS segment (video/mp2t) isn't sniffed: any bytes do.
+	const putBytes = (send: ReturnType<typeof setup>["send"], key: string, contentType = "image/jpeg") => {
+		const body = contentType === "video/mp2t" ? new Uint8Array(64) : sniffableBytes(contentType);
+		return send(`/v1/upload/${key}`, { method: "PUT", body, headers: { "Content-Type": contentType } });
+	};
 
 	it("refuses to store a private file in plaintext", async () => {
 		const { send, mediaBucket } = setup({ hasKeysBucket: false });
@@ -116,7 +120,7 @@ describe("PUT /v1/upload/<key> (single upload)", () => {
 		delete env.KEYS_BUCKET;
 		const response = await send(uploadUrl, {
 			method: "PUT",
-			body: new Uint8Array(8),
+			body: sniffableBytes("image/jpeg", 8),
 			headers: { "Content-Type": "image/jpeg" },
 		});
 		await expectKeysBucketMissing(response);

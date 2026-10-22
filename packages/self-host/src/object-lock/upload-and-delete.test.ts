@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { UploadGrant } from "../export-types";
 import { exportsWorker } from "../exports-test-harness";
+import { withSignature } from "../test-fixtures";
 import { loggedAudits } from "./audit-test-support";
 
 // The lock is written with the bytes (single PUT and multipart create) and enforced on delete.
-const BYTES = new TextEncoder().encode("pdf bytes");
+const BYTES = withSignature("application/pdf", "pdf bytes");
 const COMPLIANCE = { retention: { mode: "compliance", until: "2999-01-01T00:00:00Z" } };
 
 type Worker = ReturnType<typeof exportsWorker>;

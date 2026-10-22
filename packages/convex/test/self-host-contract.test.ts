@@ -222,6 +222,22 @@ function setup() {
 
 type Contract = ReturnType<typeof setup>;
 
+// The Worker checks an upload's first bytes against its type: each fake file starts with its type's real signature.
+const SIGNATURES: Record<string, number[]> = {
+	"application/pdf": [...new TextEncoder().encode("%PDF-1.7\n")],
+	"image/png": [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+	"video/mp4": [0, 0, 0, 16, ...new TextEncoder().encode("ftypisom"), 0, 0, 2, 0],
+};
+
+function fakeFileBytes(filename: string, contentType: string): Uint8Array<ArrayBuffer> {
+	const body = new TextEncoder().encode(`bytes of ${filename}`);
+	const signature = SIGNATURES[contentType] ?? [];
+	const bytes = new Uint8Array(signature.length + body.length);
+	bytes.set(signature);
+	bytes.set(body, signature.length);
+	return bytes;
+}
+
 async function uploadThroughComponent(
 	contract: Contract,
 	file: { filename: string; contentType: string; hold?: boolean },
@@ -230,7 +246,7 @@ async function uploadThroughComponent(
 		url: string;
 		key: string;
 	};
-	const bytes = new TextEncoder().encode(`bytes of ${file.filename}`);
+	const bytes = fakeFileBytes(file.filename, file.contentType);
 	// The browser PUTs to the URL the component returned (on the Worker's origin).
 	const put = await fetch(created.url, { method: "PUT", body: bytes, headers: { "Content-Type": file.contentType } });
 	return { ...created, bytes, put };

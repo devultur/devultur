@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { exportsWorker } from "../exports-test-harness";
 import { MAX_EXPIRED_LOOKUPS } from "../routes/assets";
+import { withSignature } from "../test-fixtures";
 import { lockedFixture } from "./worker-fixture";
 
 const empty = (customMetadata: Record<string, string> = {}) => ({
@@ -29,7 +30,11 @@ async function uploadPdf(send: Send, body: Record<string, unknown>) {
 		body: JSON.stringify({ filename: "a.pdf", contentType: "application/pdf", ...body }),
 	});
 	const { key, uploadUrl } = (await created.json()) as { key: string; uploadUrl: string };
-	const put = await send(uploadUrl, { method: "PUT", body: "bytes", headers: { "Content-Type": "application/pdf" } });
+	const put = await send(uploadUrl, {
+		method: "PUT",
+		body: withSignature("application/pdf", "bytes"),
+		headers: { "Content-Type": "application/pdf" },
+	});
 	expect(put.status).toBe(200);
 	return key;
 }
@@ -161,7 +166,11 @@ describe("6. an overwritten version's encryption key doesn't outlive it", () => 
 		const upload = async (overwrite: boolean) => {
 			const created = await worker.postJson("/v1/upload", { contentType: "application/zip", path: "x/a", overwrite });
 			const { key, uploadUrl } = (await created.json()) as { key: string; uploadUrl: string };
-			await worker.send(uploadUrl, { method: "PUT", body: "zip", headers: { "Content-Type": "application/zip" } });
+			await worker.send(uploadUrl, {
+				method: "PUT",
+				body: withSignature("application/zip", "zip"),
+				headers: { "Content-Type": "application/zip" },
+			});
 			return key;
 		};
 		const ownKeys = (key: string) =>

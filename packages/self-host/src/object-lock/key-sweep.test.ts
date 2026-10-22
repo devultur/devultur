@@ -3,6 +3,7 @@ import { decodeEncryptionMeta } from "@devultur/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { exportsWorker } from "../exports-test-harness";
 import { ENCRYPTION_KEY_MISSING_CODE } from "../keys-bucket";
+import { sniffableBytes, withSignature } from "../test-fixtures";
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -22,7 +23,11 @@ function encryptedWorker() {
 		return (await created.json()) as { key: string; uploadUrl: string };
 	};
 	const putPdf = (uploadUrl: string) =>
-		worker.send(uploadUrl, { method: "PUT", body: "pdf", headers: { "Content-Type": "application/pdf" } });
+		worker.send(uploadUrl, {
+			method: "PUT",
+			body: withSignature("application/pdf", "pdf"),
+			headers: { "Content-Type": "application/pdf" },
+		});
 	const ownKeys = (key: string) =>
 		[...worker.keysBucket.objects.keys()].filter((stored) => stored.startsWith(`prefix-a/${key}/`));
 	const storedKeyId = (key: string) =>
@@ -37,13 +42,15 @@ function encryptedWorker() {
 		const { uploadId } = (await created.json()) as { uploadId: string };
 		const part = await worker.send(`${uploadUrl}&uploadId=${uploadId}&partNumber=1`, {
 			method: "PUT",
-			body: new Uint8Array(PART_BYTES),
+			body: sniffableBytes("application/pdf", PART_BYTES),
 		});
 		expect(part.status).toBe(200);
+		// The part 1 the Worker checked: the complete must name its etag.
+		const { etag } = (await part.json()) as { etag: string };
 		const complete = () =>
 			worker.send(`${uploadUrl}&multipart=complete`, {
 				method: "POST",
-				body: JSON.stringify({ uploadId, parts: [{ partNumber: 1, etag: "e" }] }),
+				body: JSON.stringify({ uploadId, parts: [{ partNumber: 1, etag }] }),
 			});
 		return { uploadId, complete };
 	};

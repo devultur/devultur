@@ -2,6 +2,7 @@ import { createWorkerClient, DevulturApiError, HOLD_PAGE_SIZE } from "@devultur/
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkerPlugin } from "../plugin";
 import { TEST_WORKER_SECRET } from "../plugins/worker-secret-auth-test-env";
+import { withSignature } from "../test-fixtures";
 import { CAPTION_KEY, lockedFixture, RAW_KEY } from "./worker-fixture";
 
 // `@devultur/core`'s lock client against the in-memory Worker: `fetch` to the Worker's origin goes to the app.
@@ -103,10 +104,14 @@ describe("upload options", () => {
 	it("passes lock and hold on createUploadUrl, uploadFile, uploadAsset and upload tokens", async () => {
 		const { client, mediaBucket } = clientWith();
 		const created = await client.createUploadUrl({ filename: "a.pdf", contentType: "application/pdf", hold: true });
-		await fetch(created.uploadUrl, { method: "PUT", body: "a", headers: { "Content-Type": "application/pdf" } });
+		await fetch(created.uploadUrl, {
+			method: "PUT",
+			body: withSignature("application/pdf", "a"),
+			headers: { "Content-Type": "application/pdf" },
+		});
 		expect(mediaBucket.objects.get(created.key)?.customMetadata.lock).toBe('{"hold":true}');
 
-		const file = new File(["b"], "b.pdf", { type: "application/pdf" });
+		const file = new File([withSignature("application/pdf", "b")], "b.pdf", { type: "application/pdf" });
 		const uploaded = await client.uploadFile(file, { lock: { retention: { mode: "governance", period: 60 } } });
 		expect(await client.lock.get(uploaded.key)).toMatchObject({ mode: "governance", period: 60, source: "upload" });
 
