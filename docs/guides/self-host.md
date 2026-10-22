@@ -49,14 +49,62 @@ export { DownloadLink } from "@devultur/self-host";
 export default createWorker();
 ```
 
-Bind an R2 bucket as `MEDIA_BUCKET`, a second R2 bucket as `KEYS_BUCKET` (encryption keys), a KV namespace as
-`MEDIA_KV` (pending uploads, transcode job state) and the `DownloadLink` Durable Object (single-use download links)
-in `wrangler.toml`:
+The Worker needs an R2 bucket bound as `MEDIA_BUCKET`, a second R2 bucket as `KEYS_BUCKET` (encryption keys), a KV
+namespace as `MEDIA_KV` (pending uploads, transcode job state), the `DownloadLink` Durable Object (single-use download
+links) and three secrets. The steps below set them up in order.
+
+### Step by step
+
+#### 1. Pick the account
+
+If your login can see more than one Cloudflare account, non-interactive Wrangler commands fail with "More than one
+account available but unable to select one in non-interactive mode". Pin the account before anything else, either in
+`wrangler.toml`:
+
+```toml
+account_id = "<your-account-id>"
+```
+
+or in the environment, for CI and scripts:
+
+```bash
+export CLOUDFLARE_ACCOUNT_ID=<your-account-id>
+```
+
+To check auth from a script, run `wrangler r2 bucket list`: it returns, and it proves both the login and R2 access.
+Don't use `wrangler whoami` for that check: some versions print the account and then hang.
+
+#### 2. Create the buckets
+
+```bash
+wrangler r2 bucket create media
+wrangler r2 bucket create media-keys
+```
+
+`KEYS_BUCKET` holds the key of every file encrypted at rest ([L4 encryption](security.md#l4--encryption)). With
+`security.encrypt` on, the Worker fails closed without it: a private upload, transcode or captions request answers
+`503 keys_bucket_missing` and nothing is stored, instead of storing the file unencrypted. Keep it a separate
+bucket, never public, and [back it up](#backing-up-keys_bucket): losing a key loses its file for good.
+
+#### 3. Create the KV namespace
+
+```bash
+wrangler kv namespace create media-state
+```
+
+It prints a config snippet with the new namespace's `id`. Paste that id into the `MEDIA_KV` binding of
+`wrangler.toml`. Running `create` again doesn't give you the id of a namespace that already exists: find it with
+`wrangler kv namespace list`, which prints every namespace of the account with its `title` and `id`.
+
+#### 4. Write `wrangler.toml`
+
+Bind both buckets, the KV namespace and the `DownloadLink` Durable Object:
 
 ```toml
 name = "media"
 main = "src/index.ts"
 compatibility_date = "2026-10-01"
+account_id = "<your-account-id>"
 
 [[r2_buckets]]
 binding = "MEDIA_BUCKET"
@@ -80,23 +128,13 @@ tag = "v1"
 new_sqlite_classes = ["DownloadLink"]
 ```
 
-Create both buckets and the KV namespace:
+Without the `DOWNLOAD_LINKS` binding, `POST /v1/token/download` answers `501`. For staging and production in one
+file, see [Per-environment config](#per-environment-config).
 
-```bash
-wrangler r2 bucket create media
-wrangler r2 bucket create media-keys
-wrangler kv namespace create media-state   # put the id it prints in `MEDIA_KV`
-```
+#### 5. Set the secrets
 
-`KEYS_BUCKET` holds the key of every file encrypted at rest ([L4 encryption](security.md#l4--encryption)). With
-`security.encrypt` on, the Worker fails closed without it: a private upload, transcode or captions request answers
-`503 keys_bucket_missing` and nothing is stored, instead of storing the file unencrypted. Keep it a separate
-bucket, never public, and back it up: losing a key loses its file for good.
-
-Without the `DOWNLOAD_LINKS` binding, `POST /v1/token/download` answers `501`. For captions, also set
-`GROQ_API_KEY` (transcription) and `MISTRAL_API_KEY` (translation) as secrets.
-
-The Worker requires three secrets. Without them it fails closed: it doesn't fall back to open access.
+The Worker requires all three secrets, even if you never transcode a video. Without them it fails closed: it doesn't
+fall back to open access.
 
 ```bash
 wrangler secret put DELIVERY_SIGN_SECRET        # openssl rand -base64 32
@@ -111,8 +149,154 @@ wrangler secret put TRANSCODE_WEBHOOK_SECRET    # openssl rand -base64 32
   `503 worker_auth_secret_missing`. With a missing or wrong bearer, they answer `401`. The transcode
   runner also uploads its renditions with this secret, and a job's `callbackUrl` receives it as its bearer (the
   Convex component checks it against `DEVULTUR_SECRET`).
-- **`TRANSCODE_WEBHOOK_SECRET`** signs the transcode callbacks (see below). Without it, the Worker
-  answers `503` to every callback.
+- **`TRANSCODE_WEBHOOK_SECRET`** signs the transcode callbacks (see [Transcode runners](#transcode-runners)).
+  Without it, the Worker answers `503` to every callback, so no transcode ever completes: the first video upload
+  would stay in progress for good. Set it even if you don't plan to transcode.
+
+For captions, also set `GROQ_API_KEY` (transcription) and `MISTRAL_API_KEY` (translation) as secrets. Secrets are
+per environment: with [environments](#per-environment-config), add `--env <name>` to each `wrangler secret put`.
+
+#### 6. Deploy
+
+```bash
+wrangler deploy                    # with environments: wrangler deploy --env production
+```
+
+#### 7. Verify
+
+```bash
+curl https://media.example.com/health
+curl https://media.example.com/v1/assets -H "Authorization: Bearer $WORKER_AUTH_SECRET"
+```
+
+`/health` is open. `GET /v1/assets` takes the Worker secret: it answers `401` with a wrong bearer, and
+`503 worker_auth_secret_missing` if the secret didn't reach this environment. Then upload one file from your backend
+and fetch it back.
+
+### Per-environment config
+
+Under `[env.<name>]`, Wrangler doesn't inherit `r2_buckets`, `kv_namespaces` or `durable_objects` from the top
+level: repeat every binding in every environment, `KEYS_BUCKET` included. `migrations` stays top-level. Give each
+environment its own buckets, KV namespace and secrets:
+
+```toml
+name = "media"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+account_id = "<your-account-id>"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["DownloadLink"]
+
+# Staging
+[env.staging]
+name = "media-staging"
+
+[[env.staging.r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "media-staging"
+
+[[env.staging.r2_buckets]]
+binding = "KEYS_BUCKET"
+bucket_name = "media-keys-staging"
+
+[[env.staging.kv_namespaces]]
+binding = "MEDIA_KV"
+id = "<staging-kv-namespace-id>"
+
+[[env.staging.durable_objects.bindings]]
+name = "DOWNLOAD_LINKS"
+class_name = "DownloadLink"
+
+# Production
+[env.production]
+name = "media-production"
+
+[[env.production.r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "media-production"
+
+[[env.production.r2_buckets]]
+binding = "KEYS_BUCKET"
+bucket_name = "media-keys-production"
+
+[[env.production.kv_namespaces]]
+binding = "MEDIA_KV"
+id = "<production-kv-namespace-id>"
+
+[[env.production.durable_objects.bindings]]
+name = "DOWNLOAD_LINKS"
+class_name = "DownloadLink"
+```
+
+`vars` aren't inherited either: repeat `[env.<name>.vars]` (for example `TRANSCODE_RUNNER`) in each one. Then set
+the secrets and deploy per environment:
+
+```bash
+wrangler secret put WORKER_AUTH_SECRET --env staging
+wrangler deploy --env staging
+```
+
+[Wrangler environments](https://developers.cloudflare.com/workers/wrangler/environments/) lists what is and isn't
+inherited.
+
+### Backing up `KEYS_BUCKET`
+
+R2 has no built-in backup, and losing a key loses its file for good: the encrypted bytes in `MEDIA_BUCKET` can't be
+read without it. Copy `KEYS_BUCKET` to a bucket of its own, ideally in another account or with another provider:
+
+- **A cron Worker** bound to `KEYS_BUCKET` and the backup bucket, which lists the keys bucket and copies each object
+  the backup doesn't have yet. A key is written once and never changes, so copying the new ones is enough. Copy each
+  object's `customMetadata` along with its body.
+- **rclone** with [R2's S3 API](https://developers.cloudflare.com/r2/examples/rclone/), from a machine or a CI job on
+  a schedule.
+
+Each key lives at `{storageKey}/{keyId}`: the full storage key of its file plus a random id. To restore, copy the
+objects back to the same keys, with their metadata. The Worker finds a file's key by that path, so a key restored
+under another path is as good as lost. Give the backup the same access rules as the keys bucket: whoever holds both
+the keys and the media can read your encrypted files.
+
+### R2 bucket lock (defense in depth)
+
+[Retention and holds](object-lock.md) are enforced by the Worker. An
+[R2 bucket lock rule](https://developers.cloudflare.com/r2/buckets/bucket-locks/) adds a storage-level layer: R2
+itself refuses overwrites and deletes of matching objects, also from the dashboard, `wrangler r2` or the S3 API.
+Lock the same prefix in both buckets, so a file and its key are kept together:
+
+```bash
+# {root} is the Worker's storage prefix ("" if you don't set one)
+wrangler r2 bucket lock add media records-retention "{root}private/asset/records/" --retention-days 3650
+wrangler r2 bucket lock add media-keys records-retention "{root}private/asset/records/" --retention-days 3650
+```
+
+An asset is stored at `{root}{visibility}/asset/{path}` in `MEDIA_BUCKET`, and its key at
+`{root}{visibility}/asset/{path}/{keyId}` in `KEYS_BUCKET`, so one prefix covers both. Use `--retention-days`,
+`--retention-date` or `--retention-indefinite` to match the longest retention you set through the Worker.
+
+> [!WARNING]
+> Never lock `__lock/` or `__lock-audit/`, or a prefix that contains them, such as `""` or `{root}` alone. The Worker
+> rewrites those records on every lock change, and a bucket lock on them makes lock changes and holds fail.
+
+What changes once the rule is on:
+
+- Nothing under the prefix can be deleted or replaced until its R2 retention ends, whatever the Worker's own lock
+  says. That includes image variants (`{key}/__variants/…`) and the cleanup of `maxFileLifetimeSeconds`.
+- **Racing duplicate uploads.** When two create-only uploads race for the same asset path, the loser deletes the
+  key it made for its failed write. Under the lock R2 refuses that delete, so the loser gets a `500` instead of
+  `409 already_exists`. Retry it: the retry sees the existing file and answers `409 already_exists`.
+- **Don't trust `wrangler r2 object delete` to test the rule.** On a locked object it prints "Delete complete." and
+  exits `0`, but the object stays. Check for the object afterwards instead:
+
+  ```bash
+  wrangler r2 object delete "media/private/asset/records/test.pdf" --remote
+  wrangler r2 object get "media/private/asset/records/test.pdf" --remote --file check.pdf  # still there
+  ```
+
+Anyone who can edit the bucket's configuration can still remove the rule, so it raises the bar rather than closing
+it.
+
+### Calling the Worker
 
 Your backend calls the Worker with the server SDK. Pass the Worker URL as `baseUrl` and the
 secret as `secret`. Never ship the secret to the browser.
@@ -200,9 +384,9 @@ Pick the runner with the `TRANSCODE_RUNNER` var:
 | Fly Machines | `fly` | An existing Fly setup | A Fly app, an API token, a pushed image |
 | HTTP | `http` | A VPS or your own queue | A host running the reference runner behind HTTPS |
 
-Set `TRANSCODE_WEBHOOK_SECRET` (`openssl rand -base64 32`) whatever runner you pick. The
+Set `TRANSCODE_WEBHOOK_SECRET` ([step 5](#5-set-the-secrets)) whatever runner you pick. The
 script sends it on every callback, and the Worker rejects callbacks that don't carry it. If the
-secret is unset, the Worker rejects every callback.
+secret is unset, the Worker answers `503` to every callback.
 
 ### Cloudflare Containers (recommended)
 
