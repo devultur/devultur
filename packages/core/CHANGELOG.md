@@ -1,5 +1,11 @@
 # @devultur/core
 
+## 1.4.1
+
+### Patch Changes
+
+- [#50](https://github.com/devultur/devultur/pull/50) [`0fb3251`](https://github.com/devultur/devultur/commit/0fb3251b16689ee3558b793b7d4bb2dfb64bc051) Thanks [@demarchenac](https://github.com/demarchenac)! - `DevulturMedia.tags` is a `string[]` again instead of a `readonly string[]`, so a media reference returned by an upload can be passed to a mutation whose argument uses `dv.media()`. Under 1.4.0 that failed to typecheck with TS2322.
+
 ## 1.4.0
 
 ### Minor Changes

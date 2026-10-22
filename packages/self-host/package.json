@@ -1,6 +1,6 @@
 {
 	"name": "@devultur/self-host",
-	"version": "1.4.0",
+	"version": "1.4.1",
 	"description": "Self-hosted media Worker for Cloudflare: R2 uploads, edge-cached delivery, image transforms, HLS transcode and captions",
 	"keywords": [
 		"cloudflare-workers",
