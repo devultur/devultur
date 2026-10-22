@@ -62,6 +62,8 @@ export const DEVULTUR_ERROR_CODES = [
 	"token_rejected",
 	"reserved_user_id",
 	"invalid_scopes",
+	// The progress functions, given another user's `userId` than the guard's
+	"user_mismatch",
 	// Video and captions
 	"transcode_not_configured",
 	"transcode_runner_unavailable",

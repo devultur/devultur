@@ -190,6 +190,8 @@ export function DevulturProvider({ api, baseUrl, tokenArgs, issueViewerToken, ch
 	const upload = React.useCallback(
 		async (file: File, options?: UploadOptions): Promise<UploadedMedia> => {
 			const dimensions = await readImageDimensions(file);
+			// Cancelled while the file was read (or a PDF's pages counted): no upload URL for an upload nobody wants.
+			options?.signal?.throwIfAborted();
 			const target = (await createUploadUrlAction({
 				filename: file.name,
 				contentType: file.type,

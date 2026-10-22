@@ -77,6 +77,7 @@ export const devulturErrorLabels: DevulturErrorLabels = {
 	token_rejected: "Se denegó el acceso.",
 	reserved_user_id: "Este identificador de usuario está reservado.",
 	invalid_scopes: "Los permisos solicitados no son válidos.",
+	user_mismatch: "Solo puedes ver y cambiar tu propio progreso.",
 	transcode_not_configured: "El procesamiento de video no está configurado.",
 	transcode_runner_unavailable:
 		"El procesamiento de video está ocupado en este momento. Vuelve a intentarlo más tarde.",

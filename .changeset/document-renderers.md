@@ -12,4 +12,5 @@ Document link, attachment card and responsive images.
   `formatDuration`); Spanish ones ship as `attachmentLabels` in `@devultur/convex/locales/es`.
 - `<Image widths sizes>` builds a `srcset` from the Worker's transforms for public images, defaults to
   `loading="lazy"` and `decoding="async"`, and fetches one width for private images (the largest up to twice the
-  width `sizes` gives it). Without `widths`, `<Image>` is unchanged.
+  width `sizes` gives it). Without `widths`, `<Image>` is unchanged, and an explicit `srcSet` is passed through and
+  wins over the one `widths` builds.

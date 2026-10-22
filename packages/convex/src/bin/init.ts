@@ -2,6 +2,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { DEVULTUR_MODULE_TEMPLATE } from "./devultur-module-template";
 
 const CONVEX_DIR = findConvexDir();
 
@@ -84,40 +85,7 @@ function createDevulturModule() {
 		return;
 	}
 
-	const content = `import { CaptionLocale, Devultur, defineDevulturFunctions, TranscodePreset } from "@devultur/convex";
-import { ConvexError } from "convex/values";
-import { components } from "./_generated/api";
-
-const devultur = new Devultur(components.devultur);
-
-// Every function below runs this guard first. Adjust it to your app's auth and rules (narrow on \`operation.name\`).
-export const {
-	issueViewerToken,
-	createUploadUrl,
-	confirmUpload,
-	deleteMedia,
-	deleteVideo,
-	processVideo,
-	getMedia,
-	saveProgress,
-	loadProgress,
-	markComplete,
-	resetProgress,
-} = defineDevulturFunctions(devultur, {
-	guard: async (ctx, operation) => {
-		const identity = await ctx.auth.getUserIdentity();
-		if (!identity) throw new ConvexError(\`Sign in to call \${operation.name}\`);
-		return { userId: identity.subject };
-	},
-	config: {
-		video: {
-			transcodePreset: TranscodePreset.HLS_720P,
-			captionLocales: [CaptionLocale.EN],
-		},
-	},
-});
-`;
-	writeFileSync(modulePath, content);
+	writeFileSync(modulePath, DEVULTUR_MODULE_TEMPLATE);
 	log("✅ Created convex/devultur.ts");
 }
 

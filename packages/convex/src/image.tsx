@@ -8,8 +8,8 @@ import { buildSrcSet, normalizeWidths, pickWidth, renderedWidthFromSizes, scaled
 
 type ImageTransforms = Pick<MediaUrlOptions, "width" | "height" | "fit" | "format" | "quality">;
 
-export interface ImageProps
-	extends Omit<React.ImgHTMLAttributes<HTMLImageElement>, "src" | "srcSet" | "width" | "height"> {
+/** An explicit `srcSet` is passed through to the `<img>` as is, and wins over the one `widths` builds. */
+export interface ImageProps extends Omit<React.ImgHTMLAttributes<HTMLImageElement>, "src" | "width" | "height"> {
 	/** Typed reference. `null`/`undefined` → renders `fallback` (or `externalFallback`). Its `alt` is the default `alt`. */
 	media: DevulturMedia | null | undefined;
 	/** Resize width (px). With `widths`, the width a private image is picked for when `sizes` can't tell. */

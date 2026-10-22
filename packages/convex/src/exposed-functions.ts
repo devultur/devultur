@@ -21,7 +21,7 @@ import {
 	paginationOptsValidator,
 	queryGeneric,
 } from "convex/server";
-import { type ObjectType, type PropertyValidators, v } from "convex/values";
+import { ConvexError, type ObjectType, type PropertyValidators, v } from "convex/values";
 import type { ComponentApi } from "./component/_generated/component.js";
 import type { DevulturComponentConfig } from "./types";
 
@@ -33,9 +33,15 @@ type ContextOf<Kind extends FunctionKind> = Kind extends "query"
 		? GenericMutationCtx<GenericDataModel>
 		: GenericActionCtx<GenericDataModel>;
 
-/** What a guard tells the function about its caller. `userId` becomes the subject of `issueViewerToken`'s token. */
+/** What a guard tells the function about its caller. */
 export interface CallerContext {
+	/**
+	 * The caller's user: the subject of `issueViewerToken`'s token, and the only `userId` the progress functions accept
+	 * (another one is refused with `user_mismatch`).
+	 */
 	userId?: string;
+	/** The caller may name any `userId` in the progress functions (an admin resetting a learner's progress). */
+	canActForOthers?: boolean;
 }
 
 export interface ExposedFunction<Kind extends FunctionKind, Args extends DefaultFunctionArgs, Result> {
@@ -58,6 +64,19 @@ function exposed<Kind extends FunctionKind, Validators extends PropertyValidator
 const visibilityArg = v.optional(v.union(v.literal("public"), v.literal("private")));
 const mediaTypeArg = v.optional(v.union(v.literal("video"), v.literal("image"), v.literal("file")));
 const progressArgs = { userId: v.string(), videoId: v.string() };
+
+/**
+ * The progress functions' arguments with the guard's `userId`: the browser names a user, but only the guard knows who
+ * is calling. Without a guard's `userId` (`exposeApi`), the browser's is kept.
+ */
+function progressArgsFor<Args extends { userId: string }>(args: Args, caller: CallerContext): Args {
+	if (!caller.userId || caller.canActForOthers || args.userId === caller.userId) return args;
+	throw new ConvexError({
+		code: "user_mismatch",
+		message: "This progress belongs to another user",
+		status: 403,
+	});
+}
 
 /** The media id of a media id or an object key (`{visibility}/{kind}/{id}/…`). */
 function mediaIdOf(key: string): string {
@@ -144,20 +163,20 @@ export function exposedFunctions(component: ComponentApi, config?: DevulturCompo
 			async (ctx, args) => ctx.runQuery(component.library.searchMedia, args),
 		),
 
-		saveProgress: exposed("mutation", { ...progressArgs, position: v.number() }, async (ctx, args) =>
-			ctx.runMutation(component.public.saveProgress, args),
+		saveProgress: exposed("mutation", { ...progressArgs, position: v.number() }, async (ctx, args, caller) =>
+			ctx.runMutation(component.public.saveProgress, progressArgsFor(args, caller)),
 		),
 
-		loadProgress: exposed("query", progressArgs, async (ctx, args) =>
-			ctx.runQuery(component.public.loadProgress, args),
+		loadProgress: exposed("query", progressArgs, async (ctx, args, caller) =>
+			ctx.runQuery(component.public.loadProgress, progressArgsFor(args, caller)),
 		),
 
-		markComplete: exposed("mutation", progressArgs, async (ctx, args) =>
-			ctx.runMutation(component.public.markComplete, args),
+		markComplete: exposed("mutation", progressArgs, async (ctx, args, caller) =>
+			ctx.runMutation(component.public.markComplete, progressArgsFor(args, caller)),
 		),
 
-		resetProgress: exposed("mutation", progressArgs, async (ctx, args) =>
-			ctx.runMutation(component.public.resetProgress, args),
+		resetProgress: exposed("mutation", progressArgs, async (ctx, args, caller) =>
+			ctx.runMutation(component.public.resetProgress, progressArgsFor(args, caller)),
 		),
 	};
 }

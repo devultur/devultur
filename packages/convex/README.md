@@ -71,9 +71,11 @@ function CoverUpload({ onSaved }) {
 ## Guarding the component's functions
 
 `defineDevulturFunctions(devultur, { guard })` returns the functions your app exposes to the browser (`createUploadUrl`,
-`confirmUpload`, `updateMediaMeta`, `issueViewerToken`, `getMedia`, `listMediaPage`, `deleteMedia`, `deleteVideo`,
-`processVideo` and the progress functions), and each one awaits `guard(ctx, { name, kind, args })` before it runs. Throw from the guard to
-deny the call. Export the functions your app uses, one by one:
+`confirmUpload`, `updateMediaMeta`, `issueViewerToken`, `getMedia`, `listMediaPage`, `searchMedia`, `deleteMedia`,
+`deleteVideo`, `processVideo` and the progress functions), and each one awaits `guard(ctx, { name, kind, args })` before
+it runs. Throw from the guard to deny the call. `listMediaPage`, `searchMedia` and `updateMediaMeta` are library-wide:
+they read or edit every user's media, so the guard decides who may call them. Export the functions your app uses, one
+by one:
 
 ```typescript
 // convex/devultur.ts
@@ -100,6 +102,11 @@ export const { createUploadUrl, confirmUpload, issueViewerToken, getMedia, listM
 - `kind` is `"query"`, `"mutation"` or `"action"`, and `ctx` is that kind's context (every one has `ctx.auth`).
 - The guard may return `{ userId }`: `issueViewerToken` then issues the viewer token for that user (its subject)
   instead of the shared `viewer` one. The browser never names it: the exposed function only takes `sessionSecret`.
+- That `userId` is also the only user the progress functions (`saveProgress`, `loadProgress`, `markComplete`,
+  `resetProgress`) act for: a call whose `userId` is another user's is refused with `user_mismatch` (403), so a
+  signed-in user can't read or overwrite someone else's progress. Return `{ userId, canActForOthers: true }` for a
+  caller who may (an admin resetting a learner's progress). A guard that returns no `userId` keeps the browser's, as
+  `exposeApi` does: return one whenever the progress functions are exported.
 - `visibility: "internal"` registers them as internal functions, for your own actions and mutations to call.
 - `config` takes what `Devultur.exposeApi` does (transcode preset, caption locales, upload lock).
 - Each function keeps its arguments and result types, so `api.devultur.confirmUpload` is typed as before and
@@ -289,7 +296,8 @@ references stored before 1.4.0 stay valid without a migration.
 | `title`, `alt`, `tags` | Your app, with `updateMediaMeta`. |
 
 **Client hints.** `confirmUpload` accepts `width`, `height` and `pageCount` from the client. They are the uploader's
-word, not checked against the bytes: whole numbers from 1 to 100,000, or the call fails with `invalid_media_metadata`.
+word, not checked against the bytes: whole numbers from 1 to 100,000. Another value is dropped (with a warning in the
+logs) and the upload is recorded without it: the bytes are already stored.
 A size the Worker read wins over the client's. To record a PDF's page count at upload, count it in the browser with
 pdf.js (imported on the first call; `pdfjs-dist` must be installed):
 

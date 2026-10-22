@@ -35,17 +35,26 @@ function invalidMetadata(field: string, message: string) {
 	return new ConvexError({ code: "invalid_media_metadata", message, status: 400, details: { field } });
 }
 
-function checkHint(field: keyof UploadHints, value: number | undefined): void {
-	if (value === undefined) return;
-	if (Number.isInteger(value) && value > 0 && value <= MEDIA_META_LIMITS.hintValue) return;
-	throw invalidMetadata(field, `${field} must be a whole number from 1 to ${MEDIA_META_LIMITS.hintValue}`);
-}
+const HINT_FIELDS = ["width", "height", "pageCount"] as const;
 
-/** Throws `invalid_media_metadata` unless every hint the client sent is a positive integer within bounds. */
-export function checkUploadHints(hints: UploadHints): void {
-	checkHint("width", hints.width);
-	checkHint("height", hints.height);
-	checkHint("pageCount", hints.pageCount);
+const isValidHint = (value: number) => Number.isInteger(value) && value > 0 && value <= MEDIA_META_LIMITS.hintValue;
+
+/**
+ * The hints worth recording: positive integers up to `hintValue`. The bytes are already stored, so a bad hint (a
+ * client's bug) is dropped and logged instead of failing the upload.
+ */
+export function validUploadHints(hints: UploadHints): UploadHints {
+	const valid: UploadHints = {};
+	for (const field of HINT_FIELDS) {
+		const value = hints[field];
+		if (value === undefined) continue;
+		if (isValidHint(value)) {
+			valid[field] = value;
+			continue;
+		}
+		console.warn(`Devultur: dropped the upload hint ${field}=${value} (a whole number from 1 to 100,000)`);
+	}
+	return valid;
 }
 
 function trimmedText(field: "title" | "alt", value: string, maxLength: number): string | undefined {

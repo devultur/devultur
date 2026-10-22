@@ -182,4 +182,37 @@ describe("<MediaPicker> uploads", () => {
 		expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ pageCount: 7 }));
 		expect(within(selection()).getByText(/7 pages/)).toBeTruthy();
 	});
+
+	it("asks for no upload URL when cancelled while a PDF's pages are counted", async () => {
+		const createUploadUrl = vi.fn(async () => ({}));
+		actions.set("createUploadUrl", createUploadUrl);
+		const fake = fakePdfjs({ pageCount: 7 });
+		let finishCounting: () => void = () => {};
+		const counting = new Promise<void>((resolve) => (finishCounting = resolve));
+		const slowPdfjs = {
+			...fake.pdfjs,
+			getDocument: (source: { data: Uint8Array }) => {
+				const task = fake.pdfjs.getDocument(source as never) as { promise: Promise<unknown>; destroy: () => void };
+				return { ...task, promise: counting.then(() => task.promise) };
+			},
+		};
+		render(
+			<DevulturProvider api={PICKER_API as never} baseUrl={BASE_URL}>
+				<PdfPreviewProvider pdfjs={async () => slowPdfjs as never}>
+					<MediaPicker onChange={vi.fn()} />
+				</PdfPreviewProvider>
+			</DevulturProvider>,
+		);
+		await chooseFiles(pdf());
+		await flush();
+
+		fireEvent.click(screen.getByRole("button", { name: "Cancel uploading report.pdf" }));
+		finishCounting();
+		await flush();
+		await flush();
+
+		expect(createUploadUrl).not.toHaveBeenCalled();
+		expect(DrivenXhr.sent).toHaveLength(0);
+		expect(announced()).toBe("Upload of report.pdf cancelled.");
+	});
 });

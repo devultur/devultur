@@ -676,14 +676,31 @@ describe("media metadata recorded at upload", () => {
 		{ pageCount: 2.5 },
 		{ width: -1 },
 		{ height: 100_001 },
-	])("refuses the client hint %o before recording anything", async (hint) => {
+	])("drops the client hint %o, logs it and records the upload", async (hint) => {
 		const contract = setup();
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const pdf = await uploadThroughComponent(contract, { filename: "doc.pdf", contentType: "application/pdf" });
 
-		await expect(contract.run("confirmUpload", { key: pdf.key, ...hint })).rejects.toMatchObject({
-			data: { code: "invalid_media_metadata", details: { field: Object.keys(hint)[0] } },
-		});
-		expect(await contract.listMedia()).toEqual([]);
+		const record = await contract.run("confirmUpload", { key: pdf.key, pageCount: 4, ...hint });
+
+		const field = Object.keys(hint)[0] as string;
+		expect(record).toMatchObject({ filename: "doc.pdf" });
+		expect(record).not.toHaveProperty(field);
+		expect(warn).toHaveBeenCalledWith(expect.stringContaining(`${field}=`));
+		expect(await contract.listMedia()).toHaveLength(1);
+		warn.mockRestore();
+	});
+
+	it("keeps the valid hints next to a dropped one", async () => {
+		const contract = setup();
+		vi.spyOn(console, "warn").mockImplementation(() => {});
+		const pdf = await uploadThroughComponent(contract, { filename: "doc.pdf", contentType: "application/pdf" });
+
+		const record = await contract.run("confirmUpload", { key: pdf.key, pageCount: 4, width: 0 });
+
+		expect(record).toMatchObject({ pageCount: 4 });
+		expect(record).not.toHaveProperty("width");
+		vi.restoreAllMocks();
 	});
 
 	it("records a video's duration from the transcode", async () => {

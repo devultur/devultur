@@ -99,6 +99,7 @@ export const devulturErrorLabels: DevulturErrorLabels = {
 	token_rejected: "Access was denied.",
 	reserved_user_id: "This user ID is reserved.",
 	invalid_scopes: "The requested permissions aren't valid.",
+	user_mismatch: "You can only see and change your own progress.",
 	transcode_not_configured: "Video processing isn't set up.",
 	transcode_runner_unavailable: "Video processing is busy right now. Try again later.",
 	transcode_launch_failed: "The video couldn't be processed.",
