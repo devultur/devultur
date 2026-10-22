@@ -30,6 +30,11 @@ export interface PreviewProps {
 	/** Accessible name of the preview (`alt`, `title`, `aria-label`). Default: the filename (text: none). */
 	title?: string;
 	className?: string;
+	/**
+	 * PDF pages rendered with pdf.js; past it, a "first N of M pages" note and `fallback`. Default 500 (a tiny file
+	 * can declare millions of pages).
+	 */
+	maxPages?: number;
 	/** URL of pdf.js's worker for this preview; overrides `PdfPreviewProvider`'s `workerSrc`. */
 	pdfWorkerSrc?: string;
 }

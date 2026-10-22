@@ -186,9 +186,12 @@ scrollable pages:
   density, capped at 5,242,880 canvas pixels on phones and tablets (larger canvases render blank on iOS).
 - pdf.js gets the bytes of the same verified fetch, never a URL, so it fetches nothing itself and never sees a token.
 - No annotation layer is built and `enableScripting: false` is passed, so PDF JavaScript never runs (versions before
-  6.2.108 could run it with scripting on, CVE-2026-16633).
+  6.2.108 could run it with scripting on, CVE-2026-16633). `isEvalSupported: false` is passed too, though pdf.js 6
+  no longer has that `eval` path (CVE-2024-4367).
 - Each page's text is in the page for screen readers; the document is labeled with its title and page count. Text
   isn't selectable.
+- At most `maxPages` pages render (default 500): a small file can declare millions. Past it, a "showing the first N of
+  M pages" note and `fallback` follow the pages.
 - The document and its worker are destroyed, and pending renders cancelled, when `media` changes and on unmount.
 
 `loadPdfjs` imports the **legacy build** (`pdfjs-dist/legacy/build/pdf.mjs`), which runs on Safari and iOS 18+; the

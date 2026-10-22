@@ -51,7 +51,9 @@ export function openPdf(pdfjs: PdfjsModule, bytes: Uint8Array, workerSrc?: strin
 	if (workerSrc) pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
 	// pdf.js 6 only reads `enableScripting` in the annotation layer, which is never built here (CVE-2026-16633 needs
 	// it on). It's passed anyway so a release that reads it at load time keeps PDF JavaScript off.
-	const source = { data: bytes.slice(), enableScripting: false };
+	// `isEvalSupported` (CVE-2024-4367) was removed in 5.7.284 with the PostScript compiler: the 6.4.299 legacy build
+	// and worker never read it and contain no `eval` or `new Function`. Passed anyway: unknown options are ignored.
+	const source = { data: bytes.slice(), enableScripting: false, isEvalSupported: false };
 	return pdfjs.getDocument(source);
 }
 

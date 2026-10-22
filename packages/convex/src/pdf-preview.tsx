@@ -21,6 +21,9 @@ export const VISUALLY_HIDDEN: React.CSSProperties = {
 };
 
 /** The body as fetched: pdf.js and the iframe fallback both start from these bytes, so there's no second fetch. */
+/** A small file can declare millions of pages; one element each would hang the tab. */
+const DEFAULT_MAX_PAGES = 500;
+
 export const keepBytes = (bytes: Uint8Array<ArrayBuffer>) => bytes;
 
 export interface PdfPreviewProps {
@@ -32,11 +35,12 @@ export interface PdfPreviewProps {
 	title?: string;
 	className?: string;
 	pdfWorkerSrc?: string;
+	maxPages?: number;
 }
 
 /** A PDF on canvases with pdf.js when a `PdfPreviewProvider` supplies it, else in the browser's viewer. */
 export function PdfPreview(props: PdfPreviewProps) {
-	const { media, expectedType, maxBytes, fallback, loading, title, className, pdfWorkerSrc } = props;
+	const { media, expectedType, maxBytes, fallback, loading, title, className, pdfWorkerSrc, maxPages } = props;
 	const pdfjsState = usePdfjs(pdfWorkerSrc);
 	const { value: bytes, error } = useMediaResource(media, {
 		isEnabled: true,
@@ -57,6 +61,7 @@ export function PdfPreview(props: PdfPreviewProps) {
 			className={className}
 			fallback={fallback}
 			loading={loading}
+			maxPages={maxPages ?? DEFAULT_MAX_PAGES}
 		/>
 	);
 }
@@ -69,9 +74,11 @@ interface PdfCanvasDocumentProps {
 	className?: string;
 	fallback: React.ReactNode;
 	loading: React.ReactNode;
+	maxPages: number;
 }
 
-function PdfCanvasDocument({ pdfjs, workerSrc, bytes, label, className, fallback, loading }: PdfCanvasDocumentProps) {
+function PdfCanvasDocument(props: PdfCanvasDocumentProps) {
+	const { pdfjs, workerSrc, bytes, label, className, fallback, loading, maxPages } = props;
 	const { document, error } = usePdfDocument({ pdfjs, bytes, workerSrc });
 	const containerRef = React.useRef<HTMLDivElement>(null);
 	// Measured once the container exists; pages wait for it so none renders twice.
@@ -83,7 +90,9 @@ function PdfCanvasDocument({ pdfjs, workerSrc, bytes, label, className, fallback
 
 	if (error) return <>{fallback}</>;
 	if (!document) return <>{loading}</>;
-	const pageNumbers = Array.from({ length: document.numPages }, (_, index) => index + 1);
+	const shownPageCount = Math.min(document.numPages, Math.max(1, maxPages));
+	const isTruncated = shownPageCount < document.numPages;
+	const pageNumbers = Array.from({ length: shownPageCount }, (_, index) => index + 1);
 	const pageCountLabel = document.numPages === 1 ? "1 page" : `${document.numPages} pages`;
 	return (
 		<div ref={containerRef} role="document" aria-label={`${label}, ${pageCountLabel}`} className={className}>
@@ -91,6 +100,11 @@ function PdfCanvasDocument({ pdfjs, workerSrc, bytes, label, className, fallback
 				pageNumbers.map((pageNumber) => (
 					<PdfPageView key={pageNumber} document={document} pageNumber={pageNumber} width={width} />
 				))}
+			{isTruncated && (
+				<p>
+					Showing the first {shownPageCount} of {document.numPages} pages. {fallback}
+				</p>
+			)}
 		</div>
 	);
 }

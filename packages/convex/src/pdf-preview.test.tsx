@@ -83,7 +83,7 @@ describe("<Preview> with pdf.js", () => {
 		expect(container.querySelector("iframe")).toBeNull();
 		expect(URL.createObjectURL).not.toHaveBeenCalled();
 		expect(fake.getDocument).toHaveBeenCalledTimes(1);
-		expect(fake.getDocument.mock.calls[0]![0]).toMatchObject({ enableScripting: false });
+		expect(fake.getDocument.mock.calls[0]![0]).toMatchObject({ enableScripting: false, isEvalSupported: false });
 		expect(await screen.findByText("Text of page 2")).toBeTruthy();
 	});
 
@@ -93,7 +93,7 @@ describe("<Preview> with pdf.js", () => {
 
 		await waitFor(() => expect(fake.getDocument).toHaveBeenCalled());
 		const source = fake.getDocument.mock.calls[0]![0] as Record<string, unknown>;
-		expect(Object.keys(source).sort()).toEqual(["data", "enableScripting"]);
+		expect(Object.keys(source).sort()).toEqual(["data", "enableScripting", "isEvalSupported"]);
 		expect(new TextDecoder().decode(source.data as Uint8Array)).toBe(PDF_BODY);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
@@ -125,6 +125,26 @@ describe("<Preview> with pdf.js", () => {
 
 		expect(fake.destroy).toHaveBeenCalled();
 		for (const task of fake.renderTasks) expect(task.cancel).toHaveBeenCalled();
+	});
+
+	it("caps the rendered pages and offers the fallback past the cap", async () => {
+		const fake = fakePdfjs({ pageCount: 10_000_000 });
+		const { container } = renderWithPdfjs(
+			<Preview media={privateFile("bomb.pdf")} maxPages={3} fallback={<a href="#download">Download</a>} />,
+			async () => fake.pdfjs,
+		);
+
+		expect(await screen.findByText(/Showing the first 3 of 10000000 pages/)).toBeTruthy();
+		expect(container.querySelectorAll("section")).toHaveLength(3);
+		expect(screen.getByText("Download")).toBeTruthy();
+	});
+
+	it("caps at 500 pages by default", async () => {
+		const fake = fakePdfjs({ pageCount: 10_000_000, isRenderPending: true });
+		const { container } = renderWithPdfjs(<Preview media={privateFile("bomb.pdf")} />, async () => fake.pdfjs);
+
+		expect(await screen.findByText(/Showing the first 500 of 10000000 pages/)).toBeTruthy();
+		expect(container.querySelectorAll("section")).toHaveLength(500);
 	});
 
 	it("sets the worker from pdfWorkerSrc before opening the document", async () => {
