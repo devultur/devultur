@@ -34,10 +34,12 @@ const failureReasonValidator = v.union(
 // --- Media Actions (call CF Worker) ---
 
 export const issueViewerToken = workerAction({
-	args: { sessionSecret: v.optional(v.string()) },
+	// `userId`: the token's subject. Your server sets it (a guard's `userId`, see `defineDevulturFunctions`), never a
+	// browser: the exposed `issueViewerToken` only takes `sessionSecret`. Omitted → the shared `viewer` subject.
+	args: { sessionSecret: v.optional(v.string()), userId: v.optional(v.string()) },
 	handler: async (_ctx, args) => {
 		const media = getMediaClient();
-		const { token, expiresIn } = await media.issueToken("viewer", {
+		const { token, expiresIn } = await media.issueToken(args.userId ?? "viewer", {
 			expiresIn: DEFAULT_TOKEN_EXPIRY_SECONDS,
 			sessionSecret: args.sessionSecret,
 		});

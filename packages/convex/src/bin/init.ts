@@ -84,9 +84,13 @@ function createDevulturModule() {
 		return;
 	}
 
-	const content = `import { CaptionLocale, Devultur, TranscodePreset } from "@devultur/convex";
+	const content = `import { CaptionLocale, Devultur, defineDevulturFunctions, TranscodePreset } from "@devultur/convex";
+import { ConvexError } from "convex/values";
 import { components } from "./_generated/api";
 
+const devultur = new Devultur(components.devultur);
+
+// Every function below runs this guard first. Adjust it to your app's auth and rules (narrow on \`operation.name\`).
 export const {
 	issueViewerToken,
 	createUploadUrl,
@@ -99,10 +103,17 @@ export const {
 	loadProgress,
 	markComplete,
 	resetProgress,
-} = Devultur.exposeApi(components.devultur, {
-	video: {
-		transcodePreset: TranscodePreset.HLS_720P,
-		captionLocales: [CaptionLocale.EN],
+} = defineDevulturFunctions(devultur, {
+	guard: async (ctx, operation) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new ConvexError(\`Sign in to call \${operation.name}\`);
+		return { userId: identity.subject };
+	},
+	config: {
+		video: {
+			transcodePreset: TranscodePreset.HLS_720P,
+			captionLocales: [CaptionLocale.EN],
+		},
 	},
 });
 `;

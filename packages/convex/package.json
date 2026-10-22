@@ -45,6 +45,10 @@
 		"./pdfjs": {
 			"import": "./dist/pdfjs.js",
 			"types": "./dist/pdfjs.d.ts"
+		},
+		"./locales/es": {
+			"import": "./dist/locales/es.js",
+			"types": "./dist/locales/es.d.ts"
 		}
 	},
 	"bin": {
@@ -55,7 +59,7 @@
 		"dist"
 	],
 	"scripts": {
-		"build": "tsup src/index.ts src/validators.ts src/react.tsx src/pdfjs.ts src/bin/init.ts --format esm --dts && tsc -p src/component/tsconfig.json",
+		"build": "tsup src/index.ts src/validators.ts src/react.tsx src/pdfjs.ts src/locales/es.ts src/bin/init.ts --format esm --dts && tsc -p src/component/tsconfig.json",
 		"codegen": "node scripts/codegen.ts",
 		"dev": "tsup src/index.ts src/react.tsx --format esm --dts --watch",
 		"typecheck": "tsc --noEmit"

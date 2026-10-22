@@ -1,5 +1,4 @@
 import type { HoldPage, LockView, ObjectLock, SetLockOptions } from "@devultur/core";
-import { extractId } from "@devultur/core";
 import type {
 	GenericActionCtx,
 	GenericDataModel,
@@ -8,9 +7,8 @@ import type {
 	PaginationOptions,
 	PaginationResult,
 } from "convex/server";
-import { actionGeneric, mutationGeneric, paginationOptsValidator, queryGeneric } from "convex/server";
-import { v } from "convex/values";
 import type { ComponentApi } from "./component/_generated/component.js";
+import { exposedFunctions, registerFunctions } from "./exposed-functions";
 import type { DevulturComponentConfig, MediaRecord } from "./types";
 
 type DevulturComponent = ComponentApi;
@@ -23,7 +21,8 @@ type MediaPageArgs = { type?: MediaType; paginationOpts: PaginationOptions };
 type ConfirmUploadArgs = { key: string; filename?: string; width?: number; height?: number };
 
 export class Devultur {
-	private component: DevulturComponent;
+	/** The mounted component (`components.devultur`) this client calls. */
+	readonly component: DevulturComponent;
 
 	constructor(component: DevulturComponent) {
 		this.component = component;
@@ -88,124 +87,13 @@ export class Devultur {
 		return ctx.runAction(this.component.lock.releaseHold, { keys });
 	}
 
+	/**
+	 * The component's functions for your app to export. They have no auth of their own: anyone who can call your
+	 * Convex deployment can call them. `defineDevulturFunctions` returns the same functions behind your guard.
+	 */
 	static exposeApi(component: DevulturComponent, config?: DevulturComponentConfig) {
-		// No preset → the worker applies its config's default preset, or the HLS ladder if there is none.
-		const preset = config?.video?.transcodePreset;
-		const locales = config?.video?.captionLocales ?? [];
-
-		// Optional per-resource visibility: override on upload / folder to delete on video.
-		// Omitted → the component resolves the config's default (secure-by-default).
-		const visibilityArg = v.optional(v.union(v.literal("public"), v.literal("private")));
-		// The lock comes from the config only: a browser calling this never picks one.
-		const uploadLock = config?.upload?.lock;
-
-		return {
-			issueViewerToken: actionGeneric({
-				args: { sessionSecret: v.optional(v.string()) },
-				handler: async (ctx: ActionCtx, args: { sessionSecret?: string }) => {
-					return ctx.runAction(component.public.issueViewerToken, args);
-				},
-			}),
-
-			createUploadUrl: actionGeneric({
-				args: { filename: v.string(), contentType: v.string(), visibility: visibilityArg },
-				handler: async (
-					ctx: ActionCtx,
-					args: { filename: string; contentType: string; visibility?: "public" | "private" },
-				) => {
-					return ctx.runAction(component.public.createUploadUrl, {
-						...args,
-						...(uploadLock ? { lock: uploadLock } : {}),
-					});
-				},
-			}),
-
-			// Records an upload once its bytes are stored (the Worker HEADs the key): a browser can't list anything
-			// that isn't in your bucket. `useDevultur().upload()` and `useMediaUpload` call it after the PUT.
-			confirmUpload: actionGeneric({
-				args: {
-					key: v.string(),
-					filename: v.optional(v.string()),
-					width: v.optional(v.number()),
-					height: v.optional(v.number()),
-				},
-				handler: async (ctx: ActionCtx, args: ConfirmUploadArgs) => {
-					return ctx.runAction(component.uploads.confirmUpload, args);
-				},
-			}),
-
-			deleteMedia: actionGeneric({
-				args: { key: v.string() },
-				handler: async (ctx: ActionCtx, args: { key: string }) => {
-					return ctx.runAction(component.public.deleteMediaAction, args);
-				},
-			}),
-
-			deleteVideo: actionGeneric({
-				args: { videoId: v.string(), visibility: visibilityArg },
-				handler: async (ctx: ActionCtx, args: { videoId: string; visibility?: "public" | "private" }) => {
-					return ctx.runAction(component.public.deleteVideo, args);
-				},
-			}),
-
-			processVideo: actionGeneric({
-				args: { key: v.string() },
-				handler: async (ctx: ActionCtx, args: { key: string }) => {
-					return ctx.runAction(component.public.processVideo, {
-						key: args.key,
-						preset,
-						locales,
-					});
-				},
-			}),
-
-			getMedia: queryGeneric({
-				args: { key: v.string() },
-				handler: async (ctx: QueryCtx, args: { key: string }) => {
-					const mediaKey = args.key.includes("/") ? extractId(args.key) : args.key;
-					return ctx.runQuery(component.public.getMediaByKey, { key: mediaKey });
-				},
-			}),
-
-			// The media library, a page at a time (for `usePaginatedQuery`). It lists every record, of every user: export
-			// it only when every caller may see the whole library, otherwise wrap `devultur.listMediaPage` with your checks.
-			listMediaPage: queryGeneric({
-				args: {
-					type: v.optional(v.union(v.literal("video"), v.literal("image"), v.literal("file"))),
-					paginationOpts: paginationOptsValidator,
-				},
-				handler: async (ctx: QueryCtx, args: MediaPageArgs) => {
-					return ctx.runQuery(component.public.listMediaPage, args);
-				},
-			}),
-
-			saveProgress: mutationGeneric({
-				args: { userId: v.string(), videoId: v.string(), position: v.number() },
-				handler: async (ctx: MutationCtx, args: { userId: string; videoId: string; position: number }) => {
-					return ctx.runMutation(component.public.saveProgress, args);
-				},
-			}),
-
-			loadProgress: queryGeneric({
-				args: { userId: v.string(), videoId: v.string() },
-				handler: async (ctx: QueryCtx, args: { userId: string; videoId: string }) => {
-					return ctx.runQuery(component.public.loadProgress, args);
-				},
-			}),
-
-			markComplete: mutationGeneric({
-				args: { userId: v.string(), videoId: v.string() },
-				handler: async (ctx: MutationCtx, args: { userId: string; videoId: string }) => {
-					return ctx.runMutation(component.public.markComplete, args);
-				},
-			}),
-
-			resetProgress: mutationGeneric({
-				args: { userId: v.string(), videoId: v.string() },
-				handler: async (ctx: MutationCtx, args: { userId: string; videoId: string }) => {
-					return ctx.runMutation(component.public.resetProgress, args);
-				},
-			}),
-		};
+		return registerFunctions(exposedFunctions(component, config), "public", (_name, fn) => {
+			return (ctx, args) => fn.handler(ctx, args, {});
+		});
 	}
 }
