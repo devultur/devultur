@@ -391,7 +391,8 @@ Add up the counts of each call. With `hasHold`, something stays until it's relea
   else can write to the bucket. This isn't a certified WORM store.
 - **R2 bucket locks** can be an optional second layer: an R2 bucket lock rule refuses deletes at the storage level.
   Anyone who can edit the bucket's configuration can remove the rule, though, so it raises the bar rather than
-  closing it.
+  closing it. [Self-host](self-host.md#r2-bucket-lock-defense-in-depth) has the safe prefixes and what
+  changes once a rule is on.
 - **The runner credential.** While a transcode job is in progress, a request with the runner's credential may rewrite
   that job's outputs on a locked video. With `workerSecretAuth()`, that credential is `WORKER_AUTH_SECRET`, which your
   backend holds too. To limit the exemption to the runner, give the runner a narrower credential from your own auth
