@@ -107,6 +107,90 @@ For background images, pass `render` instead of forcing an `<img>`:
 <Image media={hero.image} render={<div className="hero aspect-[4/3]" />} />
 ```
 
+### Responsive images
+
+Pass `widths` and `sizes` and `<Image>` builds a `srcset` from the Worker's on-demand transforms (`?w=`, plus
+`format`, `fit` and `quality` when you set them), one variant per width. `src` is the largest variant, and
+`loading="lazy"` and `decoding="async"` are the defaults (pass `loading="eager"` for an image above the fold):
+
+```tsx
+<Image
+  media={post.cover}
+  widths={[480, 960, 1440]}
+  sizes="(min-width: 768px) 50vw, 100vw"
+  format="webp"
+/>
+// <img src="…/cover.png?w=1440&format=webp"
+//      srcset="…/cover.png?w=480&format=webp 480w, …?w=960&format=webp 960w, …?w=1440&format=webp 1440w"
+//      sizes="(min-width: 768px) 50vw, 100vw" width="2400" height="1600" loading="lazy" decoding="async">
+```
+
+The `width` and `height` attributes come from the media's metadata (`media.width` / `media.height`), so the browser
+reserves the image's box before it loads. With both `width` and `height` set, every variant keeps their ratio
+(`?w=800&h=600` for `width={400} height={300}`).
+
+Responsive variants apply to **public** images. A private image is fetched with the session header into a `blob:`
+URL, and a `blob:` URL can't be a `srcset` candidate, so `<Image>` fetches one variant: the largest of `widths` up to
+twice the width `sizes` gives the image in the current viewport (`px` and `vw` entries; `calc()` isn't read), or
+`width` when `sizes` can't tell, or else the largest. Without `widths`, `<Image>` renders a single `src` as before.
+
+### Document links and attachment cards
+
+`<DocumentLink>` is a link to a file, named after it (its `title`, else its filename). A public file links straight to
+its delivery URL, so it opens in the browser (add `download` to download it instead). A private file always
+downloads: a navigation can't send the session header, so the click fetches the file with it, like
+`<DownloadLink>`:
+
+```tsx
+import { AttachmentCard, DocumentLink } from "@devultur/convex/react";
+
+<DocumentLink media={invoice.file} target="_blank" rel="noopener" />
+<DocumentLink media={invoice.file} download>Download the invoice</DocumentLink>
+```
+
+`<AttachmentCard>` shows an attachment as an `<article>` named by its heading: an icon by type (image, video, PDF,
+audio, text, other file), the name, the type and size, the page count of a PDF or the duration of audio and video,
+a download link and, with `onOpen`, an "Open preview" button. `onOpen` receives the media, so the app decides where
+the preview goes, for example `<Preview>` in a dialog:
+
+```tsx
+const [previewed, setPreviewed] = useState<DevulturMedia | null>(null);
+
+{attachments.map((file) => (
+  <AttachmentCard key={file.id} media={file} onOpen={setPreviewed} className="attachment" />
+))}
+<dialog open={previewed !== null} onClose={() => setPreviewed(null)}>
+  <Preview media={previewed} />
+</dialog>
+```
+
+The card is unstyled; target its parts with `data-part` (`icon`, `name`, `details`, `actions`, `download`, `open`)
+and its type with `data-kind`. Pass `preview` to show something else in place of the icon (a `<PdfThumbnail>` or an
+`<Image>`), and `headingLevel` (default `3`) to fit the page's outline. The type comes from `media.kind`, and for
+files from `contentType` or the filename's extension.
+
+Every string is in `labels`, English by default (`defaultAttachmentLabels`), including the formatters: `size(bytes,
+locale)` (decimal units through `Intl.NumberFormat`: `2.4 MB`), `pages(count)` and `duration(seconds)` (`1:05`).
+The size is formatted for `locale` (the `locale` prop, else `labels.locale`). Spanish labels ship in
+`@devultur/convex/locales/es`, or write your own:
+
+```tsx
+import { attachmentLabels } from "@devultur/convex/locales/es";
+import { formatDuration, formatFileSize, type AttachmentLabels } from "@devultur/convex/react";
+
+<AttachmentCard media={file} labels={attachmentLabels} /> // "PDF · 2,4 MB · 12 páginas", "Descargar"
+
+const spanishLabels: Partial<AttachmentLabels> = {
+  locale: "es",
+  size: formatFileSize,
+  pages: (count) => (count === 1 ? "1 página" : `${count} páginas`),
+  duration: formatDuration,
+  download: "Descargar",
+  open: "Abrir vista previa",
+  untitled: "Archivo sin título",
+};
+```
+
 ### Previewing private files
 
 `<Preview>` shows a file inline, picking the element from its content type: an image in an `<img>`, a PDF on
@@ -317,7 +401,7 @@ pdf.js needs no `'unsafe-eval'`; `'wasm-unsafe-eval'` lets it decode JPEG 2000 a
 
 ### Imperative escape hatch
 
-For handlers or a hand-built `srcset`, use the non-hook builder from context:
+For handlers or a hand-built URL, use the non-hook builder from context:
 
 ```tsx
 const { url } = useDevultur();

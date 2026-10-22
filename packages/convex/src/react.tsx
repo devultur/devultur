@@ -33,8 +33,22 @@ import { deriveUploadState, type UploadPhase } from "./media-upload-derive";
 import { useViewerToken, type ViewerTokenArgs } from "./viewer-token";
 
 export type { MediaUploadError, MediaUploadState, UploadProgress } from "@devultur/react";
+export {
+	type AttachmentKind,
+	type AttachmentLabels,
+	defaultAttachmentLabels,
+	formatDuration,
+	formatFileSize,
+} from "./attachment-labels";
 export type { CropUploadLabels, CropUploadProps, CropUploadRenderProps } from "./crop-upload";
 export { CropUpload } from "./crop-upload";
+export {
+	AttachmentCard,
+	type AttachmentCardProps,
+	DocumentLink,
+	type DocumentLinkProps,
+} from "./document-renderers";
+export { Image, type ImageProps } from "./image";
 export { MediaFetchError, type MediaFetchErrorCode } from "./media-fetch";
 export { type MediaObjectUrl, type UseMediaObjectUrlOptions, useMediaObjectUrl } from "./media-object-url";
 export { type PdfPreviewConfig, PdfPreviewProvider } from "./pdf-context";
@@ -442,135 +456,7 @@ export function useVideoProps(
 	}, [media, baseUrl, token, locales, sessionSecret]);
 }
 
-// --- <Image> / <DownloadLink> (declarative render, token-transparent, usable in .map) ---
-
-interface ImageProps extends Omit<React.ImgHTMLAttributes<HTMLImageElement>, "src" | "width" | "height"> {
-	/** Typed reference. `null`/`undefined` → renders `fallback` (or `externalFallback`). Its `alt` is the default `alt`. */
-	media: DevulturMedia | null | undefined;
-	width?: number;
-	height?: number;
-	fit?: MediaUrlOptions["fit"];
-	format?: MediaUrlOptions["format"];
-	quality?: number;
-	/** What to show when there's no media (or it's loading). */
-	fallback?: React.ReactNode;
-	/** Explicit external URL (e.g. Unsplash) when `media` is null or the load fails. */
-	externalFallback?: string;
-	/** background-image mode: composes the URL as this element's `background-image` (doesn't force `<img>`). */
-	render?: React.ReactElement<{ style?: React.CSSProperties }>;
-}
-
-/**
- * Renders any media declaratively: token-transparent, with typed transforms, and works inside a
- * `.map()` (no wrappers or hooks rules on the consumer's side).
- *
- * @example
- * <Image media={course.thumbnail} alt={course.title} width={512} format="webp" fallback={<Placeholder />} />
- */
-export function Image({
-	media,
-	width,
-	height,
-	fit,
-	format,
-	quality,
-	fallback = null,
-	externalFallback,
-	render,
-	alt,
-	...imgProps
-}: ImageProps) {
-	const { url, token, baseUrl, reissueToken, sessionSecret } = useDevultur();
-	const [failed, setFailed] = React.useState(false);
-	const [blobSrc, setBlobSrc] = React.useState<string | null>(null);
-	// Read when the fetch starts: a re-issued or renewed token must not re-run the fetch (each run downloads the file again).
-	const sessionRef = React.useRef({ token, reissueToken });
-	React.useEffect(() => {
-		sessionRef.current = { token, reissueToken };
-	});
-
-	const isPrivate = media?.visibility === "private";
-	const hasToken = token !== null;
-
-	// New media → resets the error state (allows reloading and retrying from scratch).
-	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional, reset when media changes.
-	React.useEffect(() => {
-		setFailed(false);
-		setBlobSrc(null);
-	}, [media]);
-
-	// Private media: `<img src>` is native → can't send headers, so delivery with session binding
-	// would give a 401. Like video (hls.js) and captions, we recover it via `fetch` with `${SESSION_HEADER}`,
-	// turn it into an object URL, and THAT goes in the src. It waits for the first viewer token; on a 401
-	// `session_mismatch` `fetchMedia` re-issues once and retries with the fresh token. Public stays native.
-	React.useEffect(() => {
-		if (!isPrivate || failed || !media || !hasToken) return;
-		let cancelled = false;
-		let objectUrl: string | null = null;
-		if (!baseUrl) throw new Error("Devultur `url()` requires `baseUrl` on <DevulturProvider>");
-		const transforms = { width, height, fit, format, quality };
-		(async () => {
-			try {
-				const response = await fetchMedia({
-					buildUrl: (viewerToken) => mediaUrl(baseUrl, media, { ...transforms, token: viewerToken }),
-					token: sessionRef.current.token,
-					sessionSecret,
-					reissueToken: sessionRef.current.reissueToken,
-				});
-				if (response.ok) {
-					objectUrl = URL.createObjectURL(await response.blob());
-					if (cancelled) {
-						URL.revokeObjectURL(objectUrl);
-						return;
-					}
-					setBlobSrc(objectUrl);
-					return;
-				}
-			} catch {
-				// network down / CORS → definitive failure.
-			}
-			if (!cancelled) setFailed(true);
-		})();
-		return () => {
-			cancelled = true;
-			if (objectUrl) URL.revokeObjectURL(objectUrl);
-		};
-	}, [isPrivate, failed, media, hasToken, baseUrl, sessionSecret, width, height, fit, format, quality]);
-
-	// `<img>` doesn't expose the failure status. Public → direct fallback. Private goes through the blob-fetch
-	// above (which handles its own recovery); if the object URL still fails, it's definitive → fallback.
-	const handleError = React.useCallback(() => setFailed(true), []);
-
-	// effective src: failure or no media → `externalFallback`; private → blob object URL (null while loading
-	// → `fallback` placeholder); public → direct URL.
-	let src: string | null;
-	if (failed || !media) {
-		src = externalFallback ?? null;
-	} else if (isPrivate) {
-		src = blobSrc;
-	} else {
-		src = url(media, { width, height, fit, format, quality });
-	}
-
-	if (!src) return <>{fallback}</>;
-
-	if (render) {
-		return React.cloneElement(render, {
-			style: { ...render.props.style, backgroundImage: `url("${src}")` },
-		});
-	}
-
-	return (
-		<img
-			src={src}
-			alt={alt ?? media?.alt}
-			width={width ?? media?.width}
-			height={height ?? media?.height}
-			onError={handleError}
-			{...imgProps}
-		/>
-	);
-}
+// --- <DownloadLink> (declarative download, token-transparent, usable in .map) ---
 
 interface DownloadLinkProps extends Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, "href" | "download" | "media"> {
 	media: DevulturMedia | null | undefined;

@@ -1,4 +1,6 @@
-// Spanish messages for Devultur errors: `describeDevulturError(error, devulturErrorLabels)`.
+// Spanish messages for Devultur errors (`describeDevulturError(error, devulturErrorLabels)`) and attachment labels
+// (`<AttachmentCard labels={attachmentLabels} />`).
+import { type AttachmentKind, type AttachmentLabels, formatDuration, formatFileSize } from "../attachment-labels";
 import type { DevulturErrorLabels } from "../error-labels";
 import { formatBytes, formatDate } from "../error-labels";
 
@@ -90,4 +92,24 @@ export const devulturErrorLabels: DevulturErrorLabels = {
 	too_large: "El archivo es demasiado grande para la vista previa.",
 	unsupported_type: "Este tipo de archivo no tiene vista previa.",
 	type_mismatch: "El contenido del archivo no coincide con su tipo.",
+};
+
+const KIND_TEXT: Record<AttachmentKind, string> = {
+	image: "Imagen",
+	video: "Video",
+	pdf: "PDF",
+	audio: "Audio",
+	text: "Texto",
+	file: "Archivo",
+};
+
+export const attachmentLabels: AttachmentLabels = {
+	locale: LOCALE,
+	size: formatFileSize,
+	pages: (pageCount) => (pageCount === 1 ? "1 página" : `${pageCount.toLocaleString(LOCALE)} páginas`),
+	duration: formatDuration,
+	kind: (kind) => KIND_TEXT[kind],
+	download: "Descargar",
+	open: "Abrir vista previa",
+	untitled: "Archivo sin título",
 };
