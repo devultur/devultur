@@ -91,6 +91,26 @@ whose key can't be loaded answers `500`: the Worker never serves ciphertext.
 Per-resource overrides travel in the object metadata (set on upload, read on delivery) and resolve
 against the Worker default — exactly like `visibility`.
 
+## Serving uploaded files safely
+
+Delivery serves a file with the `Content-Type` it was uploaded with, so an uploaded HTML or SVG file opened from its
+URL would render as a page on the media origin and run its scripts. The Worker guards every media and download-link
+response:
+
+- `X-Content-Type-Options: nosniff` on every response: the browser never upgrades a declared type into one that
+  executes.
+- For any type outside the safe-inline list, also `Content-Security-Policy: sandbox` (no script, an opaque origin)
+  and `Content-Disposition: attachment` (opening it downloads it; a stored filename is kept).
+
+Safe inline: `image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/avif`, `video/*`, `audio/*`,
+`application/pdf`, `text/plain`, `text/csv`, `application/json`, `text/vtt` and HLS playlists. Everything else is
+sandboxed, including `text/html`, `image/svg+xml`, `application/xhtml+xml`, XML, `application/javascript` and unknown
+types. HLS playlists and segments, captions, images, video, audio, PDFs and range requests are served as before, and
+edge copies keep these headers. An `<img>` still shows an SVG, since images ignore both headers.
+
+On the client, `<Preview>` and `useMediaObjectUrl` verify types themselves; see [Previewing private
+files](media-references.md#previewing-private-files).
+
 ## Retention and holds
 
 To keep a file from being deleted or overwritten (WORM), lock it with a compliance or governance retention, or a

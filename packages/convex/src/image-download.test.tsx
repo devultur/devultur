@@ -66,7 +66,25 @@ describe("<Image> with private media", () => {
 
 		await screen.findByRole("img", { name: "ID" });
 		await waitFor(() => expect(issueViewerToken).toHaveBeenCalledTimes(2));
-		expect(fetchMock.mock.calls.some(([url]) => url.includes("token=fresh-token"))).toBe(true);
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		// Exactly the 401 and one 200: the fresh token must not re-run the fetch (no second download).
+		expect(fetchMock.mock.calls.map(([url]) => new URL(url).searchParams.get("token"))).toEqual([
+			"viewer-token",
+			"fresh-token",
+		]);
+	});
+
+	it("waits for the first viewer token instead of fetching without one", async () => {
+		let issueFirstToken: (value: unknown) => void = () => {};
+		actions.set("issueViewerToken", () => new Promise((resolve) => (issueFirstToken = resolve)));
+		renderWithDevultur(<Image media={privateImage} alt="ID" />);
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(fetchMock).not.toHaveBeenCalled();
+
+		issueFirstToken({ token: "viewer-token", expiresIn: 3600 });
+
+		await screen.findByRole("img", { name: "ID" });
+		expect(fetchMock).toHaveBeenCalledOnce();
 	});
 
 	it("renders the fallback when the retry is refused too, without a second re-issue", async () => {

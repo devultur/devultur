@@ -67,7 +67,48 @@ describe("<Preview>", () => {
 		const frame = container.querySelector("iframe")!;
 		expect(frame.getAttribute("src")).toBe("blob:preview");
 		expect(frame.getAttribute("title")).toBe("Tax form");
+		expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer");
 		expect((vi.mocked(URL.createObjectURL).mock.calls[0]![0] as Blob).type).toBe("application/pdf");
+	});
+
+	it("verifies a public PDF into a forced-type blob instead of framing its delivery URL", async () => {
+		respondWith("%PDF-1.7", "application/pdf");
+		const publicPdf: DevulturMedia = { ...privateFile("brochure.pdf"), visibility: "public" };
+		const { container } = renderPreview(<Preview media={publicPdf} />);
+
+		await waitFor(() => expect(container.querySelector("iframe")).not.toBeNull());
+		expect(container.querySelector("iframe")!.getAttribute("src")).toBe("blob:preview");
+		expect((vi.mocked(URL.createObjectURL).mock.calls[0]![0] as Blob).type).toBe("application/pdf");
+	});
+
+	it("never frames a public PDF served as text/html", async () => {
+		respondWith("<script>alert(1)</script>", "text/html");
+		const publicPdf: DevulturMedia = { ...privateFile("brochure.pdf"), visibility: "public" };
+		const { container } = renderPreview(<Preview media={publicPdf} fallback={<p>Download</p>} />);
+
+		expect(await screen.findByText("Download")).toBeTruthy();
+		expect(container.querySelector("iframe")).toBeNull();
+	});
+
+	it("keeps a public image on its delivery URL, unfetched", async () => {
+		const publicImage: DevulturMedia = { ...privateFile("cover.webp"), visibility: "public" };
+		renderPreview(<Preview media={publicImage} />);
+
+		const image = await screen.findByRole("img", { name: "cover.webp" });
+		expect(image.getAttribute("src")).toBe(`${BASE_URL}/v1/media/public/file/f1/cover.webp`);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("caps binary previews at 50 MiB by default", async () => {
+		fetchMock.mockResolvedValue(
+			new Response("%PDF", {
+				headers: { "Content-Type": "application/pdf", "Content-Length": String(51 * 1024 * 1024) },
+			}),
+		);
+		renderPreview(<Preview media={privateFile("huge.pdf")} fallback={<p>Too big</p>} />);
+
+		expect(await screen.findByText("Too big")).toBeTruthy();
+		expect(URL.createObjectURL).not.toHaveBeenCalled();
 	});
 
 	it("renders audio in <audio controls>", async () => {

@@ -174,6 +174,45 @@ describe("useMediaObjectUrl", () => {
 		expect((vi.mocked(URL.createObjectURL).mock.calls[0]![0] as Blob).type).toBe("application/octet-stream");
 	});
 
+	it("refetches when the base URL or the visibility changes", async () => {
+		let baseUrl = BASE_URL;
+		const switchingWrapper = ({ children }: { children: React.ReactNode }) => (
+			<DevulturProvider api={api as never} baseUrl={baseUrl}>
+				{children}
+			</DevulturProvider>
+		);
+		const { result, rerender } = renderHook(
+			({ media }) => useMediaObjectUrl(media, { contentType: "application/pdf" }),
+			{ wrapper: switchingWrapper, initialProps: { media: privatePdf } },
+		);
+		await waitFor(() => expect(result.current.objectUrl).toBe(`blob:${BASE_URL}/1`));
+
+		baseUrl = "https://other-media.example";
+		rerender({ media: privatePdf });
+		await waitFor(() => expect(result.current.objectUrl).toBe(`blob:${BASE_URL}/2`));
+		expect(fetchMock.mock.calls[1]![0]).toContain("https://other-media.example/");
+		expect(URL.revokeObjectURL).toHaveBeenCalledWith(`blob:${BASE_URL}/1`);
+
+		rerender({ media: { ...privatePdf, visibility: "public" } });
+		await waitFor(() => expect(result.current.objectUrl).toBe(`blob:${BASE_URL}/3`));
+		expect(fetchMock.mock.calls[2]![0]).toContain("/public/file/doc1/");
+	});
+
+	it("fetches and verifies public media when a contentType is expected", async () => {
+		const publicPdf: DevulturMedia = { ...privatePdf, visibility: "public" };
+		fetchMock.mockResolvedValue(new Response("<script>", { headers: { "Content-Type": "text/html" } }));
+
+		const { result } = renderHook(() => useMediaObjectUrl(publicPdf, { contentType: "application/pdf" }), {
+			wrapper,
+		});
+
+		await waitFor(() => expect(result.current.error).toMatchObject({ code: "type_mismatch" }));
+		const [url, init] = fetchMock.mock.calls[0]!;
+		expect(url).toBe(`${BASE_URL}/v1/media/public/file/doc1/id.pdf`);
+		expect(init?.headers).toBeUndefined();
+		expect(result.current.objectUrl).toBeNull();
+	});
+
 	it("returns the delivery URL for public media without fetching", () => {
 		const publicPdf: DevulturMedia = { ...privatePdf, visibility: "public" };
 

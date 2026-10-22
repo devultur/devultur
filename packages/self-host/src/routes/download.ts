@@ -12,6 +12,7 @@ import { cappedExpiry, decideCredential, gateLinkRedemption, getPluginHooks } fr
 import { getRequestState } from "../request-state";
 import { addRouteResult, type DownloadLinkInfo } from "../route-result";
 import type { WorkerApp } from "../types";
+import { contentSafety } from "./content-safety";
 import { expiredResponse, isObjectExpired, streamObject } from "./object-response";
 
 const DEFAULT_LINK_TTL_SECONDS = 15 * 60;
@@ -130,6 +131,8 @@ async function gateRedemption(context: WorkerContext, stub: DurableObjectStub): 
 }
 
 const download = new Hono<WorkerApp>();
+
+download.use("*", contentSafety);
 
 download.get("/:linkId", async (context) => {
 	// Hono enruta HEAD al GET: un HEAD (previsualizador de links) no debe gastar el uso.

@@ -41,7 +41,11 @@ export function useMediaResource<Value>(
 	const isPrivate = media?.visibility === "private";
 	// Private delivery waits for the first viewer token; later renewals don't refetch (a PDF being read stays put).
 	const isReady = !isPrivate || devultur.token !== null;
-	const requestKey = media && isEnabled ? `${mediaPath(media)}|${contentType ?? ""}|${maxBytes ?? ""}` : null;
+	// Everything that changes what is fetched or how it's trusted: a new value revokes the old one and refetches.
+	const requestKey =
+		media && isEnabled
+			? [devultur.baseUrl, media.visibility, mediaPath(media), contentType ?? "", maxBytes ?? ""].join("|")
+			: null;
 
 	const [settled, setSettled] = React.useState<Settled<Value> | null>(null);
 	// The latest inputs, read when the fetch starts, so a new token or callback identity doesn't restart it.

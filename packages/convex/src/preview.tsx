@@ -6,17 +6,19 @@ import { VideoPlayer } from "@devultur/react";
 import { useMediaObjectUrl } from "./media-object-url";
 import { useMediaResource } from "./media-resource";
 import { expectedContentType, type PreviewKind, previewKindOf } from "./preview-type";
-import { DownloadLink, useVideoProps } from "./react";
+import { DownloadLink, useDevultur, useVideoProps } from "./react";
 
 /** Default cap for text previews: a `<pre>` with megabytes of text isn't a preview. */
 const DEFAULT_MAX_TEXT_BYTES = 1024 * 1024;
+/** Default cap for images, PDFs and audio held in memory as a blob. */
+const DEFAULT_MAX_BYTES = 50 * 1024 * 1024;
 
 export interface PreviewProps {
 	/** Typed reference. `null`/`undefined` → renders nothing. */
 	media: DevulturMedia | null | undefined;
 	/** The type you know the media has (e.g. stored with it). Default: inferred from `media.filename`'s extension. */
 	contentType?: string;
-	/** Size cap for images, PDFs and audio; larger files render `fallback`. Default: no cap. */
+	/** Size cap for images, PDFs and audio; larger files render `fallback`. Default 50 MiB. */
 	maxBytes?: number;
 	/** Size cap for text previews. Default 1 MiB. */
 	maxTextBytes?: number;
@@ -69,15 +71,20 @@ function BinaryPreview({
 	media,
 	kind,
 	expectedType,
-	maxBytes,
+	maxBytes = DEFAULT_MAX_BYTES,
 	fallback,
 	loading = null,
 	title,
 	className,
 }: ViewProps & { kind: Exclude<PreviewKind, "text"> }) {
-	// `contentType` makes the hook refuse a response whose type disagrees and create the blob with `expectedType`.
-	const { objectUrl, error } = useMediaObjectUrl(media, { contentType: expectedType, maxBytes });
-	if (error) return <>{fallback}</>;
+	const { url } = useDevultur();
+	// An `<img>` never runs script, so a public image keeps its cacheable delivery URL. Everything else, public too, is
+	// fetched: `contentType` makes the hook refuse a response whose type disagrees and create the blob with
+	// `expectedType`, so nothing is framed before its type is verified.
+	const isPublicImage = kind === "image" && media.visibility === "public";
+	const verified = useMediaObjectUrl(media, { enabled: !isPublicImage, contentType: expectedType, maxBytes });
+	const objectUrl = isPublicImage ? url(media) : verified.objectUrl;
+	if (verified.error) return <>{fallback}</>;
 	if (!objectUrl) return <>{loading}</>;
 	const label = title ?? media.filename ?? "Preview";
 
@@ -94,7 +101,8 @@ function BinaryPreview({
 	// No `sandbox`: Chrome refuses to load its PDF viewer in a sandboxed frame and Firefox's viewer needs scripts, so a
 	// sandbox breaks every PDF. The protection is the type: a blob typed `application/pdf` opens in the browser's PDF
 	// viewer, never as HTML, so a non-PDF body fails to parse instead of running script in the app's origin.
-	return <iframe src={objectUrl} title={label} className={className} />;
+	// `no-referrer`: the viewer never learns the app page that framed the document.
+	return <iframe src={objectUrl} title={label} referrerPolicy="no-referrer" className={className} />;
 }
 
 const decodeText = (bytes: Uint8Array<ArrayBuffer>) => new TextDecoder().decode(bytes);

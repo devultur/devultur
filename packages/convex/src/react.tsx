@@ -518,24 +518,28 @@ export function Image({
 	const { url, token, baseUrl, reissueToken, sessionSecret } = useDevultur();
 	const [failed, setFailed] = React.useState(false);
 	const [blobSrc, setBlobSrc] = React.useState<string | null>(null);
-	const retriedRef = React.useRef(false);
+	// Read when the fetch starts: a re-issued or renewed token must not re-run the fetch (each run downloads the file again).
+	const sessionRef = React.useRef({ token, reissueToken });
+	React.useEffect(() => {
+		sessionRef.current = { token, reissueToken };
+	});
 
 	const isPrivate = media?.visibility === "private";
+	const hasToken = token !== null;
 
-	// New media → resets the error/retry state (allows reloading and retrying from scratch).
+	// New media → resets the error state (allows reloading and retrying from scratch).
 	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional, reset when media changes.
 	React.useEffect(() => {
-		retriedRef.current = false;
 		setFailed(false);
 		setBlobSrc(null);
 	}, [media]);
 
 	// Private media: `<img src>` is native → can't send headers, so delivery with session binding
 	// would give a 401. Like video (hls.js) and captions, we recover it via `fetch` with `${SESSION_HEADER}`,
-	// turn it into an object URL, and THAT goes in the src. On a 401 `session_mismatch` `fetchMedia` re-issues once and
-	// retries with the fresh token (`retriedRef` keeps it to once per media). Public stays native.
+	// turn it into an object URL, and THAT goes in the src. It waits for the first viewer token; on a 401
+	// `session_mismatch` `fetchMedia` re-issues once and retries with the fresh token. Public stays native.
 	React.useEffect(() => {
-		if (!isPrivate || failed || !media) return;
+		if (!isPrivate || failed || !media || !hasToken) return;
 		let cancelled = false;
 		let objectUrl: string | null = null;
 		if (!baseUrl) throw new Error("Devultur `url()` requires `baseUrl` on <DevulturProvider>");
@@ -544,13 +548,9 @@ export function Image({
 			try {
 				const response = await fetchMedia({
 					buildUrl: (viewerToken) => mediaUrl(baseUrl, media, { ...transforms, token: viewerToken }),
-					token,
+					token: sessionRef.current.token,
 					sessionSecret,
-					reissueToken,
-					canReissue: !retriedRef.current,
-					onReissue: () => {
-						retriedRef.current = true;
-					},
+					reissueToken: sessionRef.current.reissueToken,
 				});
 				if (response.ok) {
 					objectUrl = URL.createObjectURL(await response.blob());
@@ -570,7 +570,7 @@ export function Image({
 			cancelled = true;
 			if (objectUrl) URL.revokeObjectURL(objectUrl);
 		};
-	}, [isPrivate, failed, media, baseUrl, token, sessionSecret, reissueToken, width, height, fit, format, quality]);
+	}, [isPrivate, failed, media, hasToken, baseUrl, sessionSecret, width, height, fit, format, quality]);
 
 	// `<img>` doesn't expose the failure status. Public → direct fallback. Private goes through the blob-fetch
 	// above (which handles its own recovery); if the object URL still fails, it's definitive → fallback.

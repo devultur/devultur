@@ -115,7 +115,8 @@ import { Preview } from "@devultur/convex/react";
 ```
 
 The content type comes from `contentType` when you pass it (e.g. the type you stored with the file), otherwise from
-the filename's extension. Text previews are capped at 1 MiB (`maxTextBytes`).
+the filename's extension. Images, PDFs and audio are capped at 50 MiB (`maxBytes`) and text at 1 MiB
+(`maxTextBytes`); a larger file renders the fallback.
 
 For your own markup, `useMediaObjectUrl` returns an in-memory URL for any media:
 
@@ -132,7 +133,8 @@ if (objectUrl) return <iframe src={objectUrl} title={document.file.filename} />;
 
 Private media is fetched with the session header (one token re-issue and retry on a `401 session_mismatch`, as
 `<Image>` does) into an object URL that is revoked when `media` changes and on unmount; the in-flight fetch is
-aborted too. Public media returns its delivery URL without fetching. `error` is a `MediaFetchError` with a stable
+aborted too. Public media returns its delivery URL without fetching, unless you pass `contentType`: then it's
+fetched and verified like private media. `error` is a `MediaFetchError` with a stable
 `code`: `http_error` (with `status`), `too_large`, `type_mismatch` or `unsupported_type`.
 
 **Security.** A `blob:` URL is same-origin with your app: an uploaded HTML or SVG file rendered from one runs its
@@ -153,9 +155,17 @@ verbatim: the client-side counterpart of `X-Content-Type-Options: nosniff`. With
 `useMediaObjectUrl` keeps the response's type only when it's on the list and labels anything else
 `application/octet-stream`, which downloads instead of rendering.
 
+`<Preview>` never frames a URL whose type it hasn't verified: public PDFs and audio are fetched into a blob the same
+way. Only a public image keeps its delivery URL, because an `<img>` never runs script. The self-host Worker adds its own
+layer: anything outside its safe-inline list is served sandboxed and as an attachment (see
+[Security](security.md#serving-uploaded-files-safely)).
+
 The PDF `<iframe>` has no `sandbox`: browsers refuse to run their PDF viewer in a sandboxed frame. A blob typed
-`application/pdf` always opens in the PDF viewer, so a body that isn't a PDF fails to parse instead of running.
-Public media renders from its delivery URL, so serve media from its own origin, not your app's.
+`application/pdf` always opens in the PDF viewer, so a body that isn't a PDF fails to parse instead of running. The
+frame has `referrerPolicy="no-referrer"`.
+
+If your app sends a Content Security Policy, previews need `blob:` in `img-src`, `media-src` and `frame-src`. Allow it
+only on the pages that show previews (e.g. `frame-src 'self' blob:` on the review page), not app-wide.
 
 ### Imperative escape hatch
 
