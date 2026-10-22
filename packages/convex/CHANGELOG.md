@@ -1,5 +1,108 @@
 # @devultur/convex
 
+## 1.4.0
+
+### Minor Changes
+
+- [#46](https://github.com/devultur/devultur/pull/46) [`928e1ac`](https://github.com/devultur/devultur/commit/928e1ac9ef3aca7ee398fa88ca6e1f2dfbaab648) Thanks [@demarchenac](https://github.com/demarchenac)! - Document link, attachment card and responsive images.
+
+  - `<DocumentLink media download? labels?>`: a link to a file, named by its `title` or filename. Public files link to
+    their delivery URL; private files download through the session-header fetch `<DownloadLink>` uses.
+  - `<AttachmentCard media onOpen? preview? labels? locale?>`: an accessible `<article>` with an icon by type, the name,
+    type, size, a PDF's page count or a duration, a download link and an optional "Open preview" button that calls
+    `onOpen`. Labels and formatters are English by default (`defaultAttachmentLabels`, `formatFileSize`,
+    `formatDuration`); Spanish ones ship as `attachmentLabels` in `@devultur/convex/locales/es`.
+  - `<Image widths sizes>` builds a `srcset` from the Worker's transforms for public images, defaults to
+    `loading="lazy"` and `decoding="async"`, and fetches one width for private images (the largest up to twice the
+    width `sizes` gives it). Without `widths`, `<Image>` is unchanged, and an explicit `srcSet` is passed through and
+    wins over the one `widths` builds.
+
+- [#43](https://github.com/devultur/devultur/pull/43) [`b1fbdcc`](https://github.com/devultur/devultur/commit/b1fbdcc946d302a4ae14836ba1ec21e7e056b52d) Thanks [@demarchenac](https://github.com/demarchenac)! - Guard every exposed function and localize error messages.
+
+  - `defineDevulturFunctions(devultur, { guard, visibility?, config? })` returns the same functions as
+    `Devultur.exposeApi`, and each one awaits `guard(ctx, { name, kind, args })` before it runs. The guard throws to deny
+    the call and may return `{ userId }`, which `issueViewerToken` uses as the viewer token's subject.
+    `visibility: "internal"` registers internal functions. Each function keeps its argument and result types.
+    `devultur-init` now writes `convex/devultur.ts` with a sign-in guard that returns the user's `userId`, and exports
+    `listMediaPage` and `searchMedia` (`updateMediaMeta` stays commented out: editing is library-wide, so authorize it
+    in the guard first). `exposeApi` is unchanged.
+  - The progress functions (`saveProgress`, `loadProgress`, `markComplete`, `resetProgress`) act only for the guard's
+    `userId`: another user's `userId` in their arguments is refused with `user_mismatch` (403), unless the guard returns
+    `canActForOthers: true`. Without a guard's `userId`, the browser's is kept, as `exposeApi` does.
+  - The component's `issueViewerToken` takes an optional `userId` (server-side only) for the token's subject.
+  - `describeDevulturError(error, labels?)` turns a component refusal, a `DevulturApiError` or a `MediaFetchError` into a
+    message. `devulturErrorLabels` is the typed English map over every stable code (`DevulturErrorCode`,
+    `DEVULTUR_ERROR_CODES`), and `@devultur/convex/locales/es` exports the Spanish one.
+
+- [#47](https://github.com/devultur/devultur/pull/47) [`6e7d669`](https://github.com/devultur/devultur/commit/6e7d669898cdaea86873cf137261dd615b423e8b) Thanks [@demarchenac](https://github.com/demarchenac)! - Search and browse the media library, and pick media from it.
+
+  - `searchMedia({ search, type?, paginationOpts })` pages through the records whose title or filename matches, on the
+    `search_text` index, optionally of one type; a blank search lists newest first. In `defineDevulturFunctions`
+    (guarded) and `Devultur.exposeApi`, and `devultur.searchMedia(ctx, args)` from your server.
+  - `devultur.backfillSearchText(ctx, { batchSize? })` (or `npx convex run --component devultur
+library:backfillSearchText`) gives records from before 1.4.0 their `searchText`, in self-scheduling batches. Any
+    write to such a record also fills it.
+  - `useMediaLibrary({ type?, search?, pageSize? })` from `@devultur/convex/react`: `usePaginatedQuery` over
+    `listMediaPage` and `searchMedia`, with the search debounced 250 ms and pagination reset on a new query.
+  - `<MediaLibrary onSelect>`: a searchable, keyboard-navigable grid (listbox, roving tab stop, arrow keys, Home, End)
+    with a type filter, image thumbnails, icons, loading, empty and error states, `labels`, `selectable`,
+    `renderItem`, opt-in `pdfThumbnails`, class names and `--devultur-library-*` custom properties.
+  - `useDevulturApi()` returns the `api` passed to `<DevulturProvider>`, whose `DevulturApi` type gains
+    `listMediaPage` and `searchMedia`.
+  - `<MediaLibrary>` takes `selectedKeys` (a controlled selection), `multiple` (`aria-multiselectable`) and `filter`.
+  - `<MediaPicker value? onChange accept? type? multiple? labels?>`: uploads (per-file progress, cancel, retry and
+    errors through `describeDevulturError`), browses the library and shows the selection (`<AttachmentCard>` with an
+    inline `<Preview>`), returning `DevulturMedia` references; a new upload is selected, and under a
+    `PdfPreviewProvider` with pdf.js a PDF's `pageCount` is read before it uploads. `accept` filters the uploads and the
+    library. No dialog of its own: lay out `MediaPicker.Upload`, `.Library` and `.Selection`, or pass a render prop
+    (`useMediaPicker()` gives the same state). A polite live region announces uploads and selections, and focus moves
+    to the selection after an upload or a removal. `defaultMediaPickerLabels` in English; `mediaPickerLabels` and
+    `mediaLibraryLabels` in `@devultur/convex/locales/es`.
+
+- [#45](https://github.com/devultur/devultur/pull/45) [`d4caa15`](https://github.com/devultur/devultur/commit/d4caa159ef2f45defc75a3f3e93f7ef4e18c225f) Thanks [@demarchenac](https://github.com/demarchenac)! - Record and edit media metadata.
+
+  - The Worker reads an image's width and height from its header bytes on a single PUT (PNG, JPEG, GIF, WebP, AVIF),
+    keeps them in the object's metadata and returns them on GET/HEAD (`x-devultur-image-width` / `-height`,
+    `IMAGE_WIDTH_HEADER` / `IMAGE_HEIGHT_HEADER`). `files.head()` returns them as `width` / `height`.
+  - The component's `media` records gain optional `title`, `alt`, `tags`, `pageCount` and `searchText` (title and
+    filename, lowercased, behind a `search_text` search index). Records from before stay valid; no migration.
+  - `confirmUpload` records the Worker's image size over the client's, and takes an optional `pageCount` (PDFs). The
+    client's `width`, `height` and `pageCount` are hints: whole numbers from 1 to 100,000; another value is dropped
+    (and logged) and the upload is recorded without it.
+    `upload(file, { pageCount })` passes it, and `countPdfPages(file)` from `@devultur/convex/pdfjs` counts it with pdf.js.
+  - `updateMediaMeta({ key, title?, alt?, tags? })`, in `defineDevulturFunctions` (guarded) and `Devultur.exposeApi`, and
+    `devultur.updateMediaMeta(ctx, args)` from your server. Trimmed, tags deduplicated; title up to 200 characters, alt up
+    to 1,000, up to 20 tags of 50. `invalid_media_metadata` has English and Spanish labels.
+  - `DevulturMedia`, `dv.media()` and `mediaFromRecord` gain optional `title`, `alt`, `tags`, `sizeBytes`, `duration` and
+    `pageCount`. `<Image>` uses `media.alt` when no `alt` is passed.
+
+- [#49](https://github.com/devultur/devultur/pull/49) [`ccd8383`](https://github.com/devultur/devultur/commit/ccd83837e24f2eb08d5b55cfe155a7a2e4b7ffd2) Thanks [@demarchenac](https://github.com/demarchenac)! - Display-only provider and visible viewer token errors.
+
+  - `<DevulturViewerProvider baseUrl issueViewerToken tokenArgs?>` from `@devultur/convex/react`: for apps that only show
+    media. It issues and renews the viewer token like `<DevulturProvider>` and needs no upload or delete actions.
+    `useDevultur().upload`, `uploadUrl` and `deleteMedia`, and the hooks that need the `api` (`useDevulturApi`,
+    `useMediaUpload`, `<MediaLibrary>`, `<MediaPicker>`), throw a `DevulturCapabilityError` with the code
+    `capability_unavailable`. `<DevulturProvider>` is unchanged.
+  - `useDevultur()` gains `tokenStatus` (`"idle" | "loading" | "ready" | "error"`), `tokenError` and `retryToken()`. A
+    viewer token action that throws or returns no token puts the status in `"error"`; it isn't retried until
+    `retryToken()`.
+  - While the token is in error, private media fails at once with the `MediaFetchError` code `token_unavailable`
+    instead of loading: `useMediaObjectUrl`, `<Preview>` (its `fallback` receives it), `<PdfThumbnail>` (its
+    `fallback`), `<Image>` (its `fallback`, and the new `onLoadError`) and `<DownloadLink>` (the new
+    `onDownloadError`). They load once `retryToken()` gets a token.
+  - `<VideoPlayer onError>` from `@devultur/react` reports a playlist or segment that couldn't load (a 401, or an error
+    hls.js can't recover from) as a `VideoPlayerError` (`status`, `code`, `fatal`, `details`). `<Preview>`'s video
+    re-issues the token once on a `session_mismatch`, then renders its `fallback` with `session_mismatch` or
+    `token_unavailable`.
+  - `token_unavailable` and `capability_unavailable` have English and Spanish messages in `describeDevulturError`'s
+    labels, and `<Preview>`'s default labels cover `token_unavailable` and `session_mismatch`.
+
+### Patch Changes
+
+- Updated dependencies [[`d4caa15`](https://github.com/devultur/devultur/commit/d4caa159ef2f45defc75a3f3e93f7ef4e18c225f), [`ccd8383`](https://github.com/devultur/devultur/commit/ccd83837e24f2eb08d5b55cfe155a7a2e4b7ffd2)]:
+  - @devultur/core@1.4.0
+  - @devultur/react@1.4.0
+
 ## 1.3.2
 
 ### Patch Changes
