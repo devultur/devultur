@@ -9,6 +9,7 @@
  */
 
 import type * as http from "../http.js";
+import type * as library from "../library.js";
 import type * as lock from "../lock.js";
 import type * as lockValidators from "../lockValidators.js";
 import type * as mediaClient from "../mediaClient.js";
@@ -28,6 +29,7 @@ import { anyApi, componentsGeneric } from "convex/server";
 
 const fullApi: ApiFromModules<{
   http: typeof http;
+  library: typeof library;
   lock: typeof lock;
   lockValidators: typeof lockValidators;
   mediaClient: typeof mediaClient;

@@ -5,9 +5,10 @@ import { v } from "convex/values";
 import { api, internal } from "./_generated/api";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { internalMutation, mutation, query } from "./_generated/server";
+import { listNewestFirst } from "./library";
 import { objectLockValidator } from "./lockValidators";
 import { getMediaClient } from "./mediaClient";
-import { searchTextOf } from "./mediaMeta";
+import { missingSearchText, searchTextOf } from "./mediaMeta";
 import { transcodeOutputFields } from "./schema";
 import { UPLOAD_CONFIRM_BACKSTOP_MS } from "./uploads";
 import { workerAction } from "./workerErrors";
@@ -200,6 +201,7 @@ export const skipCaptions = internalMutation({
 
 		const isWaitingForCaptions = record.transcodeStatus === MediaStatus.CAPTIONING;
 		await ctx.db.patch(record._id, {
+			...missingSearchText(record),
 			captionsPending: false,
 			...(isWaitingForCaptions ? { transcodeStatus: MediaStatus.READY } : {}),
 		});
@@ -218,6 +220,7 @@ export const checkTranscodeAccepted = internalMutation({
 		if (!record || record.transcodeStatus !== MediaStatus.QUEUED) return;
 
 		await ctx.db.patch(record._id, {
+			...missingSearchText(record),
 			transcodeStatus: MediaStatus.FAILED,
 			transcodeError: "The transcode didn't start in time. Retry.",
 			failureReason: "capacity",
@@ -240,6 +243,7 @@ export const checkTranscodeStuck = internalMutation({
 		if (record.transcodeStatus === MediaStatus.READY || record.transcodeStatus === MediaStatus.FAILED) return;
 
 		await ctx.db.patch(record._id, {
+			...missingSearchText(record),
 			transcodeStatus: MediaStatus.FAILED,
 			transcodeError: "The transcode didn't finish in time. Retry.",
 			failureReason: "timeout",
@@ -304,7 +308,8 @@ export const updateMedia = mutation({
 		if (!record) return;
 
 		const { key: _mediaKey, ...fields } = args;
-		const patch: Record<string, unknown> = {};
+		// Any write to a record from before 1.4.0 also gives it its `searchText`.
+		const patch: Record<string, unknown> = { ...missingSearchText(record) };
 		for (const [fieldName, fieldValue] of Object.entries(fields)) {
 			if (fieldValue !== undefined) patch[fieldName] = fieldValue;
 		}
@@ -344,13 +349,7 @@ export const listMediaPage = query({
 		type: v.optional(v.union(v.literal("video"), v.literal("image"), v.literal("file"))),
 		paginationOpts: paginationOptsValidator,
 	},
-	handler: async (ctx, args) => {
-		const { type } = args;
-		const records = type
-			? ctx.db.query("media").withIndex("by_type", (q) => q.eq("type", type))
-			: ctx.db.query("media");
-		return records.order("desc").paginate(args.paginationOpts);
-	},
+	handler: async (ctx, args) => listNewestFirst(ctx, args.type, args.paginationOpts),
 });
 
 // --- Captions ---
@@ -489,6 +488,9 @@ export const handleWebhookEvent = internalMutation({
 				.first();
 		}
 		if (!record) return;
+
+		const searchTextFill = missingSearchText(record);
+		if (searchTextFill.searchText !== undefined) await ctx.db.patch(record._id, searchTextFill);
 
 		switch (args.event) {
 			case MediaEventName.TRANSCODE_STARTED:

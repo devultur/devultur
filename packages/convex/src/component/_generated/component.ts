@@ -23,6 +23,33 @@ import type { FunctionReference } from "convex/server";
  */
 export type ComponentApi<Name extends string | undefined = string | undefined> =
   {
+    library: {
+      backfillSearchText: FunctionReference<
+        "mutation",
+        "internal",
+        { batchSize?: number },
+        any,
+        Name
+      >;
+      searchMedia: FunctionReference<
+        "query",
+        "internal",
+        {
+          paginationOpts: {
+            cursor: string | null;
+            endCursor?: string | null;
+            id?: number;
+            maximumBytesRead?: number;
+            maximumRowsRead?: number;
+            numItems: number;
+          };
+          search: string;
+          type?: "video" | "image" | "file";
+        },
+        any,
+        Name
+      >;
+    };
     lock: {
       getLock: FunctionReference<
         "action",

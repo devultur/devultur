@@ -58,6 +58,7 @@ const ARGS_BY_NAME: Record<string, Record<string, unknown>> = {
 	processVideo: { key: "private/video/id/raw/a.mp4" },
 	getMedia: { key: "id" },
 	listMediaPage: { paginationOpts: { numItems: 10, cursor: null } },
+	searchMedia: { search: "cover", type: "image", paginationOpts: { numItems: 10, cursor: null } },
 	saveProgress: { userId: "u", videoId: "v", position: 3 },
 	loadProgress: { userId: "u", videoId: "v" },
 	markComplete: { userId: "u", videoId: "v" },
@@ -125,6 +126,15 @@ describe("defineDevulturFunctions", () => {
 		const allowed = defineDevulturFunctions(devultur, { guard: () => {} });
 		await definitionOf(allowed, "updateMediaMeta").handler(ctx, { key: "public/image/abc123/a.png", alt: "A" });
 		expect(run).toHaveBeenCalledWith("metadata.updateMediaMeta", { key: "abc123", alt: "A" });
+	});
+
+	it("searches the library through the component's searchMedia, behind the guard", async () => {
+		const { ctx, run } = fakeCtx();
+		const guard = vi.fn(() => {});
+		const args = ARGS_BY_NAME.searchMedia;
+		await definitionOf(defineDevulturFunctions(devultur, { guard }), "searchMedia").handler(ctx, args);
+		expect(guard).toHaveBeenCalledWith(ctx, { name: "searchMedia", kind: "query", args });
+		expect(run).toHaveBeenCalledWith("library.searchMedia", args);
 	});
 
 	it("registers internal functions with visibility: internal", () => {
