@@ -1,5 +1,12 @@
 # @devultur/server
 
+## 1.4.0
+
+### Patch Changes
+
+- Updated dependencies [[`d4caa15`](https://github.com/devultur/devultur/commit/d4caa159ef2f45defc75a3f3e93f7ef4e18c225f)]:
+  - @devultur/core@1.4.0
+
 ## 1.3.2
 
 ### Patch Changes
