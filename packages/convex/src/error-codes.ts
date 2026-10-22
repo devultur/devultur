@@ -84,6 +84,8 @@ export const DEVULTUR_ERROR_CODES = [
 	"unsupported_type",
 	"type_mismatch",
 	"token_unavailable",
+	"page_cap",
+	"render_failed",
 	// `DevulturCapabilityError` (an action the provider wasn't given)
 	"capability_unavailable",
 ] as const;

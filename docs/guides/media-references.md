@@ -216,25 +216,28 @@ While a file loads, `<Preview>` renders `loading`; without it, a visually hidden
 `labels.loading` to screen readers (`loading={null}` renders nothing).
 
 **Fallback as a function.** Pass a function to render a different fallback for each reason. It receives the
-`MediaFetchError` behind it, or `null`:
+`MediaFetchError` behind it, never `null`: the fallback is only rendered for a reason, and each reason has a code.
 
 ```tsx
 <Preview
   media={document.file}
   fallback={(error) => (
     <p>
-      {error?.code === "too_large" ? "Too large to preview." : "No preview available."}{" "}
+      {error.code === "too_large" ? "Too large to preview." : "No preview available."}{" "}
       <DownloadLink media={document.file}>Download</DownloadLink>
     </p>
   )}
 />
 ```
 
-| `error` | When |
+| `error.code` | When |
 | --- | --- |
-| `MediaFetchError` with `http_error` (and `status`), `too_large` or `type_mismatch` | The fetch was refused |
-| `MediaFetchError` with `unsupported_type` | The type doesn't preview inline (HTML, SVG, a ZIP…); nothing was fetched |
-| `null` | A network failure, a PDF pdf.js can't open, or the fallback after the `maxPages` note |
+| `http_error` | The delivery refused the fetch (`status` has the HTTP status), or never answered: a network failure (no `status`) |
+| `too_large`, `type_mismatch` | The body is larger than the cap, or its type disagrees with the expected one |
+| `token_unavailable`, `session_mismatch` | Private media without a viewer token, or a video whose session was refused |
+| `unsupported_type` | The type doesn't preview inline (HTML, SVG, a ZIP…); nothing was fetched |
+| `render_failed` | The bytes arrived but couldn't be shown: pdf.js can't open the PDF, or the video can't be played (`cause` has why) |
+| `page_cap` | The fallback after the `maxPages` note; `details` is `{ shown, total }` |
 
 The error comes from the preview's own fetch: rendering the fallback never fetches again.
 
@@ -242,7 +245,8 @@ The error comes from the preview's own fetch: rendering the fallback never fetch
 names, the loading announcement, the page-cap note, the default fallback's link text and its `title` for each error
 code, the thumbnail's name and the names used when a file has neither `title` nor filename. Pass any subset on
 `PdfPreviewProvider` for every preview below it, or on one `<Preview>` / `<PdfThumbnail>`; the component's own
-`labels` win over the provider's, which win over the English defaults (`defaultPreviewLabels`):
+`labels` win over the provider's, which win over the English defaults (`defaultPreviewLabels`). Spanish ones ship as
+`previewLabels` in `@devultur/convex/locales/es` (and `locales/es-formal`), or write your own:
 
 ```tsx
 import { PdfPreviewProvider, type PreviewLabels } from "@devultur/convex/react";

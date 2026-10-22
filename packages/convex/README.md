@@ -654,7 +654,12 @@ any other error, so your app keeps its own fallback. A code it doesn't know gets
 `devulturErrorLabels` is the English map, typed `Record<DevulturErrorCode, string | ((details) => string)>`:
 `DevulturErrorCode` is the union of every stable code (`DEVULTUR_ERROR_CODES` lists them), and a function label reads
 the error's details, such as `file_too_large`'s `limit`. `@devultur/convex/locales/es` exports the Spanish map under
-the same name:
+the same name.
+
+`@devultur/convex/locales/es` addresses the reader with «tú» ("Vuelve a intentarlo"). For «usted» ("Vuelva a
+intentarlo", "No tiene permiso…"), import the same names from `@devultur/convex/locales/es-formal`: it exports exactly
+what `locales/es` does (error, attachment, preview, library and picker labels), and differs only in the strings that
+address the reader.
 
 ```tsx
 import { describeDevulturError } from "@devultur/convex";

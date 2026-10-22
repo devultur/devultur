@@ -1,11 +1,13 @@
 // Spanish messages for Devultur errors (`describeDevulturError(error, devulturErrorLabels)`), attachment labels
-// (`<AttachmentCard labels={attachmentLabels} />`), the library's (`<MediaLibrary labels={mediaLibraryLabels} />`) and
-// the media picker's (`<MediaPicker labels={mediaPickerLabels} />`).
+// (`<AttachmentCard labels={attachmentLabels} />`), previews (`<PdfPreviewProvider labels={previewLabels}>`), the
+// library's (`<MediaLibrary labels={mediaLibraryLabels} />`) and the media picker's
+// (`<MediaPicker labels={mediaPickerLabels} />`). Informal «tú»; `@devultur/convex/locales/es-formal` has «usted».
 import { type AttachmentKind, type AttachmentLabels, formatDuration, formatFileSize } from "../attachment-labels";
 import type { DevulturErrorLabels } from "../error-labels";
-import { describeDevulturError, formatBytes, formatDate } from "../error-labels";
+import { describeDevulturError, formatBytes, formatDate, labelText } from "../error-labels";
 import type { MediaLibraryLabels } from "../media-library-labels";
 import type { MediaPickerLabels } from "../media-picker-labels";
+import type { PreviewLabels } from "../preview-labels";
 
 const LOCALE = "es";
 
@@ -97,8 +99,31 @@ export const devulturErrorLabels: DevulturErrorLabels = {
 	unsupported_type: "Este tipo de archivo no tiene vista previa.",
 	type_mismatch: "El contenido del archivo no coincide con su tipo.",
 	token_unavailable: "No se pudo autorizar el acceso a este archivo. Vuelve a intentarlo.",
+	page_cap: (details) => {
+		const { shown, total } = details;
+		if (typeof shown !== "number" || typeof total !== "number") return "Solo se muestran las primeras páginas.";
+		return `Solo se muestran las primeras ${shown.toLocaleString(LOCALE)} de ${total.toLocaleString(LOCALE)} páginas.`;
+	},
+	render_failed: "No se pudo mostrar el archivo.",
 	capability_unavailable: "Esta aplicación no puede hacer eso aquí.",
 };
+
+export const previewLabels: PreviewLabels = {
+	document: (title, pageCount) => `${title}, ${pagesText(pageCount)}`,
+	page: (page, pageCount) => `Página ${page} de ${pageCount}`,
+	loading: "Cargando…",
+	pageCap: (shown, total) => `Se muestran las primeras ${shown} de ${total} páginas.`,
+	error: (code) =>
+		code === "page_cap" ? "Descarga el archivo para ver todas las páginas." : labelText(devulturErrorLabels[code]),
+	thumbnail: (title) => title,
+	untitledPdf: "PDF",
+	untitledMedia: "Vista previa",
+	download: "Descargar",
+};
+
+function pagesText(pageCount: number): string {
+	return pageCount === 1 ? "1 página" : `${pageCount.toLocaleString(LOCALE)} páginas`;
+}
 
 const KIND_TEXT: Record<AttachmentKind, string> = {
 	image: "Imagen",
@@ -112,7 +137,7 @@ const KIND_TEXT: Record<AttachmentKind, string> = {
 export const attachmentLabels: AttachmentLabels = {
 	locale: LOCALE,
 	size: formatFileSize,
-	pages: (pageCount) => (pageCount === 1 ? "1 página" : `${pageCount.toLocaleString(LOCALE)} páginas`),
+	pages: pagesText,
 	duration: formatDuration,
 	kind: (kind) => KIND_TEXT[kind],
 	download: "Descargar",

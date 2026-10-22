@@ -89,6 +89,38 @@ describe("<Preview> with pdf.js", () => {
 		expect(await screen.findByText("Download")).toBeTruthy();
 	});
 
+	it("hands render_failed to a fallback function when pdf.js can't parse the body", async () => {
+		const fake = fakePdfjs({ failure: new Error("Invalid PDF structure") });
+		renderWithPdfjs(
+			<Preview media={privateFile("broken.pdf")} fallback={(error) => <p>Fallback: {error.code}</p>} />,
+			async () => fake.pdfjs,
+		);
+
+		expect(await screen.findByText("Fallback: render_failed")).toBeTruthy();
+	});
+
+	it("hands page_cap with the counts to a fallback function past the cap", async () => {
+		const fake = fakePdfjs({ pageCount: 10, isRenderPending: true });
+		renderWithPdfjs(
+			<Preview
+				media={privateFile("long.pdf")}
+				maxPages={3}
+				fallback={(error) => <a href="#download">{`${error.code} ${JSON.stringify(error.details)}`}</a>}
+			/>,
+			async () => fake.pdfjs,
+		);
+
+		expect(await screen.findByText('page_cap {"shown":3,"total":10}')).toBeTruthy();
+	});
+
+	it("titles the default fallback's link past the cap", async () => {
+		const fake = fakePdfjs({ pageCount: 10, isRenderPending: true });
+		renderWithPdfjs(<Preview media={privateFile("long.pdf")} maxPages={3} />, async () => fake.pdfjs);
+
+		const link = await screen.findByText("long.pdf");
+		expect(link.closest("a")?.getAttribute("title")).toBe("Download the file to see every page.");
+	});
+
 	it("destroys the document and cancels page renders on unmount", async () => {
 		const fake = fakePdfjs({ pageCount: 2, isRenderPending: true });
 		const { unmount } = renderWithPdfjs(<Preview media={privateFile("tax-form.pdf")} />, async () => fake.pdfjs);

@@ -129,7 +129,7 @@ describe("Preview labels", () => {
 describe("<Preview> fallback as a function", () => {
 	it("receives the MediaFetchError of a refused fetch", async () => {
 		fetchMock.mockImplementation(async () => respondTooLarge());
-		const fallback = vi.fn((error: InstanceType<typeof MediaFetchError> | null) => <p>Refused: {error?.code}</p>);
+		const fallback = vi.fn((error: InstanceType<typeof MediaFetchError>) => <p>Refused: {error.code}</p>);
 		renderPreview(<Preview media={privateFile("big.pdf")} maxBytes={10} fallback={fallback} />);
 
 		expect(await screen.findByText("Refused: too_large")).toBeTruthy();
@@ -139,28 +139,27 @@ describe("<Preview> fallback as a function", () => {
 
 	it("receives the HTTP status of an http_error", async () => {
 		fetchMock.mockImplementation(async () => new Response("gone", { status: 404 }));
-		renderPreview(<Preview media={privateFile("gone.pdf")} fallback={(error) => <p>Status {error?.status}</p>} />);
+		renderPreview(<Preview media={privateFile("gone.pdf")} fallback={(error) => <p>Status {error.status}</p>} />);
 
 		expect(await screen.findByText("Status 404")).toBeTruthy();
 	});
 
 	it("receives unsupported_type for a type that doesn't preview, without fetching", async () => {
-		renderPreview(<Preview media={privateFile("archive.zip")} fallback={(error) => <p>Code: {error?.code}</p>} />);
+		renderPreview(<Preview media={privateFile("archive.zip")} fallback={(error) => <p>Code: {error.code}</p>} />);
 
 		expect(await screen.findByText("Code: unsupported_type")).toBeTruthy();
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
-	it("receives null when pdf.js can't open the file", async () => {
-		const fake = fakePdfjs({ failure: new Error("Invalid PDF structure") });
-		renderPreview(
-			<Preview
-				media={privateFile("broken.pdf")}
-				fallback={(error) => <p>{error ? error.code : "no fetch error"}</p>}
-			/>,
-			{ loader: async () => fake.pdfjs },
-		);
+	it("receives render_failed, with pdf.js's error as its cause, when pdf.js can't open the file", async () => {
+		const failure = new Error("Invalid PDF structure");
+		const fake = fakePdfjs({ failure });
+		const fallback = vi.fn((error: InstanceType<typeof MediaFetchError>) => <p>Code: {error.code}</p>);
+		renderPreview(<Preview media={privateFile("broken.pdf")} fallback={fallback} />, {
+			loader: async () => fake.pdfjs,
+		});
 
-		expect(await screen.findByText("no fetch error")).toBeTruthy();
+		expect(await screen.findByText("Code: render_failed")).toBeTruthy();
+		expect(fallback.mock.calls.at(-1)![0].cause).toBe(failure);
 	});
 });
