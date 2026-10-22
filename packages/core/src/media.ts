@@ -35,8 +35,8 @@ export interface DevulturMedia<V extends Visibility = Visibility> {
 	readonly title?: string;
 	/** The image's alternative text, set by the app. `<Image>` uses it when no `alt` is passed. */
 	readonly alt?: string;
-	/** The app's own labels. */
-	readonly tags?: readonly string[];
+	/** The app's own labels. A mutable array on purpose: `dv.media()` infers `string[]`, which a readonly array can't be passed to. */
+	readonly tags?: string[];
 	/** Stored size in bytes. */
 	readonly sizeBytes?: number;
 	/** A video's duration, in seconds. */
