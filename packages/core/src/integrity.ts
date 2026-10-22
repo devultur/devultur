@@ -1,5 +1,6 @@
 // File integrity: sha256 of the PLAINTEXT (before L4 encryption), which the worker stores in the object's
-// metadata and returns on GET/HEAD. Headers and helpers shared by the SDK and the worker.
+// metadata and returns on GET/HEAD, along with an image's intrinsic size. Headers and helpers shared by the SDK and
+// the worker.
 
 /** sha256 (hex) of the file: the client declares it on upload and the worker returns it on GET/HEAD. */
 export const SHA256_HEADER = "x-devultur-sha256";
@@ -7,6 +8,10 @@ export const SHA256_HEADER = "x-devultur-sha256";
 export const SHA256_VERIFIED_HEADER = "x-devultur-sha256-verified";
 /** File expiration (epoch ms) if it was uploaded with a TTL. */
 export const EXPIRES_AT_HEADER = "x-devultur-expires-at";
+/** Intrinsic width (px) of an image, read by the worker from its header bytes when it was uploaded. */
+export const IMAGE_WIDTH_HEADER = "x-devultur-image-width";
+/** Intrinsic height (px) of an image, read by the worker from its header bytes when it was uploaded. */
+export const IMAGE_HEIGHT_HEADER = "x-devultur-image-height";
 /** RFC 9530: `sha-256=:<base64>:`. */
 export const REPR_DIGEST_HEADER = "Repr-Digest";
 

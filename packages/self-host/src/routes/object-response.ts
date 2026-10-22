@@ -12,6 +12,7 @@ import {
 	SHA256_VERIFIED_HEADER,
 } from "@devultur/core";
 import { loadStorageKey } from "../helpers";
+import { applyImageSizeHeaders } from "./upload-image-size";
 import { ObjectMeta } from "./upload-integrity";
 
 /** The object's `expiresAt` (epoch ms), or `undefined` when it has none. Pure. */
@@ -109,6 +110,7 @@ export async function streamObject(input: StreamObjectInput): Promise<{ response
 	headers.set("ETag", object.httpEtag);
 	headers.set("Accept-Ranges", "bytes");
 	applyIntegrityHeaders(headers, object.customMetadata);
+	applyImageSizeHeaders(headers, object.customMetadata);
 
 	// L4: the key lives at `${fullKey}/${keyId}` → same storage key as the object. No key → 500 (we never leak ciphertext).
 	const enc = decodeEncryptionMeta(object.customMetadata?.enc);

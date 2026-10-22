@@ -61,6 +61,15 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         Name
       >;
     };
+    metadata: {
+      updateMediaMeta: FunctionReference<
+        "mutation",
+        "internal",
+        { alt?: string; key: string; tags?: Array<string>; title?: string },
+        any,
+        Name
+      >;
+    };
     public: {
       createMedia: FunctionReference<
         "mutation",
@@ -243,7 +252,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       confirmUpload: FunctionReference<
         "action",
         "internal",
-        { filename?: string; height?: number; key: string; width?: number },
+        {
+          filename?: string;
+          height?: number;
+          key: string;
+          pageCount?: number;
+          width?: number;
+        },
         any,
         Name
       >;

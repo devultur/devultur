@@ -76,6 +76,8 @@ interface UploadOptions {
 	onProgress?: (progress: UploadProgress) => void;
 	/** Aborts the PUT → `upload()` rejects with an `AbortError`. */
 	signal?: AbortSignal;
+	/** A PDF's page count to record with it, a hint (`countPdfPages` from `@devultur/convex/pdfjs` counts it). */
+	pageCount?: number;
 }
 
 /**
@@ -182,7 +184,11 @@ export function DevulturProvider({ api, baseUrl, tokenArgs, issueViewerToken, ch
 			})) as UploadTarget;
 			// XHR (fetch reports no upload progress); large files against the Worker go in parts.
 			await uploadFileWithProgress(target.url, file, { onBytes: options?.onProgress, signal: options?.signal });
-			if (api.confirmUpload) await confirmUploadBestEffort(confirmUploadAction, target.key, file, dimensions);
+			if (api.confirmUpload) {
+				const pageCount = options?.pageCount;
+				const hints = { ...dimensions, ...(pageCount !== undefined ? { pageCount } : {}) };
+				await confirmUploadBestEffort(confirmUploadAction, target.key, file, hints);
+			}
 
 			return {
 				id: target.id,
@@ -375,10 +381,10 @@ async function confirmUploadBestEffort(
 	confirmUpload: (args: Record<string, unknown>) => Promise<unknown>,
 	key: string,
 	file: File,
-	dimensions: { width?: number; height?: number },
+	hints: { width?: number; height?: number; pageCount?: number },
 ): Promise<void> {
 	try {
-		await confirmUpload({ key, filename: file.name, ...dimensions });
+		await confirmUpload({ key, filename: file.name, ...hints });
 	} catch (error) {
 		console.warn("Devultur: could not record the upload; it is recorded later", error);
 	}
@@ -439,7 +445,7 @@ export function useVideoProps(
 // --- <Image> / <DownloadLink> (declarative render, token-transparent, usable in .map) ---
 
 interface ImageProps extends Omit<React.ImgHTMLAttributes<HTMLImageElement>, "src" | "width" | "height"> {
-	/** Typed reference. `null`/`undefined` → renders `fallback` (or `externalFallback`). */
+	/** Typed reference. `null`/`undefined` → renders `fallback` (or `externalFallback`). Its `alt` is the default `alt`. */
 	media: DevulturMedia | null | undefined;
 	width?: number;
 	height?: number;
@@ -557,7 +563,7 @@ export function Image({
 	return (
 		<img
 			src={src}
-			alt={alt}
+			alt={alt ?? media?.alt}
 			width={width ?? media?.width}
 			height={height ?? media?.height}
 			onError={handleError}

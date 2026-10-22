@@ -7,6 +7,7 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { objectLockValidator } from "./lockValidators";
 import { getMediaClient } from "./mediaClient";
+import { searchTextOf } from "./mediaMeta";
 import { transcodeOutputFields } from "./schema";
 import { UPLOAD_CONFIRM_BACKSTOP_MS } from "./uploads";
 import { workerAction } from "./workerErrors";
@@ -265,7 +266,11 @@ export const createMedia = mutation({
 			.withIndex("by_key", (q) => q.eq("key", args.key))
 			.first();
 		if (existing) return existing._id;
-		return ctx.db.insert("media", { ...args, createdAt: Date.now() });
+		return ctx.db.insert("media", {
+			...args,
+			searchText: searchTextOf(undefined, args.filename),
+			createdAt: Date.now(),
+		});
 	},
 });
 

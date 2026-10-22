@@ -1,6 +1,6 @@
 // Reads width/height from the header WITHOUT decoding → the megapixel guard decides before allocating the RGBA buffer
 // (file size says nothing: a 1 MB PNG can be 100 MP). JPEG (SOFn), PNG (IHDR), WebP
-// (VP8/VP8L/VP8X), AVIF (`ispe`). Null = unrecognized → fallback. Also detects animation (→ Cloudflare).
+// (VP8/VP8L/VP8X), AVIF (`ispe`), GIF (logical screen). Null = unrecognized → fallback. Uploads record them too. Also detects animation (→ Cloudflare).
 import type { Dimensions } from "./transform-plan";
 
 export function readImageDimensions(bytes: Uint8Array, contentType: string): Dimensions | null {
@@ -8,6 +8,7 @@ export function readImageDimensions(bytes: Uint8Array, contentType: string): Dim
 	if (contentType === "image/png") return readPng(bytes);
 	if (contentType === "image/webp") return readWebp(bytes);
 	if (contentType === "image/avif") return readAvif(bytes);
+	if (contentType === "image/gif") return readGif(bytes);
 	return null;
 }
 
@@ -64,6 +65,14 @@ function readAvif(bytes: Uint8Array): Dimensions | null {
 		if (isIspe) return { width: uint32BE(bytes, offset + 8), height: uint32BE(bytes, offset + 12) };
 	}
 	return null;
+}
+
+// GIF87a / GIF89a: the logical screen's width and height follow the 6-byte signature.
+function readGif(bytes: Uint8Array): Dimensions | null {
+	if (bytes.length < 10) return null;
+	const signature = String.fromCharCode(...bytes.subarray(0, 6));
+	if (signature !== "GIF87a" && signature !== "GIF89a") return null;
+	return { width: uint16LE(bytes, 6), height: uint16LE(bytes, 8) };
 }
 
 const fourCC = (bytes: Uint8Array, offset: number) =>

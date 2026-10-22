@@ -226,6 +226,8 @@ type Contract = ReturnType<typeof setup>;
 const SIGNATURES: Record<string, number[]> = {
 	"application/pdf": [...new TextEncoder().encode("%PDF-1.7\n")],
 	"image/png": [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+	// A 320×240 logical screen: the Worker reads the size from it.
+	"image/gif": [...new TextEncoder().encode("GIF89a"), 0x40, 0x01, 0xf0, 0x00],
 	"video/mp4": [0, 0, 0, 16, ...new TextEncoder().encode("ftypisom"), 0, 0, 2, 0],
 };
 
@@ -634,5 +636,63 @@ describe("the media library (confirmed uploads in listMedia)", () => {
 		await expect(contract.run("confirmUpload", { key: "asset/exports/pkg.zip" })).rejects.toMatchObject({
 			data: { code: "invalid_upload_key" },
 		});
+	});
+});
+
+describe("media metadata recorded at upload", () => {
+	it("records the size the Worker read from an image's bytes over the client's hint", async () => {
+		const contract = setup();
+		const image = await uploadThroughComponent(contract, { filename: "anim.gif", contentType: "image/gif" });
+
+		const head = await contract.send(`/v1/media/${image.key}`, {
+			method: "HEAD",
+			headers: { Authorization: `Bearer ${WORKER_AUTH_SECRET}` },
+		});
+		expect(head.headers.get("x-devultur-image-width")).toBe("320");
+		const record = await contract.run("confirmUpload", { key: image.key, width: 10, height: 10 });
+
+		expect(record).toMatchObject({
+			width: 320,
+			height: 240,
+			sizeBytes: image.bytes.byteLength,
+			searchText: "anim.gif",
+		});
+	});
+
+	it("records a PDF's page count from the client, and ignores it for other files", async () => {
+		const contract = setup();
+		const pdf = await uploadThroughComponent(contract, { filename: "Report.pdf", contentType: "application/pdf" });
+		const clip = await uploadThroughComponent(contract, { filename: "clip.mp4", contentType: "video/mp4" });
+
+		expect(await contract.run("confirmUpload", { key: pdf.key, filename: "Report.pdf", pageCount: 12 })).toMatchObject({
+			pageCount: 12,
+			searchText: "report.pdf",
+		});
+		expect(await contract.run("confirmUpload", { key: clip.key, pageCount: 3 })).not.toHaveProperty("pageCount");
+	});
+
+	it.each([
+		{ pageCount: 0 },
+		{ pageCount: 2.5 },
+		{ width: -1 },
+		{ height: 100_001 },
+	])("refuses the client hint %o before recording anything", async (hint) => {
+		const contract = setup();
+		const pdf = await uploadThroughComponent(contract, { filename: "doc.pdf", contentType: "application/pdf" });
+
+		await expect(contract.run("confirmUpload", { key: pdf.key, ...hint })).rejects.toMatchObject({
+			data: { code: "invalid_media_metadata", details: { field: Object.keys(hint)[0] } },
+		});
+		expect(await contract.listMedia()).toEqual([]);
+	});
+
+	it("records a video's duration from the transcode", async () => {
+		const contract = setup();
+		const { key } = await uploadThroughComponent(contract, { filename: "clip.mp4", contentType: "video/mp4" });
+		await contract.run("confirmUpload", { key });
+		await contract.run("processVideo", { key });
+		await completeTranscode(contract);
+
+		expect(await contract.mediaRecord(key.split("/")[2] ?? "")).toMatchObject({ duration: 12 });
 	});
 });

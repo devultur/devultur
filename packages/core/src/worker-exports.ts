@@ -2,7 +2,13 @@
 // scoped to a prefix for the runner, multipart upload with sha256, `head` to verify before publishing, single-use
 // download links, and server-side streaming without exposing credentials.
 import { errorFromResponse } from "./api-error";
-import { EXPIRES_AT_HEADER, SHA256_HEADER, SHA256_VERIFIED_HEADER } from "./integrity";
+import {
+	EXPIRES_AT_HEADER,
+	IMAGE_HEIGHT_HEADER,
+	IMAGE_WIDTH_HEADER,
+	SHA256_HEADER,
+	SHA256_VERIFIED_HEADER,
+} from "./integrity";
 import type { ObjectLock } from "./lock";
 import type { Visibility } from "./media";
 import { type CapabilityUploadResult, shouldUseMultipart, uploadMultipart } from "./multipart";
@@ -86,6 +92,9 @@ export interface FileHead {
 	sha256Verified: boolean;
 	/** Expiration (epoch ms) if the file has a TTL. */
 	expiresAt: number | null;
+	/** Intrinsic size (px) of an image the worker read when it was uploaded in a single PUT. */
+	width?: number;
+	height?: number;
 }
 
 export interface DownloadLinkOptions {
@@ -129,8 +138,16 @@ function encodeKey(key: string): string {
 	return key.split("/").map(encodeURIComponent).join("/");
 }
 
+/** A header holding a positive integer, or `undefined`. */
+function positiveIntHeader(response: Response, name: string): number | undefined {
+	const value = Number(response.headers.get(name));
+	return Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
 function headFromResponse(key: string, response: Response): FileHead {
 	const expiresAt = Number(response.headers.get(EXPIRES_AT_HEADER));
+	const width = positiveIntHeader(response, IMAGE_WIDTH_HEADER);
+	const height = positiveIntHeader(response, IMAGE_HEIGHT_HEADER);
 	return {
 		key,
 		size: Number(response.headers.get("content-length") ?? "0"),
@@ -139,6 +156,7 @@ function headFromResponse(key: string, response: Response): FileHead {
 		sha256: response.headers.get(SHA256_HEADER),
 		sha256Verified: response.headers.get(SHA256_VERIFIED_HEADER) === "true",
 		expiresAt: Number.isFinite(expiresAt) && expiresAt > 0 ? expiresAt : null,
+		...(width && height ? { width, height } : {}),
 	};
 }
 

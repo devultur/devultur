@@ -4,7 +4,7 @@ import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
 
 // Drift check: `_generated/component.ts` (the `ComponentApi` apps type `components.devultur` with) must describe
-// exactly the public functions of each module (`public.ts`, `lock.ts`, `uploads.ts`), with the same kind and arguments. It fails when a function or an
+// exactly the public functions of each module (`public.ts`, `lock.ts`, `uploads.ts`, `metadata.ts`), with the same kind and arguments. It fails when a function or an
 // argument changes without regenerating. Fix it with `pnpm --filter @devultur/convex codegen`.
 
 type Visibility = "public" | "internal";
@@ -48,6 +48,7 @@ const MODULES: Record<string, Record<string, Registered>> = {
 	public: publicModule,
 	lock: (await import("./lock")) as unknown as Record<string, Registered>,
 	uploads: (await import("./uploads")) as unknown as Record<string, Registered>,
+	metadata: (await import("./metadata")) as unknown as Record<string, Registered>,
 };
 
 function objectType(fields: [name: string, isOptional: boolean, type: string][]): string {

@@ -52,6 +52,7 @@ const ARGS_BY_NAME: Record<string, Record<string, unknown>> = {
 	issueViewerToken: { sessionSecret: "secret" },
 	createUploadUrl: { filename: "a.png", contentType: "image/png" },
 	confirmUpload: { key: "private/image/id/a.png" },
+	updateMediaMeta: { key: "id", title: "Cover", tags: ["landscape"] },
 	deleteMedia: { key: "id" },
 	deleteVideo: { videoId: "id" },
 	processVideo: { key: "private/video/id/raw/a.mp4" },
@@ -109,6 +110,23 @@ describe("defineDevulturFunctions", () => {
 		expect(run).toHaveBeenCalledWith("public.issueViewerToken", { sessionSecret: "s" });
 	});
 
+	it("doesn't edit metadata when the guard denies it, and edits by media id", async () => {
+		const { ctx, run } = fakeCtx();
+		const denied = defineDevulturFunctions(devultur, {
+			guard: () => {
+				throw new Error("denied");
+			},
+		});
+		await expect(definitionOf(denied, "updateMediaMeta").handler(ctx, { key: "id", title: "x" })).rejects.toThrow(
+			"denied",
+		);
+		expect(run).not.toHaveBeenCalled();
+
+		const allowed = defineDevulturFunctions(devultur, { guard: () => {} });
+		await definitionOf(allowed, "updateMediaMeta").handler(ctx, { key: "public/image/abc123/a.png", alt: "A" });
+		expect(run).toHaveBeenCalledWith("metadata.updateMediaMeta", { key: "abc123", alt: "A" });
+	});
+
 	it("registers internal functions with visibility: internal", () => {
 		const functions = defineDevulturFunctions(devultur, { guard: () => {}, visibility: "internal" });
 		expect(definitionOf(functions, "getMedia").visibility).toBe("internal");
@@ -127,7 +145,15 @@ describe("defineDevulturFunctions", () => {
 			filename?: string;
 			width?: number;
 			height?: number;
+			pageCount?: number;
 		}>();
+		expectTypeOf<FunctionArgs<Api["devultur"]["updateMediaMeta"]>>().toEqualTypeOf<{
+			key: string;
+			title?: string;
+			alt?: string;
+			tags?: string[];
+		}>();
+		expectTypeOf<Api["devultur"]["updateMediaMeta"]["_type"]>().toEqualTypeOf<"mutation">();
 		expectTypeOf<Api["devultur"]["confirmUpload"]["_type"]>().toEqualTypeOf<"action">();
 		expectTypeOf<Api["devultur"]["getMedia"]["_visibility"]>().toEqualTypeOf<"public">();
 		expectTypeOf<FunctionArgs<InternalApi["devultur"]["getMedia"]>>().toEqualTypeOf<{ key: string }>();

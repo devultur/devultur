@@ -59,6 +59,11 @@ const visibilityArg = v.optional(v.union(v.literal("public"), v.literal("private
 const mediaTypeArg = v.optional(v.union(v.literal("video"), v.literal("image"), v.literal("file")));
 const progressArgs = { userId: v.string(), videoId: v.string() };
 
+/** The media id of a media id or an object key (`{visibility}/{kind}/{id}/…`). */
+function mediaIdOf(key: string): string {
+	return key.includes("/") ? extractId(key) : key;
+}
+
 export function exposedFunctions(component: ComponentApi, config?: DevulturComponentConfig) {
 	// No preset → the worker applies its config's default preset, or the HLS ladder if there is none.
 	const preset = config?.video?.transcodePreset;
@@ -91,8 +96,21 @@ export function exposedFunctions(component: ComponentApi, config?: DevulturCompo
 				filename: v.optional(v.string()),
 				width: v.optional(v.number()),
 				height: v.optional(v.number()),
+				pageCount: v.optional(v.number()),
 			},
 			async (ctx, args) => ctx.runAction(component.uploads.confirmUpload, args),
+		),
+
+		// Edits a record's title, alt text and tags. Your guard decides who may edit which media.
+		updateMediaMeta: exposed(
+			"mutation",
+			{
+				key: v.string(),
+				title: v.optional(v.string()),
+				alt: v.optional(v.string()),
+				tags: v.optional(v.array(v.string())),
+			},
+			async (ctx, args) => ctx.runMutation(component.metadata.updateMediaMeta, { ...args, key: mediaIdOf(args.key) }),
 		),
 
 		deleteMedia: exposed("action", { key: v.string() }, async (ctx, args) =>
@@ -107,10 +125,9 @@ export function exposedFunctions(component: ComponentApi, config?: DevulturCompo
 			ctx.runAction(component.public.processVideo, { key: args.key, preset, locales }),
 		),
 
-		getMedia: exposed("query", { key: v.string() }, async (ctx, args) => {
-			const mediaKey = args.key.includes("/") ? extractId(args.key) : args.key;
-			return ctx.runQuery(component.public.getMediaByKey, { key: mediaKey });
-		}),
+		getMedia: exposed("query", { key: v.string() }, async (ctx, args) =>
+			ctx.runQuery(component.public.getMediaByKey, { key: mediaIdOf(args.key) }),
+		),
 
 		// The media library, a page at a time (for `usePaginatedQuery`). It lists every record, of every user.
 		listMediaPage: exposed(

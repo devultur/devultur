@@ -12,6 +12,13 @@ const mediaFields = {
 	key: v.optional(v.string()),
 	width: v.optional(v.number()),
 	height: v.optional(v.number()),
+	// The record's metadata, as `mediaFromRecord` copies it. Optional: references stored before 1.4.0 stay valid.
+	title: v.optional(v.string()),
+	alt: v.optional(v.string()),
+	tags: v.optional(v.array(v.string())),
+	sizeBytes: v.optional(v.number()),
+	duration: v.optional(v.number()),
+	pageCount: v.optional(v.number()),
 } as const;
 
 /**

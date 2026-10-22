@@ -23,6 +23,7 @@ import { getRequestState, isAuthenticated } from "../request-state";
 import type { RawStorageClass, UploadPending, UploadRequest, WorkerApp } from "../types";
 import { inheritedExpiresAt } from "./derived-upload";
 import { checkSinglePutContent, OCTET_STREAM } from "./upload-content-check";
+import { imageSizeMetadata } from "./upload-image-size";
 import {
 	allowedUploadMetadata,
 	digestBody,
@@ -253,6 +254,7 @@ upload.put("/:key{.+}", async (context) => {
 		// A transcode output (no pending) expires with its video's raw.
 		...integrityMetadata(digest.sha256, true, pending?.expiresAt ?? (await inheritedExpiresAt(context, key))),
 		...lockMetadata(uploadLockOf(context, key, pending)),
+		...imageSizeMetadata(contentType, body),
 	};
 	// The binding override travels in the metadata → the delivery gate resolves it per-resource.
 	if (resourceSecurity) customMetadata.security = JSON.stringify(resourceSecurity);

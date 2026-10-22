@@ -65,6 +65,8 @@ export { contentDispositionAttachment, contentDispositionInline, sanitizeFilenam
 export {
 	bytesToHex,
 	EXPIRES_AT_HEADER,
+	IMAGE_HEIGHT_HEADER,
+	IMAGE_WIDTH_HEADER,
 	normalizeSha256,
 	REPR_DIGEST_HEADER,
 	reprDigest,

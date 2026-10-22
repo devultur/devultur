@@ -31,6 +31,18 @@ export interface DevulturMedia<V extends Visibility = Visibility> {
 	readonly width?: number;
 	/** Intrinsic height (px). */
 	readonly height?: number;
+	/** Display title, set by the app. */
+	readonly title?: string;
+	/** The image's alternative text, set by the app. `<Image>` uses it when no `alt` is passed. */
+	readonly alt?: string;
+	/** The app's own labels. */
+	readonly tags?: readonly string[];
+	/** Stored size in bytes. */
+	readonly sizeBytes?: number;
+	/** A video's duration, in seconds. */
+	readonly duration?: number;
+	/** A PDF's page count, as the uploading client reported it. */
+	readonly pageCount?: number;
 }
 
 /** Visibility default when not specified at any level: secure-by-default. */
