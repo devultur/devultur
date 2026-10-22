@@ -1,5 +1,17 @@
 # @devultur/convex
 
+## 1.3.2
+
+### Patch Changes
+
+- [#41](https://github.com/devultur/devultur/pull/41) [`6eb48ad`](https://github.com/devultur/devultur/commit/6eb48ad79e3ba5c5d87ac94381771eccea22a52f) Thanks [@demarchenac](https://github.com/demarchenac)! - `DevulturProvider` takes `tokenArgs`, extra arguments sent with `sessionSecret` on every viewer token issuance (first,
+  renewal and re-issue). When they change by value, the provider drops the current token and issues a new one, and a
+  response for the previous arguments is ignored. `issueViewerToken` lets an app pass its own token action in place of
+  `api.issueViewerToken`, for example one that checks access to a workspace before issuing.
+- Updated dependencies []:
+  - @devultur/core@1.3.2
+  - @devultur/react@1.3.2
+
 ## 1.3.1
 
 ### Patch Changes
