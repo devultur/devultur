@@ -10,7 +10,7 @@ import type { Doc } from "./_generated/dataModel";
 import type { ActionCtx } from "./_generated/server";
 import { internalAction, internalMutation } from "./_generated/server";
 import { getMediaClient } from "./mediaClient";
-import { checkUploadHints, searchTextOf, type UploadHints } from "./mediaMeta";
+import { searchTextOf, type UploadHints, validUploadHints } from "./mediaMeta";
 import { parseUploadKey, type UploadKey } from "./uploadKeys";
 import { workerAction } from "./workerErrors";
 
@@ -24,8 +24,8 @@ function displayName(uploadKey: UploadKey, filename: string | undefined): string
 	return uploadKey.storedName;
 }
 
-// The hints are the uploading client's word, not the Worker's: positive integers up to 100,000, else
-// `invalid_media_metadata`. An image size the Worker read from the bytes wins over them.
+// The hints are the uploading client's word, not the Worker's: positive integers up to 100,000; another value is
+// dropped (and logged) and the upload recorded without it. An image size the Worker read from the bytes wins over them.
 const confirmArgs = {
 	key: v.string(),
 	/** The original filename (display and download name). Ignored unless it is the one in the key. */
@@ -58,7 +58,7 @@ async function confirm(ctx: ActionCtx, args: ConfirmArgs): Promise<Doc<"media"> 
 	if (!uploadKey) {
 		throw new ConvexError({ code: "invalid_upload_key", message: `Not an upload key: ${args.key}`, status: 400 });
 	}
-	checkUploadHints(args);
+	const hints = validUploadHints(args);
 
 	const head: FileHead | null = await getMediaClient().files.head(args.key);
 	if (!head) return null;
@@ -72,8 +72,8 @@ async function confirm(ctx: ActionCtx, args: ConfirmArgs): Promise<Doc<"media"> 
 		filename: displayName(uploadKey, args.filename),
 		contentType: head.contentType,
 		sizeBytes: head.size,
-		...recordedSize(head, args),
-		...(isPdf && args.pageCount !== undefined ? { pageCount: args.pageCount } : {}),
+		...recordedSize(head, hints),
+		...(isPdf && hints.pageCount !== undefined ? { pageCount: hints.pageCount } : {}),
 	});
 }
 

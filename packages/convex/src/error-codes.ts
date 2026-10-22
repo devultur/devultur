@@ -62,6 +62,8 @@ export const DEVULTUR_ERROR_CODES = [
 	"token_rejected",
 	"reserved_user_id",
 	"invalid_scopes",
+	// The progress functions, given another user's `userId` than the guard's
+	"user_mismatch",
 	// Video and captions
 	"transcode_not_configured",
 	"transcode_runner_unavailable",
@@ -81,6 +83,9 @@ export const DEVULTUR_ERROR_CODES = [
 	"too_large",
 	"unsupported_type",
 	"type_mismatch",
+	"token_unavailable",
+	// `DevulturCapabilityError` (an action the provider wasn't given)
+	"capability_unavailable",
 ] as const;
 
 /** A stable error code: match on it, not on `message`. */

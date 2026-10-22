@@ -53,6 +53,20 @@ afterEach(() => {
 	actions.clear();
 });
 
+describe("<Image srcSet>", () => {
+	it("passes an explicit srcSet through", () => {
+		const srcSet = "https://cdn.example/a-480.webp 480w, https://cdn.example/a-960.webp 960w";
+		renderWithDevultur(<Image media={publicImage} srcSet={srcSet} sizes="50vw" />);
+		expect(screen.getByRole("img").getAttribute("srcset")).toBe(srcSet);
+	});
+
+	it("wins over the srcset widths builds", () => {
+		const srcSet = "https://cdn.example/a-480.webp 480w";
+		renderWithDevultur(<Image media={publicImage} widths={[480, 960]} srcSet={srcSet} />);
+		expect(screen.getByRole("img").getAttribute("srcset")).toBe(srcSet);
+	});
+});
+
 describe("<Image widths> with public media", () => {
 	it("builds a srcset from the Worker's transforms, with sizes, lazy loading and the intrinsic size", () => {
 		renderWithDevultur(

@@ -45,6 +45,18 @@ export interface UploadZoneRenderProps {
 	error: Error | null;
 }
 
+/** A playlist or segment request the player couldn't complete. */
+export interface VideoPlayerError {
+	/** HTTP status of the failed request, when the server answered. */
+	status?: number;
+	/** The `code` in the error response's JSON body (e.g. `session_mismatch`), when it had one. */
+	code?: string;
+	/** True when hls.js stopped playback; a 401 is reported even when hls.js would keep trying. */
+	fatal: boolean;
+	/** hls.js's error detail, e.g. `manifestLoadError` or `fragLoadError`. */
+	details: string;
+}
+
 /**
  * Props for the {@link VideoPlayer} component.
  */
@@ -75,6 +87,8 @@ export interface VideoPlayerProps {
 	onProgress?: (currentTime: number, percent: number) => void;
 	/** Called when playback reaches the end of the video. Optional. */
 	onEnded?: () => void;
+	/** Called when the playlist or a segment can't be loaded: on a 401, and on any error hls.js can't recover from. */
+	onError?: (error: VideoPlayerError) => void;
 	/**
 	 * Playback quality metrics (startup time, rebuffering, errors, bitrate, watch time) sent to the playback host
 	 * in small batched beacons. No cookies and no personal data: a random id per view. Defaults to on for

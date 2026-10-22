@@ -128,6 +128,45 @@ describe("defineDevulturFunctions", () => {
 		expect(run).toHaveBeenCalledWith("metadata.updateMediaMeta", { key: "abc123", alt: "A" });
 	});
 
+	const PROGRESS_FUNCTIONS = ["saveProgress", "loadProgress", "markComplete", "resetProgress"];
+
+	it.each(PROGRESS_FUNCTIONS)("refuses %s for another user than the guard's", async (name) => {
+		const { ctx, run } = fakeCtx();
+		const functions = defineDevulturFunctions(devultur, { guard: async () => ({ userId: "user-1" }) });
+		const otherUsersArgs = { ...ARGS_BY_NAME[name], userId: "user-2" };
+
+		await expect(definitionOf(functions, name).handler(ctx, otherUsersArgs)).rejects.toMatchObject({
+			data: { code: "user_mismatch", status: 403 },
+		});
+		expect(run).not.toHaveBeenCalled();
+	});
+
+	it.each(PROGRESS_FUNCTIONS)("runs %s for the guard's own user", async (name) => {
+		const { ctx, run } = fakeCtx();
+		const functions = defineDevulturFunctions(devultur, { guard: async () => ({ userId: "user-1" }) });
+		const ownArgs = { ...ARGS_BY_NAME[name], userId: "user-1" };
+
+		await definitionOf(functions, name).handler(ctx, ownArgs);
+		expect(run).toHaveBeenCalledWith(expect.any(String), ownArgs);
+	});
+
+	it("runs the progress functions for any user when the guard can act for others", async () => {
+		const { ctx, run } = fakeCtx();
+		const guard = async () => ({ userId: "admin", canActForOthers: true });
+		const { resetProgress } = defineDevulturFunctions(devultur, { guard });
+		const args = { userId: "learner", videoId: "v" };
+
+		await definitionOf({ resetProgress }, "resetProgress").handler(ctx, args);
+		expect(run).toHaveBeenCalledWith("public.resetProgress", args);
+	});
+
+	it("keeps the browser's userId when the guard returns none, as exposeApi does", async () => {
+		const { ctx, run } = fakeCtx();
+		const { loadProgress } = defineDevulturFunctions(devultur, { guard: () => {} });
+		await definitionOf({ loadProgress }, "loadProgress").handler(ctx, { userId: "u", videoId: "v" });
+		expect(run).toHaveBeenCalledWith("public.loadProgress", { userId: "u", videoId: "v" });
+	});
+
 	it("searches the library through the component's searchMedia, behind the guard", async () => {
 		const { ctx, run } = fakeCtx();
 		const guard = vi.fn(() => {});

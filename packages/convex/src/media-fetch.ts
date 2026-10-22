@@ -14,19 +14,28 @@ export type MediaFetchErrorCode =
 	/** The expected content type isn't one that can be previewed inline. */
 	| "unsupported_type"
 	/** The response's `Content-Type` doesn't agree with the expected one. */
-	| "type_mismatch";
+	| "type_mismatch"
+	/** No viewer token for private media: its issuance failed (`useDevultur().tokenError` has why) or was refused. */
+	| "token_unavailable"
+	/** The delivery refused the token for this browser session, also after a re-issue (video playback). */
+	| "session_mismatch";
 
 export class MediaFetchError extends Error {
 	readonly code: MediaFetchErrorCode;
 	/** HTTP status, for `http_error`. */
 	readonly status?: number;
 
-	constructor(code: MediaFetchErrorCode, message: string, status?: number) {
-		super(message);
+	constructor(code: MediaFetchErrorCode, message: string, status?: number, options?: ErrorOptions) {
+		super(message, options);
 		this.name = "MediaFetchError";
 		this.code = code;
 		this.status = status;
 	}
+}
+
+/** Private media can't be fetched: the viewer token couldn't be issued (`cause`: the issuance's error). */
+export function tokenUnavailableError(cause?: Error | null): MediaFetchError {
+	return new MediaFetchError("token_unavailable", "No viewer token: its issuance failed", undefined, { cause });
 }
 
 export interface MediaFetchRequest {

@@ -30,6 +30,8 @@ const ERROR_TEXT: Record<MediaFetchErrorCode, string> = {
 	too_large: "The file is too large to preview.",
 	unsupported_type: "This file type can't be previewed.",
 	type_mismatch: "The file's content doesn't match its type.",
+	token_unavailable: "Access to this file couldn't be granted. Try again.",
+	session_mismatch: "Your session changed. Reload the page.",
 };
 
 export const defaultPreviewLabels: PreviewLabels = {

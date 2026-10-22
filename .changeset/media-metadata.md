@@ -12,7 +12,8 @@ Record and edit media metadata.
 - The component's `media` records gain optional `title`, `alt`, `tags`, `pageCount` and `searchText` (title and
   filename, lowercased, behind a `search_text` search index). Records from before stay valid; no migration.
 - `confirmUpload` records the Worker's image size over the client's, and takes an optional `pageCount` (PDFs). The
-  client's `width`, `height` and `pageCount` are hints: whole numbers from 1 to 100,000, else `invalid_media_metadata`.
+  client's `width`, `height` and `pageCount` are hints: whole numbers from 1 to 100,000; another value is dropped
+  (and logged) and the upload is recorded without it.
   `upload(file, { pageCount })` passes it, and `countPdfPages(file)` from `@devultur/convex/pdfjs` counts it with pdf.js.
 - `updateMediaMeta({ key, title?, alt?, tags? })`, in `defineDevulturFunctions` (guarded) and `Devultur.exposeApi`, and
   `devultur.updateMediaMeta(ctx, args)` from your server. Trimmed, tags deduplicated; title up to 200 characters, alt up

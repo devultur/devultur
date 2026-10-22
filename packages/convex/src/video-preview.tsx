@@ -1,0 +1,63 @@
+"use client";
+
+// `<Preview>`'s video: the streaming `<VideoPlayer>`, which never goes through a blob (it streams HLS and sends the
+// session header itself). A refused playlist or segment, or a viewer token that couldn't be issued, renders the
+// fallback instead of a player that never starts.
+import React from "react";
+import type { DevulturMedia } from "@devultur/core";
+import { VideoPlayer, type VideoPlayerError } from "@devultur/react";
+import { MediaFetchError, tokenUnavailableError } from "./media-fetch";
+import type { RenderFallback } from "./pdf-preview";
+import { useDevultur, useVideoProps } from "./react";
+
+interface VideoPreviewProps {
+	media: DevulturMedia;
+	renderFallback: RenderFallback;
+	className?: string;
+}
+
+interface PlaybackFailure {
+	/** The token the player had: a new one (renewed, re-issued, retried) plays again. */
+	token: string | undefined;
+	error: MediaFetchError | null;
+}
+
+const UNAUTHORIZED = 401;
+
+function fetchErrorOf(error: VideoPlayerError): MediaFetchError | null {
+	if (error.status === UNAUTHORIZED && error.code === "session_mismatch") {
+		return new MediaFetchError("session_mismatch", "The delivery refused this session's token", UNAUTHORIZED);
+	}
+	if (error.status === UNAUTHORIZED) return tokenUnavailableError();
+	if (error.status) return new MediaFetchError("http_error", `Video fetch failed: ${error.status}`, error.status);
+	return null;
+}
+
+export function VideoPreview({ media, renderFallback, className }: VideoPreviewProps) {
+	const { tokenStatus, tokenError, reissueToken } = useDevultur();
+	const videoProps = useVideoProps(media);
+	const [failure, setFailure] = React.useState<PlaybackFailure | null>(null);
+	const hasReissuedRef = React.useRef(false);
+	const playerToken = videoProps?.token;
+
+	const handleError = React.useCallback(
+		(error: VideoPlayerError) => {
+			// A `session_mismatch` re-issues once, like the other fetches; the new token rebuilds the player.
+			const isFirstMismatch = error.code === "session_mismatch" && !hasReissuedRef.current;
+			if (isFirstMismatch) {
+				hasReissuedRef.current = true;
+				void reissueToken();
+				return;
+			}
+			setFailure({ token: playerToken, error: fetchErrorOf(error) });
+		},
+		[reissueToken, playerToken],
+	);
+
+	if (!videoProps) return null;
+	if (media.visibility === "private" && tokenStatus === "error") {
+		return <>{renderFallback(tokenUnavailableError(tokenError))}</>;
+	}
+	if (failure && failure.token === playerToken) return <>{renderFallback(failure.error)}</>;
+	return <VideoPlayer {...videoProps} className={className} onError={handleError} />;
+}

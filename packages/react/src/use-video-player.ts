@@ -3,8 +3,9 @@
 import React from "react";
 import { SESSION_HEADER } from "@devultur/core";
 import type Hls from "hls.js";
+import { videoPlayerErrorOf } from "./hls-error";
 import { usePlaybackMetrics } from "./playback-metrics/use-playback-metrics";
-import type { QualityLevel, VideoPlayerRenderProps } from "./types";
+import type { QualityLevel, VideoPlayerError, VideoPlayerRenderProps } from "./types";
 
 const HLS_EXTENSION = ".m3u8";
 const HLS_MIME_TYPE = "application/vnd.apple.mpegurl";
@@ -19,6 +20,8 @@ interface UseVideoPlayerOptions {
 	containerRef?: React.RefObject<HTMLElement | null>;
 	onProgress?: (currentTime: number, percent: number) => void;
 	onEnded?: () => void;
+	/** A playlist or segment that couldn't load: a 401, or an error hls.js can't recover from. */
+	onError?: (error: VideoPlayerError) => void;
 	/** Playback QoE metrics (startup, rebuffering, errors…) beaconed to the playback host. `false` opts out. */
 	metrics?: boolean;
 }
@@ -46,9 +49,15 @@ export function useVideoPlayer({
 	containerRef,
 	onProgress,
 	onEnded,
+	onError,
 	metrics,
 }: UseVideoPlayerOptions): UseVideoPlayerReturn {
 	const ref = React.useRef<HTMLVideoElement | null>(null);
+	// Read when hls.js reports: a new callback identity must not rebuild the player.
+	const onErrorRef = React.useRef(onError);
+	React.useEffect(() => {
+		onErrorRef.current = onError;
+	});
 	const hlsRef = React.useRef<Hls | null>(null);
 	const [hlsInstance, setHlsInstance] = React.useState<Hls | null>(null);
 	const hasAppliedInitialTime = React.useRef(false);
@@ -115,6 +124,11 @@ export function useVideoPlayer({
 
 				hls.on(HlsConstructor.Events.LEVEL_SWITCHED, (_event, data) => {
 					setCurrentQuality(data.level);
+				});
+
+				hls.on(HlsConstructor.Events.ERROR, (_event, data) => {
+					const playerError = videoPlayerErrorOf(data);
+					if (playerError) onErrorRef.current?.(playerError);
 				});
 
 				hls.loadSource(src);

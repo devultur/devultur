@@ -47,7 +47,8 @@ export type DevulturGuardCtx =
 
 /**
  * Throws to deny the call. May return what it learned about the caller: a `userId` becomes the subject of the token
- * `issueViewerToken` issues.
+ * `issueViewerToken` issues, and the only user the progress functions act for (another `userId` in their arguments is
+ * refused with `user_mismatch`, unless the guard also returns `canActForOthers: true`).
  */
 export type DevulturGuard = (ctx: DevulturGuardCtx, operation: DevulturOperation) => GuardResult | Promise<GuardResult>;
 

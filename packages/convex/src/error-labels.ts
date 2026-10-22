@@ -99,6 +99,7 @@ export const devulturErrorLabels: DevulturErrorLabels = {
 	token_rejected: "Access was denied.",
 	reserved_user_id: "This user ID is reserved.",
 	invalid_scopes: "The requested permissions aren't valid.",
+	user_mismatch: "You can only see and change your own progress.",
 	transcode_not_configured: "Video processing isn't set up.",
 	transcode_runner_unavailable: "Video processing is busy right now. Try again later.",
 	transcode_launch_failed: "The video couldn't be processed.",
@@ -114,6 +115,8 @@ export const devulturErrorLabels: DevulturErrorLabels = {
 	too_large: "The file is too large to preview.",
 	unsupported_type: "This file type can't be previewed.",
 	type_mismatch: "The file's content doesn't match its type.",
+	token_unavailable: "Access to this file couldn't be granted. Try again.",
+	capability_unavailable: "This app can't do that here.",
 };
 
 interface ErrorDescriptor {
@@ -127,12 +130,13 @@ function asRecord(value: unknown): Record<string, unknown> {
 	return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }
 
-// `MediaFetchError` and `@devultur/core`'s `DevulturApiError`, matched by name: a second bundled copy fails instanceof.
+// `MediaFetchError`, `DevulturCapabilityError` and `@devultur/core`'s `DevulturApiError`, matched by name: a second bundled copy fails instanceof.
 function codedErrorOf(error: unknown): ErrorDescriptor | null {
 	if (!(error instanceof Error)) return null;
 	const { code, status, details, limit } = error as CodedError;
 	const statusField = typeof status === "number" ? { status } : {};
 	if (error.name === "MediaFetchError" && typeof code === "string") return { code, details: statusField };
+	if (error.name === "DevulturCapabilityError") return { code: "capability_unavailable", details: {} };
 	if (error.name !== "DevulturApiError") return null;
 	const limitField = typeof limit === "number" ? { limit } : {};
 	return {

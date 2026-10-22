@@ -463,7 +463,10 @@ Visibility is decided once, at upload, and travels in the reference:
   `og:image`, emails, and social crawlers (WhatsApp/X/Google).
 - **Private** — the `DevulturProvider` issues and auto-renews a short-lived viewer
   token; `<Image>` and `<VideoPlayer>` read it from context. You never pass it. A
-  request without a valid token gets a `401`.
+  request without a valid token gets a `401`. When the token can't be issued, `useDevultur().tokenStatus` is
+  `"error"`, private previews fail at once with `token_unavailable` and `retryToken()` tries again; see
+  [When the viewer token can't be issued](../../packages/convex/README.md#when-the-viewer-token-cant-be-issued).
+  An app that only displays media can use `<DevulturViewerProvider>`, which needs no upload or delete actions.
 
   To issue tokens per workspace (one app showing media from several), pass `tokenArgs` and your own
   `issueViewerToken` action to the provider; see

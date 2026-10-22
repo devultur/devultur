@@ -4,7 +4,7 @@
 // the in-flight fetch and release what was built from it (an object URL) when the media changes or on unmount.
 import React from "react";
 import { type DevulturMedia, mediaPath, mediaUrl } from "@devultur/core";
-import { loadMedia } from "./media-fetch";
+import { loadMedia, tokenUnavailableError } from "./media-fetch";
 import { useDevultur } from "./react";
 
 export interface MediaResourceOptions<Value> {
@@ -41,6 +41,12 @@ export function useMediaResource<Value>(
 	const isPrivate = media?.visibility === "private";
 	// Private delivery waits for the first viewer token; later renewals don't refetch (a PDF being read stays put).
 	const isReady = !isPrivate || devultur.token !== null;
+	// No token is coming until `retryToken()`: fail now instead of loading forever.
+	const isTokenUnavailable = isPrivate && devultur.tokenStatus === "error";
+	const tokenFailure = React.useMemo(
+		() => (isTokenUnavailable ? tokenUnavailableError(devultur.tokenError) : null),
+		[isTokenUnavailable, devultur.tokenError],
+	);
 	// Everything that changes what is fetched or how it's trusted: a new value revokes the old one and refetches.
 	const requestKey =
 		media && isEnabled
@@ -91,6 +97,7 @@ export function useMediaResource<Value>(
 
 	if (!requestKey) return IDLE;
 	if (!devultur.baseUrl) throw new Error("Devultur media previews require `baseUrl` on <DevulturProvider>");
+	if (tokenFailure) return { value: null, contentType: null, isLoading: false, error: tokenFailure };
 	if (settled?.requestKey !== requestKey) return LOADING;
 	return { value: settled.value, contentType: settled.contentType, isLoading: false, error: settled.error };
 }

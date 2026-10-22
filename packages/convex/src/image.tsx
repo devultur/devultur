@@ -2,14 +2,14 @@
 
 import React from "react";
 import { type DevulturMedia, type MediaUrlOptions, mediaUrl } from "@devultur/core";
-import { fetchMedia } from "./media-fetch";
+import { fetchMedia, MediaFetchError, tokenUnavailableError } from "./media-fetch";
 import { useDevultur } from "./react";
 import { buildSrcSet, normalizeWidths, pickWidth, renderedWidthFromSizes, scaledHeight } from "./responsive-image";
 
 type ImageTransforms = Pick<MediaUrlOptions, "width" | "height" | "fit" | "format" | "quality">;
 
-export interface ImageProps
-	extends Omit<React.ImgHTMLAttributes<HTMLImageElement>, "src" | "srcSet" | "width" | "height"> {
+/** An explicit `srcSet` is passed through to the `<img>` as is, and wins over the one `widths` builds. */
+export interface ImageProps extends Omit<React.ImgHTMLAttributes<HTMLImageElement>, "src" | "width" | "height"> {
 	/** Typed reference. `null`/`undefined` → renders `fallback` (or `externalFallback`). Its `alt` is the default `alt`. */
 	media: DevulturMedia | null | undefined;
 	/** Resize width (px). With `widths`, the width a private image is picked for when `sizes` can't tell. */
@@ -31,6 +31,11 @@ export interface ImageProps
 	externalFallback?: string;
 	/** background-image mode: composes the URL as this element's `background-image` (doesn't force `<img>`). */
 	render?: React.ReactElement<{ style?: React.CSSProperties }>;
+	/**
+	 * A private image that can't be shown: a `MediaFetchError` (`token_unavailable` right away when the viewer token
+	 * couldn't be issued, `http_error` when the delivery refused it) or a network error. `fallback` shows meanwhile.
+	 */
+	onLoadError?: (error: Error) => void;
 }
 
 /**
@@ -54,6 +59,7 @@ export function Image({
 	externalFallback,
 	render,
 	alt,
+	onLoadError,
 	...imgProps
 }: ImageProps) {
 	const { url } = useDevultur();
@@ -72,7 +78,7 @@ export function Image({
 		const pickedWidth = pickWidth(responsiveWidths, renderedWidthFromSizes(sizes) ?? width ?? null);
 		if (pickedWidth) transforms = variantOf(pickedWidth);
 	}
-	const { blobSrc, isFailed, handleError } = usePrivateImage(media, transforms);
+	const { blobSrc, isFailed, handleError } = usePrivateImage(media, transforms, onLoadError);
 
 	// effective src: failure or no media → `externalFallback`; private → blob object URL (null while loading
 	// → `fallback` placeholder); public → direct URL.
@@ -120,20 +126,26 @@ export function Image({
  * Private media: `<img src>` is native → can't send headers, so delivery with session binding would give a 401.
  * Like video (hls.js) and captions, it's fetched with `${SESSION_HEADER}` into an object URL, and THAT goes in the
  * src. It waits for the first viewer token; on a 401 `session_mismatch` `fetchMedia` re-issues once and retries with
- * the fresh token. Public stays native, and only its load failure is tracked here.
+ * the fresh token. Public stays native, and only its load failure is tracked here. When the viewer token couldn't be
+ * issued, a private image fails at once (`token_unavailable`) and loads once `retryToken()` gets one.
  */
-function usePrivateImage(media: DevulturMedia | null | undefined, transforms: ImageTransforms) {
-	const { token, baseUrl, reissueToken, sessionSecret } = useDevultur();
+function usePrivateImage(
+	media: DevulturMedia | null | undefined,
+	transforms: ImageTransforms,
+	onLoadError?: (error: Error) => void,
+) {
+	const { token, tokenStatus, tokenError, baseUrl, reissueToken, sessionSecret } = useDevultur();
 	const [isFailed, setIsFailed] = React.useState(false);
 	const [blobSrc, setBlobSrc] = React.useState<string | null>(null);
 	// Read when the fetch starts: a re-issued or renewed token must not re-run the fetch (each run downloads the file again).
-	const sessionRef = React.useRef({ token, reissueToken });
+	const sessionRef = React.useRef({ token, reissueToken, onLoadError });
 	React.useEffect(() => {
-		sessionRef.current = { token, reissueToken };
+		sessionRef.current = { token, reissueToken, onLoadError };
 	});
 
 	const isPrivate = media?.visibility === "private";
 	const hasToken = token !== null;
+	const isTokenUnavailable = isPrivate && tokenStatus === "error";
 	const { width, height, fit, format, quality } = transforms;
 
 	// New media → resets the error state (allows reloading and retrying from scratch).
@@ -144,11 +156,21 @@ function usePrivateImage(media: DevulturMedia | null | undefined, transforms: Im
 	}, [media]);
 
 	React.useEffect(() => {
+		if (!isTokenUnavailable || !media) return;
+		sessionRef.current.onLoadError?.(tokenUnavailableError(tokenError));
+	}, [isTokenUnavailable, media, tokenError]);
+
+	React.useEffect(() => {
 		if (!isPrivate || isFailed || !media || !hasToken) return;
 		let cancelled = false;
 		let objectUrl: string | null = null;
 		if (!baseUrl) throw new Error("Devultur `url()` requires `baseUrl` on <DevulturProvider>");
 		const fetchTransforms = { width, height, fit, format, quality };
+		const fail = (error: Error) => {
+			if (cancelled) return;
+			setIsFailed(true);
+			sessionRef.current.onLoadError?.(error);
+		};
 		(async () => {
 			try {
 				const response = await fetchMedia({
@@ -157,19 +179,21 @@ function usePrivateImage(media: DevulturMedia | null | undefined, transforms: Im
 					sessionSecret,
 					reissueToken: sessionRef.current.reissueToken,
 				});
-				if (response.ok) {
-					objectUrl = URL.createObjectURL(await response.blob());
-					if (cancelled) {
-						URL.revokeObjectURL(objectUrl);
-						return;
-					}
-					setBlobSrc(objectUrl);
+				if (!response.ok) {
+					const status = response.status;
+					fail(new MediaFetchError("http_error", `Media fetch failed: ${status}`, status));
 					return;
 				}
-			} catch {
+				objectUrl = URL.createObjectURL(await response.blob());
+				if (cancelled) {
+					URL.revokeObjectURL(objectUrl);
+					return;
+				}
+				setBlobSrc(objectUrl);
+			} catch (error) {
 				// network down / CORS → definitive failure.
+				fail(error instanceof Error ? error : new Error(String(error)));
 			}
-			if (!cancelled) setIsFailed(true);
 		})();
 		return () => {
 			cancelled = true;
@@ -180,5 +204,5 @@ function usePrivateImage(media: DevulturMedia | null | undefined, transforms: Im
 	// `<img>` doesn't expose the failure status. Public → direct fallback. Private goes through the blob-fetch
 	// above (which handles its own recovery); if the object URL still fails, it's definitive → fallback.
 	const handleError = React.useCallback(() => setIsFailed(true), []);
-	return { blobSrc, isFailed, handleError };
+	return { blobSrc, isFailed: isFailed || isTokenUnavailable, handleError };
 }

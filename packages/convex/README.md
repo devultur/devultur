@@ -71,9 +71,11 @@ function CoverUpload({ onSaved }) {
 ## Guarding the component's functions
 
 `defineDevulturFunctions(devultur, { guard })` returns the functions your app exposes to the browser (`createUploadUrl`,
-`confirmUpload`, `updateMediaMeta`, `issueViewerToken`, `getMedia`, `listMediaPage`, `deleteMedia`, `deleteVideo`,
-`processVideo` and the progress functions), and each one awaits `guard(ctx, { name, kind, args })` before it runs. Throw from the guard to
-deny the call. Export the functions your app uses, one by one:
+`confirmUpload`, `updateMediaMeta`, `issueViewerToken`, `getMedia`, `listMediaPage`, `searchMedia`, `deleteMedia`,
+`deleteVideo`, `processVideo` and the progress functions), and each one awaits `guard(ctx, { name, kind, args })` before
+it runs. Throw from the guard to deny the call. `listMediaPage`, `searchMedia` and `updateMediaMeta` are library-wide:
+they read or edit every user's media, so the guard decides who may call them. Export the functions your app uses, one
+by one:
 
 ```typescript
 // convex/devultur.ts
@@ -100,6 +102,11 @@ export const { createUploadUrl, confirmUpload, issueViewerToken, getMedia, listM
 - `kind` is `"query"`, `"mutation"` or `"action"`, and `ctx` is that kind's context (every one has `ctx.auth`).
 - The guard may return `{ userId }`: `issueViewerToken` then issues the viewer token for that user (its subject)
   instead of the shared `viewer` one. The browser never names it: the exposed function only takes `sessionSecret`.
+- That `userId` is also the only user the progress functions (`saveProgress`, `loadProgress`, `markComplete`,
+  `resetProgress`) act for: a call whose `userId` is another user's is refused with `user_mismatch` (403), so a
+  signed-in user can't read or overwrite someone else's progress. Return `{ userId, canActForOthers: true }` for a
+  caller who may (an admin resetting a learner's progress). A guard that returns no `userId` keeps the browser's, as
+  `exposeApi` does: return one whenever the progress functions are exported.
 - `visibility: "internal"` registers them as internal functions, for your own actions and mutations to call.
 - `config` takes what `Devultur.exposeApi` does (transcode preset, caption locales, upload lock).
 - Each function keeps its arguments and result types, so `api.devultur.confirmUpload` is typed as before and
@@ -164,6 +171,49 @@ The provider sends `{ sessionSecret, ...tokenArgs }` on the first issuance, on e
 `tokenArgs` are compared by value, so a new object with the same values changes nothing. When they change, the
 provider drops the current token, private media wait for the new one, and a response for the previous arguments is
 ignored. Your action returns what the component's action returns: `{ token, expiresIn }` or the token string.
+
+### Display-only apps
+
+An app that only shows media (no uploads, no deletes) uses `<DevulturViewerProvider>`, which needs only the base URL
+and a viewer token action:
+
+```tsx
+import { DevulturViewerProvider, Preview } from "@devultur/convex/react";
+
+<DevulturViewerProvider
+  baseUrl={MEDIA_URL}
+  issueViewerToken={api.admin.issueWorkspaceViewerToken}
+  tokenArgs={{ workspaceId }}
+>
+  <Preview media={document.file} />
+</DevulturViewerProvider>;
+```
+
+`<Image>`, `<Preview>`, `<PdfThumbnail>`, `<DownloadLink>`, `<DocumentLink>`, `<AttachmentCard>`, `useMediaObjectUrl`,
+`useMediaUrl` and `useVideoProps` work under it. `useDevultur().upload`, `uploadUrl` and `deleteMedia`, and the hooks
+that need the `api` (`useDevulturApi`, `useMediaUpload`, `<MediaLibrary>`, `<MediaPicker>`), throw a
+`DevulturCapabilityError` whose `code` is `capability_unavailable`.
+
+### When the viewer token can't be issued
+
+`useDevultur()` tells where the viewer token stands:
+
+```tsx
+const { tokenStatus, tokenError, retryToken } = useDevultur();
+// tokenStatus: "idle" | "loading" | "ready" | "error"
+if (tokenStatus === "error") return <button onClick={retryToken}>Try again</button>; // tokenError has why
+```
+
+The status turns `"error"` when the action throws (your guard refused, for example) or returns no token, and stays
+there until `retryToken()`: a failed issuance isn't retried on its own. Meanwhile private media fails at once with the
+`MediaFetchError` code `token_unavailable` instead of loading: `useMediaObjectUrl` returns it as `error`,
+`<Preview>` passes it to its `fallback`, `<PdfThumbnail>` and `<Image>` render their `fallback` (`<Image onLoadError>`
+receives it), and `<DownloadLink onDownloadError>` receives it on click. They load once `retryToken()` gets a token.
+
+`<Preview>`'s video re-issues the token once when the delivery answers the playlist or a segment with a 401
+`session_mismatch`; after that, or on any other 401, it renders its `fallback` with `session_mismatch` or
+`token_unavailable`. `<VideoPlayer onError>` (from `@devultur/react`) reports these failures when you render the
+player yourself.
 
 ## Media library
 
@@ -246,7 +296,8 @@ references stored before 1.4.0 stay valid without a migration.
 | `title`, `alt`, `tags` | Your app, with `updateMediaMeta`. |
 
 **Client hints.** `confirmUpload` accepts `width`, `height` and `pageCount` from the client. They are the uploader's
-word, not checked against the bytes: whole numbers from 1 to 100,000, or the call fails with `invalid_media_metadata`.
+word, not checked against the bytes: whole numbers from 1 to 100,000. Another value is dropped (with a warning in the
+logs) and the upload is recorded without it: the bytes are already stored.
 A size the Worker read wins over the client's. To record a PDF's page count at upload, count it in the browser with
 pdf.js (imported on the first call; `pdfjs-dist` must be installed):
 
