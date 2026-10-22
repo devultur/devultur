@@ -371,5 +371,9 @@ Visibility is decided once, at upload, and travels in the reference:
   token; `<Image>` and `<VideoPlayer>` read it from context. You never pass it. A
   request without a valid token gets a `401`.
 
+  To issue tokens per workspace (one app showing media from several), pass `tokenArgs` and your own
+  `issueViewerToken` action to the provider; see
+  [Multiple workspaces](../../packages/convex/README.md#multiple-workspaces).
+
 Because the reference carries its visibility, `<Image media={ref} />` picks
 token-or-no-token automatically — the render never knows about tokens.

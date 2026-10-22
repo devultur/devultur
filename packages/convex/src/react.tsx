@@ -4,7 +4,6 @@ import React from "react";
 import {
 	buildMediaUrl,
 	CaptionLocaleLabel,
-	DEFAULT_TOKEN_EXPIRY_SECONDS,
 	type DevulturKind,
 	type DevulturMedia,
 	type FailureReason,
@@ -31,6 +30,7 @@ import type { FunctionReference } from "convex/server";
 import { isSessionMismatch } from "./image-recovery";
 import { fetchMedia } from "./media-fetch";
 import { deriveUploadState, type UploadPhase } from "./media-upload-derive";
+import { useViewerToken, type ViewerTokenArgs } from "./viewer-token";
 
 export type { MediaUploadError, MediaUploadState, UploadProgress } from "@devultur/react";
 export type { CropUploadLabels, CropUploadProps, CropUploadRenderProps } from "./crop-upload";
@@ -43,6 +43,7 @@ export { PdfThumbnail, type PdfThumbnailProps } from "./pdf-thumbnail";
 export { Preview, type PreviewProps } from "./preview";
 export { defaultPreviewLabels, type PreviewLabels } from "./preview-labels";
 export type { PreviewKind } from "./preview-type";
+export type { ViewerTokenArgs, ViewerTokenResult } from "./viewer-token";
 
 /** Transform/delivery options for media URLs (without `token`, which the context injects). */
 type MediaRenderOptions = Omit<MediaUrlOptions, "token">;
@@ -129,26 +130,32 @@ interface DevulturProviderProps {
 	api: DevulturApi;
 	/** Media worker base (e.g. `https://media.your-domain.com`). Required for `useMediaUrl`. */
 	baseUrl?: string;
+	/**
+	 * Extra arguments sent with `sessionSecret` on every viewer token issuance (first, renewal and re-issue), for
+	 * example `{ workspaceId }`. Compared by value: when they change, the current token is dropped and a new one is
+	 * issued. The component's own `issueViewerToken` accepts only `sessionSecret`, so pass your own action in
+	 * `issueViewerToken` that takes these arguments.
+	 */
+	tokenArgs?: ViewerTokenArgs;
+	/**
+	 * Your own viewer token action, used instead of `api.issueViewerToken`. It receives `{ sessionSecret, ...tokenArgs }`
+	 * and returns what the component's `issueViewerToken` returns.
+	 */
+	issueViewerToken?: FunctionReference<"action", "public", { sessionSecret: string }>;
 	children: React.ReactNode;
 }
 
-const REFRESH_BUFFER_MS = 5 * 60 * 1000;
-const MIN_REFRESH_MS = 60_000;
-const DEFAULT_TTL_MS = DEFAULT_TOKEN_EXPIRY_SECONDS * 1000;
-
-function extractTokenResult(result: { token: string; expiresIn: number } | string) {
-	const tokenValue = typeof result === "string" ? result : result.token;
-	const ttlMs = typeof result === "string" ? DEFAULT_TTL_MS : result.expiresIn * 1000;
-	return { tokenValue, ttlMs };
-}
-
-export function DevulturProvider({ api, baseUrl, children }: DevulturProviderProps) {
-	const [token, setToken] = React.useState<string | null>(null);
+export function DevulturProvider({ api, baseUrl, tokenArgs, issueViewerToken, children }: DevulturProviderProps) {
 	// Client session secret: generated ONCE (in memory, per app session), bound to the token at
 	// issuance, and sent in `${SESSION_HEADER}` on every delivery → real session binding (works even
 	// when the token is issued server-side). Empty outside the browser (SSR) → no binding.
 	const [sessionSecret] = React.useState(() => (typeof crypto !== "undefined" ? crypto.randomUUID() : ""));
-	const issueViewerToken = useAction(api.issueViewerToken);
+	const issueViewerTokenAction = useAction(issueViewerToken ?? api.issueViewerToken);
+	const { token, reissueToken } = useViewerToken({
+		issueViewerToken: issueViewerTokenAction,
+		sessionSecret,
+		tokenArgs,
+	});
 	const createUploadUrlAction = useAction(api.createUploadUrl);
 	const deleteMediaAction = useAction(api.deleteMedia);
 	// Fallback ref to respect the rules of hooks; only invoked if `api.confirmUpload` exists.
@@ -156,58 +163,6 @@ export function DevulturProvider({ api, baseUrl, children }: DevulturProviderPro
 	// `useAction` can't be conditional (rules of hooks); if there's no `deleteVideo`, it falls back to
 	// `deleteMedia` as a valid reference — but it's only invoked when `api.deleteVideo` exists (see `deleteMedia`).
 	const deleteVideoAction = useAction(api.deleteVideo ?? api.deleteMedia);
-	const refreshTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-	const reissueInFlightRef = React.useRef<Promise<string | null> | null>(null);
-
-	const scheduleRefresh = React.useCallback(
-		(ttlMs: number) => {
-			if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-			const refreshIn = Math.max(ttlMs - REFRESH_BUFFER_MS, MIN_REFRESH_MS);
-			refreshTimerRef.current = setTimeout(() => {
-				issueViewerToken({ sessionSecret }).then((result: { token: string; expiresIn: number } | string) => {
-					const { tokenValue, ttlMs: nextTtl } = extractTokenResult(result);
-					setToken(tokenValue);
-					scheduleRefresh(nextTtl);
-				});
-			}, refreshIn);
-		},
-		[issueViewerToken, sessionSecret],
-	);
-
-	React.useEffect(() => {
-		if (token) return;
-		issueViewerToken({ sessionSecret }).then((result: { token: string; expiresIn: number } | string) => {
-			const { tokenValue, ttlMs } = extractTokenResult(result);
-			setToken(tokenValue);
-			scheduleRefresh(ttlMs);
-		});
-	}, [token, issueViewerToken, scheduleRefresh, sessionSecret]);
-
-	const reissueToken = React.useCallback((): Promise<string | null> => {
-		// Single-flight: if a resource already triggered the re-issuance, the other 401s share the same
-		// promise (one new token per burst of mismatches, no loops).
-		if (reissueInFlightRef.current) return reissueInFlightRef.current;
-		const pending = issueViewerToken({ sessionSecret })
-			.then((result: { token: string; expiresIn: number } | string) => {
-				const { tokenValue, ttlMs } = extractTokenResult(result);
-				setToken(tokenValue);
-				scheduleRefresh(ttlMs);
-				reissueInFlightRef.current = null;
-				return tokenValue;
-			})
-			.catch(() => {
-				reissueInFlightRef.current = null;
-				return null;
-			});
-		reissueInFlightRef.current = pending;
-		return pending;
-	}, [issueViewerToken, scheduleRefresh, sessionSecret]);
-
-	React.useEffect(() => {
-		return () => {
-			if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-		};
-	}, []);
 
 	const uploadUrl = React.useCallback(
 		async (file: File) => {
