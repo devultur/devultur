@@ -2,9 +2,10 @@
 
 import type React from "react";
 import type { DevulturMedia } from "@devultur/core";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PdfjsLoader, PdfjsModule, PdfRenderTask } from "./pdf-render";
+import type { PdfjsLoader } from "./pdf-render";
+import { fakePdfjs, stubIntersectionObserver } from "./pdf-test-utils";
 
 vi.mock("convex/react", () => ({
 	useAction: () => async () => ({ token: "viewer-token", expiresIn: 3600 }),
@@ -20,34 +21,6 @@ const api = { issueViewerToken: "issueViewerToken", createUploadUrl: "createUplo
 const PDF_BODY = "%PDF-1.7 test";
 
 const privateFile = (filename: string): DevulturMedia => ({ id: "f1", kind: "file", visibility: "private", filename });
-
-interface FakePdfjsOptions {
-	pageCount?: number;
-	/** Renders never settle, so unmounting has a task to cancel. */
-	isRenderPending?: boolean;
-	failure?: Error;
-}
-
-function fakePdfjs({ pageCount = 3, isRenderPending = false, failure }: FakePdfjsOptions = {}) {
-	const renderTasks: Array<PdfRenderTask & { cancel: ReturnType<typeof vi.fn> }> = [];
-	const destroy = vi.fn(async () => {});
-	const getPage = vi.fn(async (pageNumber: number) => ({
-		getViewport: ({ scale }: { scale: number }) => ({ width: 600 * scale, height: 800 * scale }),
-		render: () => {
-			const task = { promise: isRenderPending ? new Promise<void>(() => {}) : Promise.resolve(), cancel: vi.fn() };
-			renderTasks.push(task);
-			return task;
-		},
-		getTextContent: async () => ({ items: [{ str: `Text of page ${pageNumber}` }] }),
-		cleanup: vi.fn(),
-	}));
-	const getDocument = vi.fn((_source: { data: Uint8Array }) => ({
-		promise: failure ? Promise.reject(failure) : Promise.resolve({ numPages: pageCount, getPage }),
-		destroy,
-	}));
-	const pdfjs: PdfjsModule = { GlobalWorkerOptions: { workerSrc: "" }, getDocument };
-	return { pdfjs, getDocument, getPage, destroy, renderTasks };
-}
 
 function renderWithPdfjs(element: React.ReactElement, loader?: PdfjsLoader) {
 	return render(
@@ -158,33 +131,6 @@ describe("<Preview> with pdf.js", () => {
 		expect(fake.pdfjs.GlobalWorkerOptions.workerSrc).toBe("/assets/pdf.worker.min.mjs");
 	});
 });
-
-// Records observers so a test decides when an element scrolls into view.
-function stubIntersectionObserver() {
-	const observers: Array<{ callback: IntersectionObserverCallback; elements: Element[] }> = [];
-	class FakeIntersectionObserver {
-		private readonly record: { callback: IntersectionObserverCallback; elements: Element[] };
-		constructor(callback: IntersectionObserverCallback) {
-			this.record = { callback, elements: [] };
-			observers.push(this.record);
-		}
-		observe(element: Element) {
-			this.record.elements.push(element);
-		}
-		disconnect() {
-			this.record.elements = [];
-		}
-	}
-	vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
-	const scrollIntoView = () =>
-		act(() => {
-			for (const { callback, elements } of observers) {
-				const entries = elements.map((target) => ({ target, isIntersecting: true }));
-				if (entries.length) callback(entries as never, {} as never);
-			}
-		});
-	return { scrollIntoView };
-}
 
 describe("<PdfThumbnail>", () => {
 	it("fetches nothing until visible, then renders page 1 only", async () => {

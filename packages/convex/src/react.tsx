@@ -41,6 +41,7 @@ export { type PdfPreviewConfig, PdfPreviewProvider } from "./pdf-context";
 export type { PdfjsLoader, PdfjsModule } from "./pdf-render";
 export { PdfThumbnail, type PdfThumbnailProps } from "./pdf-thumbnail";
 export { Preview, type PreviewProps } from "./preview";
+export { defaultPreviewLabels, type PreviewLabels } from "./preview-labels";
 export type { PreviewKind } from "./preview-type";
 
 /** Transform/delivery options for media URLs (without `token`, which the context injects). */

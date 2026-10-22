@@ -6,6 +6,10 @@ import { useMediaResource } from "./media-resource";
 import { usePdfjs } from "./pdf-context";
 import { useIsVisible, usePageRender, usePdfDocument } from "./pdf-hooks";
 import type { PdfDocument, PdfjsModule } from "./pdf-render";
+import type { PreviewLabels } from "./preview-labels";
+
+/** Renders `<Preview>`'s fallback for what caused it: a fetch or pdf.js error, or `null` (the `maxPages` note). */
+export type RenderFallback = (error: Error | null) => React.ReactNode;
 
 /** Hidden from sight, read by screen readers: the canvas carries no text of its own. */
 export const VISUALLY_HIDDEN: React.CSSProperties = {
@@ -30,8 +34,9 @@ export interface PdfPreviewProps {
 	media: DevulturMedia;
 	expectedType: string;
 	maxBytes: number;
-	fallback: React.ReactNode;
+	renderFallback: RenderFallback;
 	loading: React.ReactNode;
+	labels: PreviewLabels;
 	title?: string;
 	className?: string;
 	pdfWorkerSrc?: string;
@@ -40,7 +45,7 @@ export interface PdfPreviewProps {
 
 /** A PDF on canvases with pdf.js when a `PdfPreviewProvider` supplies it, else in the browser's viewer. */
 export function PdfPreview(props: PdfPreviewProps) {
-	const { media, expectedType, maxBytes, fallback, loading, title, className, pdfWorkerSrc, maxPages } = props;
+	const { media, expectedType, maxBytes, renderFallback, loading, labels, title, className, pdfWorkerSrc } = props;
 	const pdfjsState = usePdfjs(pdfWorkerSrc);
 	const { value: bytes, error } = useMediaResource(media, {
 		isEnabled: true,
@@ -48,9 +53,9 @@ export function PdfPreview(props: PdfPreviewProps) {
 		contentType: expectedType,
 		decode: keepBytes,
 	});
-	if (error) return <>{fallback}</>;
+	if (error) return <>{renderFallback(error)}</>;
 	if (!bytes || pdfjsState.status === "loading") return <>{loading}</>;
-	const label = title ?? media.filename ?? "PDF";
+	const label = title ?? media.filename ?? labels.untitledPdf;
 	if (pdfjsState.status === "unavailable") return <PdfFrame bytes={bytes} label={label} className={className} />;
 	return (
 		<PdfCanvasDocument
@@ -59,9 +64,10 @@ export function PdfPreview(props: PdfPreviewProps) {
 			bytes={bytes}
 			label={label}
 			className={className}
-			fallback={fallback}
+			renderFallback={renderFallback}
 			loading={loading}
-			maxPages={maxPages ?? DEFAULT_MAX_PAGES}
+			labels={labels}
+			maxPages={props.maxPages ?? DEFAULT_MAX_PAGES}
 		/>
 	);
 }
@@ -72,13 +78,14 @@ interface PdfCanvasDocumentProps {
 	bytes: Uint8Array;
 	label: string;
 	className?: string;
-	fallback: React.ReactNode;
+	renderFallback: RenderFallback;
 	loading: React.ReactNode;
+	labels: PreviewLabels;
 	maxPages: number;
 }
 
 function PdfCanvasDocument(props: PdfCanvasDocumentProps) {
-	const { pdfjs, workerSrc, bytes, label, className, fallback, loading, maxPages } = props;
+	const { pdfjs, workerSrc, bytes, label, className, renderFallback, loading, labels, maxPages } = props;
 	const { document, error } = usePdfDocument({ pdfjs, bytes, workerSrc });
 	const containerRef = React.useRef<HTMLDivElement>(null);
 	// Measured once the container exists; pages wait for it so none renders twice.
@@ -88,21 +95,31 @@ function PdfCanvasDocument(props: PdfCanvasDocumentProps) {
 		if (document) setWidth(containerRef.current?.clientWidth ?? 0);
 	}, [document]);
 
-	if (error) return <>{fallback}</>;
+	if (error) return <>{renderFallback(error)}</>;
 	if (!document) return <>{loading}</>;
 	const shownPageCount = Math.min(document.numPages, Math.max(1, maxPages));
 	const isTruncated = shownPageCount < document.numPages;
 	const pageNumbers = Array.from({ length: shownPageCount }, (_, index) => index + 1);
-	const pageCountLabel = document.numPages === 1 ? "1 page" : `${document.numPages} pages`;
 	return (
-		<div ref={containerRef} role="document" aria-label={`${label}, ${pageCountLabel}`} className={className}>
+		<div
+			ref={containerRef}
+			role="document"
+			aria-label={labels.document(label, document.numPages)}
+			className={className}
+		>
 			{width !== null &&
 				pageNumbers.map((pageNumber) => (
-					<PdfPageView key={pageNumber} document={document} pageNumber={pageNumber} width={width} />
+					<PdfPageView
+						key={pageNumber}
+						document={document}
+						pageNumber={pageNumber}
+						width={width}
+						label={labels.page(pageNumber, document.numPages)}
+					/>
 				))}
 			{isTruncated && (
 				<p>
-					Showing the first {shownPageCount} of {document.numPages} pages. {fallback}
+					{labels.pageCap(shownPageCount, document.numPages)} {renderFallback(null)}
 				</p>
 			)}
 		</div>
@@ -113,10 +130,11 @@ interface PdfPageViewProps {
 	document: PdfDocument;
 	pageNumber: number;
 	width: number;
+	label: string;
 }
 
 // A page renders once it nears the viewport; until then an A4-shaped placeholder holds its place in the scroll.
-function PdfPageView({ document, pageNumber, width }: PdfPageViewProps) {
+function PdfPageView({ document, pageNumber, width, label }: PdfPageViewProps) {
 	const pageRef = React.useRef<HTMLElement>(null);
 	const canvasRef = React.useRef<HTMLCanvasElement>(null);
 	const isVisible = useIsVisible(pageRef);
@@ -130,7 +148,7 @@ function PdfPageView({ document, pageNumber, width }: PdfPageViewProps) {
 	});
 	const placeholderStyle = isRendered ? undefined : { aspectRatio: "1 / 1.4142", maxWidth: "100%" };
 	return (
-		<section ref={pageRef} aria-label={`Page ${pageNumber} of ${document.numPages}`} style={placeholderStyle}>
+		<section ref={pageRef} aria-label={label} style={placeholderStyle}>
 			<canvas ref={canvasRef} style={{ display: "block", maxWidth: "100%" }} />
 			{text && <p style={VISUALLY_HIDDEN}>{text}</p>}
 		</section>

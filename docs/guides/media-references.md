@@ -118,6 +118,62 @@ The content type comes from `contentType` when you pass it (e.g. the type you st
 the filename's extension. Images, PDFs and audio are capped at 50 MiB (`maxBytes`) and text at 1 MiB
 (`maxTextBytes`); a larger file renders the fallback.
 
+While a file loads, `<Preview>` renders `loading`; without it, a visually hidden `role="status"` announces
+`labels.loading` to screen readers (`loading={null}` renders nothing).
+
+**Fallback as a function.** Pass a function to render a different fallback for each reason. It receives the
+`MediaFetchError` behind it, or `null`:
+
+```tsx
+<Preview
+  media={document.file}
+  fallback={(error) => (
+    <p>
+      {error?.code === "too_large" ? "Too large to preview." : "No preview available."}{" "}
+      <DownloadLink media={document.file}>Download</DownloadLink>
+    </p>
+  )}
+/>
+```
+
+| `error` | When |
+| --- | --- |
+| `MediaFetchError` with `http_error` (and `status`), `too_large` or `type_mismatch` | The fetch was refused |
+| `MediaFetchError` with `unsupported_type` | The type doesn't preview inline (HTML, SVG, a ZIP…); nothing was fetched |
+| `null` | A network failure, a PDF pdf.js can't open, or the fallback after the `maxPages` note |
+
+The error comes from the preview's own fetch: rendering the fallback never fetches again.
+
+**Localization.** Every string a preview shows or announces is in `labels`: the PDF document's and pages' accessible
+names, the loading announcement, the page-cap note, the default fallback's link text and its `title` for each error
+code, the thumbnail's name and the names used when a file has neither `title` nor filename. Pass any subset on
+`PdfPreviewProvider` for every preview below it, or on one `<Preview>` / `<PdfThumbnail>`; the component's own
+`labels` win over the provider's, which win over the English defaults (`defaultPreviewLabels`):
+
+```tsx
+import { PdfPreviewProvider, type PreviewLabels } from "@devultur/convex/react";
+import { loadPdfjs } from "@devultur/convex/pdfjs";
+
+const spanishLabels: Partial<PreviewLabels> = {
+  document: (title, pageCount) => `${title}, ${pageCount === 1 ? "1 página" : `${pageCount} páginas`}`,
+  page: (page, pageCount) => `Página ${page} de ${pageCount}`,
+  loading: "Cargando…",
+  pageCap: (shown, total) => `Mostrando las primeras ${shown} de ${total} páginas.`,
+  error: (code) => (code === "too_large" ? "El archivo es demasiado grande para previsualizarlo." : "No se puede previsualizar."),
+  thumbnail: (title) => `Miniatura de ${title}`,
+  untitledPdf: "PDF",
+  untitledMedia: "Vista previa",
+  download: "Descargar",
+};
+
+<PdfPreviewProvider pdfjs={loadPdfjs} labels={spanishLabels}>
+  <Preview media={document.file} />
+  <Preview media={invoice.file} labels={{ document: (title) => `Factura ${title}` }} />
+</PdfPreviewProvider>
+```
+
+`PdfPreviewProvider` provides labels even without `pdfjs`, so it can wrap an app that previews only images or text.
+
 For your own markup, `useMediaObjectUrl` returns an in-memory URL for any media:
 
 ```tsx

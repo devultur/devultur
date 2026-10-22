@@ -3,9 +3,12 @@
 import type React from "react";
 import type { DevulturMedia } from "@devultur/core";
 import { VideoPlayer } from "@devultur/react";
+import { MediaFetchError } from "./media-fetch";
 import { useMediaObjectUrl } from "./media-object-url";
 import { useMediaResource } from "./media-resource";
-import { PdfPreview } from "./pdf-preview";
+import { usePreviewLabels } from "./pdf-context";
+import { PdfPreview, type RenderFallback, VISUALLY_HIDDEN } from "./pdf-preview";
+import type { PreviewLabels } from "./preview-labels";
 import { expectedContentType, type PreviewKind, previewKindOf } from "./preview-type";
 import { DownloadLink, useDevultur, useVideoProps } from "./react";
 
@@ -23,9 +26,14 @@ export interface PreviewProps {
 	maxBytes?: number;
 	/** Size cap for text previews. Default 1 MiB. */
 	maxTextBytes?: number;
-	/** Shown for types that don't preview inline and when the fetch fails. Default: a `<DownloadLink>`. */
-	fallback?: React.ReactNode;
-	/** Shown while a private file is loading. Default: nothing. */
+	/**
+	 * Shown for types that don't preview inline and when the fetch fails. Default: a `<DownloadLink>`.
+	 * As a function it receives why: a `MediaFetchError` when the fetch was refused (`http_error`, `too_large`,
+	 * `type_mismatch`) or the type doesn't preview inline (`unsupported_type`, nothing fetched), `null` otherwise
+	 * (a network failure, a PDF pdf.js can't open, or the link after the `maxPages` note).
+	 */
+	fallback?: React.ReactNode | ((error: MediaFetchError | null) => React.ReactNode);
+	/** Shown while a file loads. Default: `labels.loading`, visually hidden, in a `role="status"`. `null` → nothing. */
 	loading?: React.ReactNode;
 	/** Accessible name of the preview (`alt`, `title`, `aria-label`). Default: the filename (text: none). */
 	title?: string;
@@ -37,6 +45,8 @@ export interface PreviewProps {
 	maxPages?: number;
 	/** URL of pdf.js's worker for this preview; overrides `PdfPreviewProvider`'s `workerSrc`. */
 	pdfWorkerSrc?: string;
+	/** Overrides any string shown or announced; wins over `PdfPreviewProvider`'s `labels`. English by default. */
+	labels?: Partial<PreviewLabels>;
 }
 
 /**
@@ -48,29 +58,59 @@ export interface PreviewProps {
  * @example
  * <Preview media={document.file} maxBytes={20_000_000} className="h-[80vh] w-full" />
  */
-export function Preview({ media, contentType, fallback, ...viewProps }: PreviewProps) {
+export function Preview({ media, contentType, fallback, loading, labels, ...viewProps }: PreviewProps) {
+	const text = usePreviewLabels(labels);
 	if (!media) return null;
-	const fallbackNode =
-		fallback === undefined ? <DownloadLink media={media}>{media.filename ?? "Download"}</DownloadLink> : fallback;
 	if (media.kind === "video") return <VideoPreview media={media} className={viewProps.className} />;
 
+	const renderFallback: RenderFallback = (error) => {
+		const fetchError = error instanceof MediaFetchError ? error : null;
+		if (typeof fallback === "function") return fallback(fetchError);
+		if (fallback !== undefined) return fallback;
+		return <DefaultFallback media={media} error={fetchError} labels={text} />;
+	};
 	const expectedType = expectedContentType(media, contentType);
 	const kind = previewKindOf(expectedType);
-	if (!expectedType || !kind) return <>{fallbackNode}</>;
+	if (!expectedType || !kind) return <>{renderFallback(unsupportedType(expectedType))}</>;
 
-	const props = { ...viewProps, media, expectedType, fallback: fallbackNode };
+	const loadingNode = loading === undefined ? <LoadingStatus text={text.loading} /> : loading;
+	const props = { ...viewProps, media, expectedType, renderFallback, loading: loadingNode, labels: text };
 	if (kind === "text") return <TextPreview {...props} />;
-	if (kind === "pdf") {
-		const { maxBytes = DEFAULT_MAX_BYTES, loading = null } = props;
-		return <PdfPreview {...props} maxBytes={maxBytes} loading={loading} />;
-	}
+	if (kind === "pdf") return <PdfPreview {...props} maxBytes={props.maxBytes ?? DEFAULT_MAX_BYTES} />;
 	return <BinaryPreview {...props} kind={kind} />;
 }
 
-interface ViewProps extends Omit<PreviewProps, "contentType" | "fallback"> {
+const unsupportedType = (contentType: string | null | undefined) =>
+	new MediaFetchError("unsupported_type", `Can't preview ${contentType ?? "an unknown type"} inline`);
+
+interface DefaultFallbackProps {
+	media: DevulturMedia;
+	error: MediaFetchError | null;
+	labels: PreviewLabels;
+}
+
+function DefaultFallback({ media, error, labels }: DefaultFallbackProps) {
+	return (
+		<DownloadLink media={media} title={error ? labels.error(error.code) : undefined}>
+			{media.filename ?? labels.download}
+		</DownloadLink>
+	);
+}
+
+function LoadingStatus({ text }: { text: string }) {
+	return (
+		<span role="status" style={VISUALLY_HIDDEN}>
+			{text}
+		</span>
+	);
+}
+
+interface ViewProps extends Omit<PreviewProps, "contentType" | "fallback" | "labels"> {
 	media: DevulturMedia;
 	expectedType: string;
-	fallback: React.ReactNode;
+	renderFallback: RenderFallback;
+	loading: React.ReactNode;
+	labels: PreviewLabels;
 }
 
 // Video never goes through a blob: the player streams HLS and sends the session header itself.
@@ -85,8 +125,9 @@ function BinaryPreview({
 	kind,
 	expectedType,
 	maxBytes = DEFAULT_MAX_BYTES,
-	fallback,
-	loading = null,
+	renderFallback,
+	loading,
+	labels,
 	title,
 	className,
 }: ViewProps & { kind: Exclude<PreviewKind, "text" | "pdf"> }) {
@@ -97,9 +138,9 @@ function BinaryPreview({
 	const isPublicImage = kind === "image" && media.visibility === "public";
 	const verified = useMediaObjectUrl(media, { enabled: !isPublicImage, contentType: expectedType, maxBytes });
 	const objectUrl = isPublicImage ? url(media) : verified.objectUrl;
-	if (verified.error) return <>{fallback}</>;
+	if (verified.error) return <>{renderFallback(verified.error)}</>;
 	if (!objectUrl) return <>{loading}</>;
-	const label = title ?? media.filename ?? "Preview";
+	const label = title ?? media.filename ?? labels.untitledMedia;
 
 	if (kind === "image") {
 		return <img src={objectUrl} alt={label} width={media.width} height={media.height} className={className} />;
@@ -115,8 +156,8 @@ function TextPreview({
 	media,
 	expectedType,
 	maxTextBytes = DEFAULT_MAX_TEXT_BYTES,
-	fallback,
-	loading = null,
+	renderFallback,
+	loading,
 	title,
 	className,
 }: ViewProps) {
@@ -126,7 +167,7 @@ function TextPreview({
 		contentType: expectedType,
 		decode: decodeText,
 	});
-	if (error) return <>{fallback}</>;
+	if (error) return <>{renderFallback(error)}</>;
 	if (text === null) return <>{loading}</>;
 	return (
 		<pre title={title} className={className}>
