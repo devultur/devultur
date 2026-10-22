@@ -136,6 +136,14 @@ export function exposedFunctions(component: ComponentApi, config?: DevulturCompo
 			async (ctx, args) => ctx.runQuery(component.public.listMediaPage, args),
 		),
 
+		// The media library matching a search (title and filename), a page at a time. Every user's media, like
+		// `listMediaPage`; a blank search lists it newest first.
+		searchMedia: exposed(
+			"query",
+			{ search: v.string(), type: mediaTypeArg, paginationOpts: paginationOptsValidator },
+			async (ctx, args) => ctx.runQuery(component.library.searchMedia, args),
+		),
+
 		saveProgress: exposed("mutation", { ...progressArgs, position: v.number() }, async (ctx, args) =>
 			ctx.runMutation(component.public.saveProgress, args),
 		),

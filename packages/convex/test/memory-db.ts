@@ -1,11 +1,16 @@
 // A minimal in-memory stand-in for a Convex `ctx.db`: enough of insert / get / patch / delete and
 // `query(table).withIndex(name, (q) => q.eq(...)).first() | .collect()` (plus `.filter()` and `.collect()` on a whole
-// table) to run the component's functions for real.
+// table, `.paginate()` and `.withSearchIndex(...).paginate()`) to run the component's functions for real.
 
 type Document = Record<string, unknown> & { _id: string };
 
 interface IndexRange {
 	eq(field: string, value: unknown): IndexRange;
+}
+
+interface SearchRange {
+	search(field: string, text: string): SearchRange;
+	eq(field: string, value: unknown): SearchRange;
 }
 
 interface FieldFilter {
@@ -70,12 +75,42 @@ export function memoryDb() {
 					return { page: ordered.slice(start, end), isDone: end >= ordered.length, continueCursor: String(end) };
 				},
 			});
+			// `withSearchIndex(name, (q) => q.search(field, text).eq(...))`: a document matches when each of the text's
+			// words starts one of the field's words (an approximation of Convex's ranking, enough to filter on).
+			const search: SearchRange = {
+				search(field, text) {
+					const terms = text.toLowerCase().split(/\s+/).filter(Boolean);
+					const words = (document: Document) => String(document[field] ?? "").split(/[^\p{L}\p{N}]+/u);
+					searchMatches.push((document) =>
+						terms.every((term) => words(document).some((word) => word.startsWith(term))),
+					);
+					return search;
+				},
+				eq(field, value) {
+					conditions.push([field, value]);
+					return search;
+				},
+			};
+			const searchMatches: Array<(document: Document) => boolean> = [];
 			return {
 				withIndex(_index: string, select: (q: IndexRange) => IndexRange) {
 					select(range);
 					return { first: async () => matches()[0] ?? null, collect: async () => matches(), order };
 				},
+				withSearchIndex(_index: string, select: (q: SearchRange) => SearchRange) {
+					select(search);
+					const isMatch = (document: Document) => searchMatches.every((matcher) => matcher(document));
+					return {
+						paginate: async (options: { numItems: number; cursor: string | null }) => {
+							const found = matches().filter(isMatch);
+							const start = options.cursor ? Number(options.cursor) : 0;
+							const end = start + options.numItems;
+							return { page: found.slice(start, end), isDone: end >= found.length, continueCursor: String(end) };
+						},
+					};
+				},
 				order,
+				paginate: (options: { numItems: number; cursor: string | null }) => order("asc").paginate(options),
 				// Only `filter((q) => q.eq(q.field(name), value))`, the one filter the component uses.
 				filter(select: (q: FieldFilter) => [string, unknown]) {
 					conditions.push(select({ field: (name) => name, eq: (field, value) => [field, value] }));

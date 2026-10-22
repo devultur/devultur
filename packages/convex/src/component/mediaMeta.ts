@@ -86,3 +86,15 @@ export function mediaMetaPatch(input: MediaMetaInput): MediaMetaPatch {
 export function searchTextOf(title: string | undefined, filename: string): string {
 	return (title ? `${title} ${filename}` : filename).toLowerCase();
 }
+
+interface SearchableRecord {
+	title?: string;
+	filename: string;
+	searchText?: string;
+}
+
+/** `{ searchText }` for a record written before 1.4.0 (it has none), else `{}`: spread it into any patch of a record. */
+export function missingSearchText(record: SearchableRecord): { searchText?: string } {
+	if (record.searchText !== undefined) return {};
+	return { searchText: searchTextOf(record.title, record.filename) };
+}

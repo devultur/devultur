@@ -18,6 +18,9 @@ type ActionCtx = GenericActionCtx<GenericDataModel>;
 type UploadUrlArgs = { filename: string; contentType: string; visibility?: "public" | "private" };
 type MediaType = "video" | "image" | "file";
 type MediaPageArgs = { type?: MediaType; paginationOpts: PaginationOptions };
+type SearchMediaArgs = MediaPageArgs & { search: string };
+/** `updated`: records this first batch filled. `isDone`: `false` while later batches are scheduled. */
+type BackfillResult = { updated: number; isDone: boolean };
 type ConfirmUploadArgs = { key: string; filename?: string; width?: number; height?: number; pageCount?: number };
 type MediaMetaArgs = { key: string; title?: string; alt?: string; tags?: string[] };
 
@@ -77,6 +80,23 @@ export class Devultur {
 	/** One page of the recorded media, newest first, optionally of one type. Takes Convex's `paginationOpts`. */
 	async listMediaPage(ctx: QueryCtx, args: MediaPageArgs): Promise<PaginationResult<MediaRecord>> {
 		return ctx.runQuery(this.component.public.listMediaPage, args);
+	}
+
+	/**
+	 * One page of the records whose title or filename matches `search` (its last word as a prefix), best match first,
+	 * optionally of one type. A blank `search` lists newest first, like `listMediaPage`. Records from before 1.4.0
+	 * match once `backfillSearchText` (or any write) gives them a `searchText`.
+	 */
+	async searchMedia(ctx: QueryCtx, args: SearchMediaArgs): Promise<PaginationResult<MediaRecord>> {
+		return ctx.runQuery(this.component.library.searchMedia, args);
+	}
+
+	/**
+	 * One-off for records written before 1.4.0: gives every record without a `searchText` one, `batchSize` records
+	 * per mutation (default 100, at most 1000). Runs the first batch and schedules the rest. Safe to run again.
+	 */
+	async backfillSearchText(ctx: MutationCtx, options?: { batchSize?: number }): Promise<BackfillResult> {
+		return ctx.runMutation(this.component.library.backfillSearchText, options ?? {});
 	}
 
 	/** The lock in force on `key`. */

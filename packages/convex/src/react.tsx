@@ -50,6 +50,9 @@ export {
 } from "./document-renderers";
 export { Image, type ImageProps } from "./image";
 export { MediaFetchError, type MediaFetchErrorCode } from "./media-fetch";
+export { MediaLibrary, type MediaLibraryPart, type MediaLibraryProps } from "./media-library";
+export type { MediaLibraryItemState } from "./media-library-item";
+export { defaultMediaLibraryLabels, type MediaLibraryLabels } from "./media-library-labels";
 export { type MediaObjectUrl, type UseMediaObjectUrlOptions, useMediaObjectUrl } from "./media-object-url";
 export { type PdfPreviewConfig, PdfPreviewProvider } from "./pdf-context";
 export type { PdfjsLoader, PdfjsModule } from "./pdf-render";
@@ -57,6 +60,12 @@ export { PdfThumbnail, type PdfThumbnailProps } from "./pdf-thumbnail";
 export { Preview, type PreviewProps } from "./preview";
 export { defaultPreviewLabels, type PreviewLabels } from "./preview-labels";
 export type { PreviewKind } from "./preview-type";
+export {
+	type MediaLibraryState,
+	type MediaLibraryStatus,
+	type UseMediaLibraryOptions,
+	useMediaLibrary,
+} from "./use-media-library";
 export type { ViewerTokenArgs, ViewerTokenResult } from "./viewer-token";
 
 /** Transform/delivery options for media URLs (without `token`, which the context injects). */
@@ -66,7 +75,7 @@ type AnyAction = FunctionReference<"action">;
 type AnyMutation = FunctionReference<"mutation">;
 type AnyQuery = FunctionReference<"query">;
 
-interface DevulturApi {
+export interface DevulturApi {
 	issueViewerToken: AnyAction;
 	createUploadUrl: AnyAction;
 	/** Records an upload in the component after its PUT, so it shows in `listMedia`. Optional (uploads still work). */
@@ -77,6 +86,10 @@ interface DevulturApi {
 	/** Requests the transcode of an uploaded video. Required by `useMediaUpload` for auto-process. */
 	processVideo?: AnyAction;
 	getMedia?: AnyQuery;
+	/** The library, newest first. Required by `useMediaLibrary` and `<MediaLibrary>`. */
+	listMediaPage?: AnyQuery;
+	/** The library matching a search. Required by `useMediaLibrary` and `<MediaLibrary>` to search. */
+	searchMedia?: AnyQuery;
 	saveProgress?: AnyMutation;
 	loadProgress?: AnyQuery;
 	markComplete?: AnyMutation;
@@ -361,6 +374,13 @@ export function useDevultur(): DevulturContextValue {
 	const context = React.use(DevulturContext);
 	if (!context) throw new Error("useDevultur must be used within <DevulturProvider>");
 	return context;
+}
+
+/** The `api` passed to `<DevulturProvider>`: your app's exported Devultur functions. */
+export function useDevulturApi(): DevulturApi {
+	const api = React.use(DevulturApiContext);
+	if (!api) throw new Error("useDevulturApi must be used within <DevulturProvider>");
+	return api;
 }
 
 export function useDevulturProgress(): ProgressContextValue {

@@ -273,7 +273,121 @@ await devultur.updateMediaMeta(ctx, { key: record.key, title: "Cover", alt: "A m
 `alt`. A stored reference is a copy: after an edit, read the record again (`getMedia`) or store the new reference.
 
 Each write also keeps a `searchText` field (the title and filename, lowercased) with a `search_text` search index over
-it, filterable by `type`. Records written before 1.4.0 have no `searchText` until they are written again.
+it, filterable by `type`. Records written before 1.4.0 get theirs from [the backfill](#records-from-before-140) or
+from their next write.
+
+### Searching the library
+
+`searchMedia({ search, type?, paginationOpts })` pages through the records whose title or filename matches `search`,
+best match first, optionally of one type. Convex's full-text search matches whole words, and the last word as a
+prefix (`cov` finds "Cover photo"). A blank `search` lists the library newest first, like `listMediaPage`.
+
+```typescript
+// Behind your guard: like listMediaPage, it searches every user's media.
+export const { listMediaPage, searchMedia } = defineDevulturFunctions(devultur, { guard });
+// From your server:
+await devultur.searchMedia(ctx, { search: "cover", type: "image", paginationOpts });
+```
+
+#### Records from before 1.4.0
+
+Records written before 1.4.0 have no `searchText`, so `searchMedia` doesn't find them (`listMediaPage` still lists
+them). Any write to one gives it its `searchText` (a transcode update, a confirmed upload, `updateMediaMeta`). To fill
+them all at once, run the backfill once after upgrading. It fills 100 records per mutation and schedules the next
+batch until it reaches the end of the table; running it again only fills what is still missing.
+
+```bash
+npx convex run --component devultur library:backfillSearchText '{}'
+```
+
+Or from a function of your own, for example an internal mutation you run from the dashboard:
+
+```typescript
+// convex/maintenance.ts
+import { internalMutation } from "./_generated/server";
+
+export const backfillMediaSearch = internalMutation({
+  args: {},
+  // { updated, isDone }: the first batch's count, and false while more batches are scheduled.
+  handler: async (ctx) => devultur.backfillSearchText(ctx, { batchSize: 200 }), // 1 to 1000, default 100
+});
+```
+
+### React: `useMediaLibrary` and `<MediaLibrary>`
+
+Both read the library through the `listMediaPage` and `searchMedia` you pass `<DevulturProvider api>`.
+
+`useMediaLibrary({ type?, search?, pageSize? })` wraps Convex's `usePaginatedQuery`. It waits until `search` has
+stayed the same for 250 ms before querying (clearing it applies at once), and a new search or type starts again from
+the first page.
+
+```tsx
+import { useMediaLibrary } from "@devultur/convex/react";
+
+const { items, status, loadMore, isLoading, isSearchPending } = useMediaLibrary({ type: "image", search, pageSize: 24 });
+// status: "LoadingFirstPage" | "CanLoadMore" | "LoadingMore" | "Exhausted"; loadMore() loads pageSize more.
+```
+
+Like `usePaginatedQuery`, a query that fails (your guard throws, for example) throws during render to the nearest
+error boundary. `<MediaLibrary>` has its own.
+
+`<MediaLibrary>` is a grid with a search box and a type filter. Images show a 160 px thumbnail (`<Image widths>`,
+`format: "auto"`); other media show an icon, and every item shows its title (or filename) and size.
+
+```tsx
+import { MediaLibrary } from "@devultur/convex/react";
+
+<MediaLibrary type="image" selectable onSelect={(record, media) => setCover(media)} />;
+```
+
+| Prop | |
+| --- | --- |
+| `onSelect(record, media)` | Called on a click, Enter or Space. `media` is `mediaFromRecord(record)`, `null` for a record without a visibility. |
+| `type` | Only this type; the type filter is hidden. |
+| `selectable` | Keeps the chosen item selected (`aria-selected`, `data-selected`), for a picker. Default `false`. |
+| `renderItem(record, { media, isSelected, isActive })` | Replaces an item's content; the item stays the focusable option. |
+| `pdfThumbnails` | Draws page 1 of PDFs with `<PdfThumbnail>` (inside a `PdfPreviewProvider`). Off by default, because each thumbnail downloads its PDF. |
+| `pageSize` | Records per page. Default 24. |
+| `labels` | Any of the strings below. |
+| `className`, `classNames` | Added to the root's and each part's class. |
+
+The items are a `listbox` of `option`s with one tab stop: the arrow keys move between them (up and down by a row of the
+grid), Home and End go to the first and last. While the first page loads, the library is empty, or nothing matches,
+a `role="status"` message replaces the grid. A failed query shows `labels.error(error)` in a `role="alert"` with a
+retry button; by default, a Devultur error's message (see [Error messages](#error-messages)).
+
+The component sets only its layout. Each part has a class (`devultur-media-library`, and
+`devultur-media-library__{search,filter,list,item,thumbnail,name,size,status,more}`), and these custom properties
+tune the grid: `--devultur-library-item-width` (160px, the narrowest column), `--devultur-library-gap` (0.75rem),
+`--devultur-library-item-gap` (0.25rem), `--devultur-library-thumbnail-height` (120px) and
+`--devultur-library-accent` (`currentColor`, the selected item's ring).
+
+The strings are English by default. Spanish, for example:
+
+```tsx
+import { describeDevulturError } from "@devultur/convex";
+import { devulturErrorLabels } from "@devultur/convex/locales/es";
+import { formatFileSize, type MediaLibraryLabels } from "@devultur/convex/react";
+
+const libraryLabels: Partial<MediaLibraryLabels> = {
+  search: "Buscar archivos",
+  searchPlaceholder: "Busca por título o nombre de archivo",
+  typeFilter: "Tipo",
+  allTypes: "Todos los tipos",
+  types: { image: "Imágenes", video: "Videos", file: "Archivos" },
+  results: "Archivos",
+  loading: "Cargando archivos…",
+  empty: "Todavía no hay archivos.",
+  noResults: (search) => `Nada coincide con «${search}».`,
+  loadMore: "Cargar más",
+  loadingMore: "Cargando…",
+  error: (error) => describeDevulturError(error, devulturErrorLabels) ?? "No se pudieron cargar los archivos.",
+  retry: "Reintentar",
+  size: (bytes) => formatFileSize(bytes, "es"),
+};
+
+<MediaLibrary labels={libraryLabels} onSelect={handleSelect} />;
+```
 
 ## Using a self-hosted Worker
 
