@@ -34,8 +34,17 @@ export default defineSchema({
 		// `processVideo`. The record's `key` is the media id for every kind; `objectKey` is the stored object's key.
 		visibility: v.optional(v.union(v.literal("public"), v.literal("private"))),
 		objectKey: v.optional(v.string()),
+		// An image's intrinsic size: read by the Worker from the bytes when it can, else the uploading client's hint.
 		width: v.optional(v.number()),
 		height: v.optional(v.number()),
+		// A PDF's page count, as the uploading client reported it (a hint, see `confirmUpload`).
+		pageCount: v.optional(v.number()),
+		// Set by the app (`updateMediaMeta`).
+		title: v.optional(v.string()),
+		alt: v.optional(v.string()),
+		tags: v.optional(v.array(v.string())),
+		// `title + " " + filename`, lowercased, kept in step on every write. Unset on records from before 1.4.0.
+		searchText: v.optional(v.string()),
 		transcodeStatus: v.optional(
 			v.union(
 				v.literal("queued"),
@@ -74,12 +83,15 @@ export default defineSchema({
 		// True while requested captions haven't arrived: `transcode.complete` then waits in "captioning" instead
 		// of going straight to "ready". Unset (records from before this field) means no captions were requested.
 		captionsPending: v.optional(v.boolean()),
+		// A video's duration in seconds, from the transcode's webhook.
 		duration: v.optional(v.number()),
 		createdAt: v.number(),
 	})
 		.index("by_key", ["key"])
 		// The media library by kind (`listMediaPage`), newest first.
-		.index("by_type", ["type"]),
+		.index("by_type", ["type"])
+		// Full-text search over the title and filename, optionally of one kind.
+		.searchIndex("search_text", { searchField: "searchText", filterFields: ["type"] }),
 
 	captions: defineTable({
 		mediaKey: v.string(),

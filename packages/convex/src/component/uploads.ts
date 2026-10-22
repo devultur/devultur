@@ -10,6 +10,7 @@ import type { Doc } from "./_generated/dataModel";
 import type { ActionCtx } from "./_generated/server";
 import { internalAction, internalMutation } from "./_generated/server";
 import { getMediaClient } from "./mediaClient";
+import { checkUploadHints, searchTextOf, type UploadHints } from "./mediaMeta";
 import { parseUploadKey, type UploadKey } from "./uploadKeys";
 import { workerAction } from "./workerErrors";
 
@@ -23,6 +24,8 @@ function displayName(uploadKey: UploadKey, filename: string | undefined): string
 	return uploadKey.storedName;
 }
 
+// The hints are the uploading client's word, not the Worker's: positive integers up to 100,000, else
+// `invalid_media_metadata`. An image size the Worker read from the bytes wins over them.
 const confirmArgs = {
 	key: v.string(),
 	/** The original filename (display and download name). Ignored unless it is the one in the key. */
@@ -30,13 +33,22 @@ const confirmArgs = {
 	/** Intrinsic size of an image, read in the browser. */
 	width: v.optional(v.number()),
 	height: v.optional(v.number()),
+	/** A PDF's page count, counted in the browser (`countPdfPages`). Recorded for PDFs only. */
+	pageCount: v.optional(v.number()),
 };
 
-interface ConfirmArgs {
+interface ConfirmArgs extends UploadHints {
 	key: string;
 	filename?: string;
-	width?: number;
-	height?: number;
+}
+
+/** The size to record: the Worker's (read from the bytes) when it has one, else the client's hint. */
+function recordedSize(head: FileHead, hints: UploadHints): { width?: number; height?: number } {
+	if (head.width && head.height) return { width: head.width, height: head.height };
+	return {
+		...(hints.width !== undefined ? { width: hints.width } : {}),
+		...(hints.height !== undefined ? { height: hints.height } : {}),
+	};
 }
 
 /** HEADs the object and records it; `null` when no object is stored at `key` (yet). */
@@ -46,10 +58,12 @@ async function confirm(ctx: ActionCtx, args: ConfirmArgs): Promise<Doc<"media"> 
 	if (!uploadKey) {
 		throw new ConvexError({ code: "invalid_upload_key", message: `Not an upload key: ${args.key}`, status: 400 });
 	}
+	checkUploadHints(args);
 
 	const head: FileHead | null = await getMediaClient().files.head(args.key);
 	if (!head) return null;
 
+	const isPdf = head.contentType === "application/pdf";
 	return ctx.runMutation(internal.uploads.recordUpload, {
 		key: uploadKey.id,
 		objectKey: args.key,
@@ -58,8 +72,8 @@ async function confirm(ctx: ActionCtx, args: ConfirmArgs): Promise<Doc<"media"> 
 		filename: displayName(uploadKey, args.filename),
 		contentType: head.contentType,
 		sizeBytes: head.size,
-		...(args.width !== undefined ? { width: args.width } : {}),
-		...(args.height !== undefined ? { height: args.height } : {}),
+		...recordedSize(head, args),
+		...(isPdf && args.pageCount !== undefined ? { pageCount: args.pageCount } : {}),
 	});
 }
 
@@ -92,6 +106,7 @@ export const recordUpload = internalMutation({
 		sizeBytes: v.number(),
 		width: v.optional(v.number()),
 		height: v.optional(v.number()),
+		pageCount: v.optional(v.number()),
 	},
 	handler: async (ctx, args) => {
 		const existing = await ctx.db
@@ -99,12 +114,14 @@ export const recordUpload = internalMutation({
 			.withIndex("by_key", (q) => q.eq("key", args.key))
 			.first();
 		if (!existing) {
-			const id = await ctx.db.insert("media", { ...args, createdAt: Date.now() });
+			const searchText = searchTextOf(undefined, args.filename);
+			const id = await ctx.db.insert("media", { ...args, searchText, createdAt: Date.now() });
 			return ctx.db.get(id);
 		}
 
-		// A video `processVideo` recorded first: fill in what only the upload knows, keep its transcode state.
-		await ctx.db.patch(existing._id, args);
+		// A video `processVideo` recorded first: fill in what only the upload knows, keep its transcode state (and any
+		// title the app already set).
+		await ctx.db.patch(existing._id, { ...args, searchText: searchTextOf(existing.title, args.filename) });
 		return ctx.db.get(existing._id);
 	},
 });

@@ -71,8 +71,8 @@ function CoverUpload({ onSaved }) {
 ## Guarding the component's functions
 
 `defineDevulturFunctions(devultur, { guard })` returns the functions your app exposes to the browser (`createUploadUrl`,
-`confirmUpload`, `issueViewerToken`, `getMedia`, `listMediaPage`, `deleteMedia`, `deleteVideo`, `processVideo` and the
-progress functions), and each one awaits `guard(ctx, { name, kind, args })` before it runs. Throw from the guard to
+`confirmUpload`, `updateMediaMeta`, `issueViewerToken`, `getMedia`, `listMediaPage`, `deleteMedia`, `deleteVideo`,
+`processVideo` and the progress functions), and each one awaits `guard(ctx, { name, kind, args })` before it runs. Throw from the guard to
 deny the call. Export the functions your app uses, one by one:
 
 ```typescript
@@ -222,15 +222,58 @@ A record's `key` is the media id for every kind (what `getMedia` takes), and `ob
 `confirmUpload` only accepts upload keys (`{visibility}/{image|file}/{id}/{name}`, `{visibility}/video/{id}/raw/{name}`)
 and is idempotent: a video's transcode state stays as it is.
 
-`confirmUpload` runs your guard first, like every function `defineDevulturFunctions` returns. The caller only names
-the key: the record's visibility, size and content type come from the Worker's `HEAD` of the object, never from the
-arguments.
+`confirmUpload` runs your guard first, like every function `defineDevulturFunctions` returns. The record's
+visibility, size and content type come from the Worker's `HEAD` of the object, never from the arguments; the only
+values a caller supplies are the hints described in [Media metadata](#media-metadata).
 
 `deleteMedia` removes an image's or a file's record once the Worker
 deleted the object (a delete refused by a lock keeps it). `deleteVideo` removes a video's.
 
 A video only `processVideo` recorded has no `visibility` or `objectKey`, and `mediaFromRecord` returns `null` for
 it. `listMedia` doesn't report an object's lock: read it from an action with `devultur.getLock(ctx, record.objectKey)`.
+
+### Media metadata
+
+A record carries what is known about its media. All of these fields are optional, so records and `dv.media()`
+references stored before 1.4.0 stay valid without a migration.
+
+| Field | Set by |
+| --- | --- |
+| `sizeBytes` | The Worker's `HEAD` of the object, on every confirm. |
+| `width`, `height` | The Worker, which reads an image's size from its header bytes (PNG, JPEG, GIF, WebP, AVIF) on a single PUT and returns it on `HEAD` (`x-devultur-image-width` / `-height`). Otherwise, the client's hint. |
+| `duration` | The transcode, in seconds (`transcode.started` / `transcode.complete`). |
+| `pageCount` | The client's hint, recorded for PDFs only. |
+| `title`, `alt`, `tags` | Your app, with `updateMediaMeta`. |
+
+**Client hints.** `confirmUpload` accepts `width`, `height` and `pageCount` from the client. They are the uploader's
+word, not checked against the bytes: whole numbers from 1 to 100,000, or the call fails with `invalid_media_metadata`.
+A size the Worker read wins over the client's. To record a PDF's page count at upload, count it in the browser with
+pdf.js (imported on the first call; `pdfjs-dist` must be installed):
+
+```tsx
+import { countPdfPages } from "@devultur/convex/pdfjs";
+
+const pageCount = file.type === "application/pdf" ? ((await countPdfPages(file)) ?? undefined) : undefined;
+const media = await upload(file, { pageCount });
+```
+
+**Editing.** `updateMediaMeta({ key, title?, alt?, tags? })` sets only the fields it's given. Values are trimmed, an
+empty `title` or `alt` clears it, and tags are deduplicated (case-insensitively, first spelling kept). Past a title of
+200 characters, an alt text of 1,000, or 20 tags of 50 characters each, it fails with `invalid_media_metadata` (its
+`details.field` names the field). It returns the updated record, or `null` when no record has that media id.
+
+```typescript
+// From the browser: export it from defineDevulturFunctions, so your guard decides who may edit which media.
+export const { updateMediaMeta } = defineDevulturFunctions(devultur, { guard });
+// From your server:
+await devultur.updateMediaMeta(ctx, { key: record.key, title: "Cover", alt: "A mountain at dawn", tags: ["hero"] });
+```
+
+`mediaFromRecord(record)` copies the metadata into the reference, and `<Image>` uses `media.alt` when you pass no
+`alt`. A stored reference is a copy: after an edit, read the record again (`getMedia`) or store the new reference.
+
+Each write also keeps a `searchText` field (the title and filename, lowercased) with a `search_text` search index over
+it, filterable by `type`. Records written before 1.4.0 have no `searchText` until they are written again.
 
 ## Using a self-hosted Worker
 

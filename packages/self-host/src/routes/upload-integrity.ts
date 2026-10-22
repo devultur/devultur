@@ -17,17 +17,22 @@ export const ObjectMeta = {
 	SHA256_VERIFIED: "sha256Verified",
 	/** Epoch ms. From then on the gate responds 410 (and an external sweeper may delete it). */
 	EXPIRES_AT: "expiresAt",
+	/** An image's intrinsic size (px), read from its header bytes on a single PUT. */
+	IMAGE_WIDTH: "imageWidth",
+	IMAGE_HEIGHT: "imageHeight",
 } as const;
 
 /**
  * `customMetadata` keys the Worker itself writes and reads (besides `sha256*`): security policy,
- * encryption material, expiry, the marker for image variants, and the object lock. Lowercase (R2's S3-based keys are
- * case-insensitive).
+ * encryption material, expiry, an image's size, the marker for image variants, and the object lock. Lowercase (R2's
+ * S3-based keys are case-insensitive).
  */
 const WORKER_METADATA_KEYS = new Set([
 	"security",
 	"enc",
 	ObjectMeta.EXPIRES_AT.toLowerCase(),
+	ObjectMeta.IMAGE_WIDTH.toLowerCase(),
+	ObjectMeta.IMAGE_HEIGHT.toLowerCase(),
 	"derivedfrom",
 	LOCK_METADATA_KEY,
 ]);

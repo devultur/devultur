@@ -61,6 +61,12 @@ export const devulturErrorLabels: DevulturErrorLabels = {
 	invalid_size: "The file size isn't valid.",
 	invalid_part: "Part of the upload isn't valid. Try again.",
 	invalid_parts: "The upload is incomplete. Try again.",
+	invalid_media_metadata: (details) => {
+		if (details.field === "title") return "The title can't be longer than 200 characters.";
+		if (details.field === "alt") return "The alternative text can't be longer than 1,000 characters.";
+		if (details.field === "tags") return "Use at most 20 tags, of up to 50 characters each.";
+		return "The file's details aren't valid.";
+	},
 	part_size_mismatch: "Part of the upload has the wrong size. Try again.",
 	part_sha256_required: "Part of the upload is missing its checksum.",
 	expired: "This file has expired.",

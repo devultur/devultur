@@ -21,8 +21,17 @@ export interface MediaRecord {
 	visibility?: "public" | "private";
 	/** Key of the uploaded object (a video's raw file). Set by a confirmed upload. */
 	objectKey?: string;
+	/** An image's intrinsic size: read by the Worker from the bytes when it can, else the uploading client's hint. */
 	width?: number;
 	height?: number;
+	/** A PDF's page count, as the uploading client reported it (a hint). */
+	pageCount?: number;
+	/** Set by the app with `updateMediaMeta`. */
+	title?: string;
+	alt?: string;
+	tags?: string[];
+	/** `title + " " + filename`, lowercased, for search. Unset on records from before 1.4.0. */
+	searchText?: string;
 	transcodeStatus?: "queued" | "transcoding" | "captioning" | "ready" | "failed";
 	transcodeProgress?: { current: number; total: number };
 	transcodeError?: string;
@@ -33,6 +42,7 @@ export interface MediaRecord {
 	captionLocales?: string[];
 	/** True while requested captions haven't arrived; the video waits in "captioning" only then. */
 	captionsPending?: boolean;
+	/** A video's duration in seconds, from the transcode. */
 	duration?: number;
 	createdAt: number;
 }

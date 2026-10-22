@@ -18,7 +18,8 @@ type ActionCtx = GenericActionCtx<GenericDataModel>;
 type UploadUrlArgs = { filename: string; contentType: string; visibility?: "public" | "private" };
 type MediaType = "video" | "image" | "file";
 type MediaPageArgs = { type?: MediaType; paginationOpts: PaginationOptions };
-type ConfirmUploadArgs = { key: string; filename?: string; width?: number; height?: number };
+type ConfirmUploadArgs = { key: string; filename?: string; width?: number; height?: number; pageCount?: number };
+type MediaMetaArgs = { key: string; title?: string; alt?: string; tags?: string[] };
 
 export class Devultur {
 	/** The mounted component (`components.devultur`) this client calls. */
@@ -48,9 +49,20 @@ export class Devultur {
 	/**
 	 * Records an upload in the component once its bytes are stored (after the PUT): it then shows in `listMedia`.
 	 * Returns the record, or `null` when nothing is stored at `key`. Uploads nobody confirms are recorded a day later.
+	 * `width`, `height` and `pageCount` are the client's hints (positive integers up to 100,000); an image size the
+	 * Worker read from the bytes wins over them.
 	 */
 	async confirmUpload(ctx: ActionCtx, args: ConfirmUploadArgs): Promise<MediaRecord | null> {
 		return ctx.runAction(this.component.uploads.confirmUpload, args);
+	}
+
+	/**
+	 * Sets a record's `title`, `alt` and/or `tags` (only the ones passed; an empty string clears a title or alt, `[]`
+	 * the tags). `key` is the media id. Trimmed and deduplicated; past title 200, alt 1000 or 20 tags of 50 characters
+	 * it throws `invalid_media_metadata`. Returns the updated record, or `null` when there is none.
+	 */
+	async updateMediaMeta(ctx: MutationCtx, args: MediaMetaArgs): Promise<MediaRecord | null> {
+		return ctx.runMutation(this.component.metadata.updateMediaMeta, args);
 	}
 
 	/**

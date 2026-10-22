@@ -18,8 +18,18 @@ type DevulturMedia = {
   width?: number;                      // intrinsic dimensions (no layout shift)
   height?: number;
   key?: string;                        // the uploaded object's key (informational)
+  // Metadata copied from the media record (`mediaFromRecord`), all optional:
+  title?: string;
+  alt?: string;                        // <Image> uses it when you pass no alt
+  tags?: readonly string[];
+  sizeBytes?: number;
+  duration?: number;                   // a video's, in seconds
+  pageCount?: number;                  // a PDF's, as the uploader reported it
 };
 ```
+
+The metadata fields are a copy of the record at the time the reference was made. See
+"Media metadata" in the `@devultur/convex` README for how each one is recorded and edited.
 
 Store the **reference**, not a URL. The delivery path is derived from it, so devultur
 can change how URLs are built without touching your data — and you never persist a

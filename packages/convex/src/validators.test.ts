@@ -6,14 +6,27 @@ describe("dv.media", () => {
 		const validator = dv.media();
 		expect(validator.kind).toBe("object");
 		expect(Object.keys(validator.fields).sort()).toEqual([
+			"alt",
+			"duration",
 			"filename",
 			"height",
 			"id",
 			"key",
 			"kind",
+			"pageCount",
+			"sizeBytes",
+			"tags",
+			"title",
 			"visibility",
 			"width",
 		]);
+	});
+
+	it("keeps every metadata field optional, so references stored before 1.4.0 stay valid", () => {
+		const { fields } = dv.media();
+		for (const field of ["title", "alt", "tags", "sizeBytes", "duration", "pageCount"] as const) {
+			expect(fields[field].isOptional).toBe("optional");
+		}
 	});
 
 	it("sin kind: acepta los tres tipos (union)", () => {

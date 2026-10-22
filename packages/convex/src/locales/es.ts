@@ -36,6 +36,12 @@ export const devulturErrorLabels: DevulturErrorLabels = {
 	invalid_parts: "La subida está incompleta. Vuelve a intentarlo.",
 	part_size_mismatch: "Una parte de la subida tiene un tamaño incorrecto. Vuelve a intentarlo.",
 	part_sha256_required: "A una parte de la subida le falta la suma de verificación.",
+	invalid_media_metadata: (details) => {
+		if (details.field === "title") return "El título no puede tener más de 200 caracteres.";
+		if (details.field === "alt") return "El texto alternativo no puede tener más de 1000 caracteres.";
+		if (details.field === "tags") return "Usa como máximo 20 etiquetas, de hasta 50 caracteres cada una.";
+		return "Los datos del archivo no son válidos.";
+	},
 	expired: "Este archivo ya venció.",
 	invalid_key: "La referencia del archivo no es válida.",
 	invalid_max_uses: "El número de usos no es válido.",

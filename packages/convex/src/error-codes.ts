@@ -32,6 +32,8 @@ export const DEVULTUR_ERROR_CODES = [
 	"invalid_parts",
 	"part_size_mismatch",
 	"part_sha256_required",
+	// Media metadata (`updateMediaMeta`, `confirmUpload`'s hints)
+	"invalid_media_metadata",
 	// Delivery and download links
 	"expired",
 	"invalid_key",
