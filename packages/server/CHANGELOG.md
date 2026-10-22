@@ -1,5 +1,12 @@
 # @devultur/server
 
+## 1.4.2
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @devultur/core@1.4.2
+
 ## 1.4.1
 
 ### Patch Changes
