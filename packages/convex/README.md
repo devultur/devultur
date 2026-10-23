@@ -107,9 +107,10 @@ export const { createUploadUrl, confirmUpload, issueViewerToken, getMedia, listM
   signed-in user can't read or overwrite someone else's progress. Return `{ userId, canActForOthers: true }` for a
   caller who may (an admin resetting a learner's progress). A guard that returns no `userId` keeps the browser's, as
   `exposeApi` does: return one whenever the progress functions are exported.
-- The guard may also return `args`: each key replaces the caller's argument of that name, on your server, before the
-  function runs (see [Upload visibility](#upload-visibility)). Rewrite the arguments of the operation the guard was
-  called for (narrow on `operation.name`); they aren't validated again.
+- The guard may also return a `rewrite`, `{ name, args }`: each key of `args` replaces the caller's argument of that
+  name, on your server, before the function runs (see [Upload visibility](#upload-visibility)). `name` is the guarded
+  operation's, so `args` are typed for it; a rewrite named for another operation throws. The rewritten arguments
+  aren't validated again.
 - `visibility: "internal"` registers them as internal functions, for your own actions and mutations to call.
 - `config` takes what `Devultur.exposeApi` does (transcode preset, caption locales, upload lock and default
   visibility).
@@ -134,28 +135,30 @@ export const { createUploadUrl, confirmUpload } = defineDevulturFunctions(devult
 ```
 
 The browser can still pass `visibility` (`upload(file, { visibility })`, `useMediaUpload({ visibility })`). To decide
-it on your server instead, rewrite it in the guard: the guard's `args` replace the browser's.
+it on your server instead, rewrite it in the guard: the guard's `rewrite` replaces the browser's arguments.
 
 ```typescript
 guard: async (ctx, operation) => {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) throw new ConvexError("Sign in first");
   // Members' uploads are always private, whatever the browser asked for.
-  if (operation.name === "createUploadUrl") return { userId: identity.subject, args: { visibility: "private" } };
+  if (operation.name === "createUploadUrl") {
+    return { userId: identity.subject, rewrite: { name: "createUploadUrl", args: { visibility: "private" } } };
+  }
   return { userId: identity.subject };
 },
 ```
 
 Which one wins, from first to last:
 
-1. The guard's `args.visibility`.
+1. The guard's `rewrite.args.visibility`.
 2. The caller's `visibility`.
 3. `config.upload.visibility`.
 4. The Worker's default by type.
 
 The guard sees the caller's arguments as they arrived (`operation.args.visibility` is `undefined` when the browser
 passed none): the config's default is applied after the guard. `config.upload.lock` isn't an argument, so neither
-the browser nor the guard's `args` change it.
+the browser nor the guard's `rewrite` change it.
 
 ## Upload progress
 
@@ -234,12 +237,19 @@ import { DevulturViewerProvider, Preview } from "@devultur/convex/react";
 that need the `api` (`useDevulturApi`, `useMediaUpload`, `<MediaLibrary>`, `<MediaPicker>`), throw a
 `DevulturCapabilityError` whose `code` is `capability_unavailable`.
 
-It issues the viewer token only when a private media is shown, and renews it from then on. While every media on the
-page is public, it calls nothing: `tokenStatus` stays `"idle"` and `token` stays `null`. Code that reads `token`
-itself calls `useDevultur().requestToken()` first; the built-in components and hooks do it for private media.
-`<DevulturProvider>` issues the token as soon as it mounts.
+Like `<DevulturProvider>`, it issues the viewer token as soon as it mounts. With `lazyToken`, it issues it only when
+a private media is shown, and renews it from then on: while every media on the page is public, it calls nothing,
+`tokenStatus` stays `"idle"` and `token` stays `null`. Code that reads `token` itself then calls
+`useDevultur().requestToken()` first; the built-in components and hooks do it for private media.
 
-When all the media is public, leave `issueViewerToken` out. The provider then needs no Convex client:
+```tsx
+<DevulturViewerProvider baseUrl={MEDIA_URL} issueViewerToken={api.devultur.issueViewerToken} lazyToken>
+  <Gallery />
+</DevulturViewerProvider>
+```
+
+When all the media is public, leave `issueViewerToken` out. The provider then needs no Convex client and issues
+nothing:
 
 ```tsx
 <DevulturViewerProvider baseUrl={MEDIA_URL}>
@@ -279,9 +289,9 @@ there until `retryToken()`: a failed issuance isn't retried on its own. Meanwhil
 `<Preview>` passes it to its `fallback`, `<PdfThumbnail>` and `<Image>` render their `fallback` (`<Image onLoadError>`
 receives it), and `<DownloadLink onDownloadError>` receives it on click. They load once `retryToken()` gets a token.
 
-`<Preview>`'s video plays in `<VideoPlayer>` from `@devultur/react`, with its playback metrics on (anonymous, no cookies,
-sent to the media host: see [Playback metrics](https://github.com/devultur/devultur/blob/main/docs/guides/video-player.md#playback-metrics)).
-To turn them off, render `<VideoPlayer {...useVideoProps(media)} metrics={false} />` yourself.
+`<Preview>`'s video plays in `<VideoPlayer>` from `@devultur/react`, with its playback metrics on: anonymous, no
+cookies, sent to the media host (see [Playback metrics](https://github.com/devultur/devultur/blob/main/docs/guides/video-player.md#playback-metrics)).
+`<Preview metrics={false}>` turns them off. A private video shows `loading` until its viewer token is issued.
 
 `<Preview>`'s video re-issues the token once when the delivery answers the playlist or a segment with a 401
 `session_mismatch`; after that, or on any other 401, it renders its `fallback` with `session_mismatch` or

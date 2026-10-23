@@ -79,7 +79,11 @@ function progressArgsFor<Args extends { userId: string }>(args: Args, caller: Ca
 }
 
 /** The media id of a media id or an object key (`{visibility}/{kind}/{id}/…`). */
-function mediaIdOf(key: string): string {
+function mediaIdOf(key: unknown): string {
+	// A guard's rewrite isn't validated again: refuse a key that isn't a string instead of crashing on it.
+	if (typeof key !== "string") {
+		throw new ConvexError({ code: "invalid_key", message: "The media key must be a string", status: 400 });
+	}
 	return key.includes("/") ? extractId(key) : key;
 }
 

@@ -285,7 +285,7 @@ export function useDevulturProgress(): ProgressContextValue {
 export function useMediaUrl(key: string | null | undefined, options?: MediaRenderOptions): string | null {
 	const devultur = useDevultur();
 	const { token, baseUrl } = devultur;
-	useRequestTokenWhen(devultur, Boolean(key) && visibilityFromKey(key ?? "") === "private");
+	useRequestTokenWhen(devultur, Boolean(key) && visibilityFromKey(key ?? "") !== "public");
 	return React.useMemo(() => {
 		if (!key) return null;
 		if (!baseUrl) throw new Error("useMediaUrl requires `baseUrl` on <DevulturProvider>");

@@ -34,6 +34,7 @@ const {
 	useDevulturApi,
 	useDevulturOptional,
 	useMediaUpload,
+	useMediaUrl,
 } = await import("./react");
 const { describeDevulturError } = await import("./error-labels");
 
@@ -49,17 +50,22 @@ function Probe() {
 	return null;
 }
 
-function renderViewer(children: React.ReactNode) {
-	return render(
+function ViewerHarness({ lazyToken, children }: { lazyToken?: boolean; children: React.ReactNode }) {
+	return (
 		<DevulturViewerProvider
 			baseUrl={BASE_URL}
 			issueViewerToken={"admin.issueViewerToken" as never}
 			tokenArgs={{ workspaceId: "w1" }}
+			lazyToken={lazyToken}
 		>
 			<Probe />
 			{children}
-		</DevulturViewerProvider>,
+		</DevulturViewerProvider>
 	);
+}
+
+function renderViewer(children: React.ReactNode, options?: { lazyToken?: boolean }) {
+	return render(<ViewerHarness lazyToken={options?.lazyToken}>{children}</ViewerHarness>);
 }
 
 beforeEach(() => {
@@ -88,8 +94,16 @@ describe("<DevulturViewerProvider>", () => {
 		expect(latest?.tokenStatus).toBe("ready");
 	});
 
-	it("issues no token while every media shown is public", async () => {
+	it("issues the token as soon as it mounts by default, with only public media", async () => {
 		renderViewer(<Preview media={publicFile} />);
+
+		await waitFor(() => expect(latest?.tokenStatus).toBe("ready"));
+		expect(latest?.token).toBe("viewer-token");
+		expect(calls).toHaveLength(1);
+	});
+
+	it("with lazyToken, issues no token while every media shown is public", async () => {
+		renderViewer(<Preview media={publicFile} />, { lazyToken: true });
 
 		expect(await screen.findByText("hello")).toBeTruthy();
 		expect(calls).toEqual([]);
@@ -97,37 +111,49 @@ describe("<DevulturViewerProvider>", () => {
 		expect(latest?.token).toBeNull();
 	});
 
-	it("issues the token once the first private media is shown", async () => {
-		const view = renderViewer(<Preview media={publicFile} />);
+	it("with lazyToken, issues the token once the first private media is shown", async () => {
+		const view = renderViewer(<Preview media={publicFile} />, { lazyToken: true });
 		await screen.findByText("hello");
 		expect(calls).toHaveLength(0);
 
 		view.rerender(
-			<DevulturViewerProvider
-				baseUrl={BASE_URL}
-				issueViewerToken={"admin.issueViewerToken" as never}
-				tokenArgs={{ workspaceId: "w1" }}
-			>
-				<Probe />
+			<ViewerHarness lazyToken>
 				<Preview media={publicFile} />
 				<Preview media={privateFile} />
-			</DevulturViewerProvider>,
+			</ViewerHarness>,
 		);
 
 		await waitFor(() => expect(latest?.tokenStatus).toBe("ready"));
 		expect(calls).toHaveLength(1);
 	});
 
-	it("issues the token when url() builds a private URL during a render", async () => {
+	it("with lazyToken, issues the token when url() builds a private URL during a render", async () => {
 		function PrivateLink() {
 			const { url } = useDevultur();
 			return <a href={url(privateFile)}>Download notes</a>;
 		}
-		renderViewer(<PrivateLink />);
+		renderViewer(<PrivateLink />, { lazyToken: true });
 
 		await waitFor(() => expect(latest?.tokenStatus).toBe("ready"));
 		expect(calls).toHaveLength(1);
 		expect(screen.getByText("Download notes").getAttribute("href")).toContain("viewer-token");
+	});
+
+	it("with lazyToken, useMediaUrl asks for a token for any key that isn't public", async () => {
+		function KeyUrl({ mediaKey }: { mediaKey: string }) {
+			return <span>{useMediaUrl(mediaKey)}</span>;
+		}
+		const view = renderViewer(<KeyUrl mediaKey="public/image/i1/cover.png" />, { lazyToken: true });
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(calls).toHaveLength(0);
+
+		view.rerender(
+			<ViewerHarness lazyToken>
+				<KeyUrl mediaKey="legacy/cover.png" />
+			</ViewerHarness>,
+		);
+		await waitFor(() => expect(latest?.tokenStatus).toBe("ready"));
+		expect(calls).toHaveLength(1);
 	});
 
 	it("shows public media with no token action and no Convex client", async () => {

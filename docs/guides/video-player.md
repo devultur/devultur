@@ -76,9 +76,10 @@ One JSON object per beacon, with the changes since the previous one:
 | `bitrateKbpsMs`, `bitrateWatchMs` | Bitrate × time played, and the time played at a known bitrate (for the average bitrate). |
 | `completionDelta` | How far the furthest position reached moved, in percentage points. |
 | `durationS` | The video's duration in seconds. |
-| `token` | Only for a private video, and only when the player's `token` is a viewer JWT: it lets the media host find which storage the beacon belongs to. Any other kind of token is never put in a beacon. |
+| `token` | The player's `token`, only when it has a JWT's shape (three dot-separated parts), as a viewer token does: it lets the media host find which storage the beacon belongs to. A token of any other shape is never put in a beacon. |
 
-No cookies, no local storage, no user id, no page URL and no device fingerprint. Like any request, the beacon reaches
+No cookies, no local storage, no user id, no page URL and no device fingerprint. `<Preview>` from `@devultur/convex`
+plays videos in this player and takes the same `metrics` prop. Like any request, the beacon reaches
 the media host with the viewer's IP address, user agent and the page's origin (and its referrer, as the page's
 referrer policy allows); the body carries none of them.
 

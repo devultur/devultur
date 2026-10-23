@@ -88,13 +88,16 @@ export function useViewerToken({ issueViewerToken, sessionSecret, tokenArgs, isL
 	const currentArgsKeyRef = React.useRef(argsKey);
 	const refreshTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 	const inFlightRef = React.useRef<Issuance | null>(null);
+	const isMountedRef = React.useRef(true);
 
 	React.useEffect(() => {
 		currentArgsKeyRef.current = argsKey;
 	}, [argsKey]);
 
 	React.useEffect(() => {
+		isMountedRef.current = true;
 		return () => {
+			isMountedRef.current = false;
 			if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
 		};
 	}, []);
@@ -104,7 +107,8 @@ export function useViewerToken({ issueViewerToken, sessionSecret, tokenArgs, isL
 			request().catch((error: unknown) => console.warn("Devultur: could not renew the viewer token", error));
 		};
 		const result = await issueViewerToken({ ...stableArgs, sessionSecret });
-		if (currentArgsKeyRef.current !== argsKey) return null;
+		// Unmounted while issuing: no renewal timer outlives the provider.
+		if (!isMountedRef.current || currentArgsKeyRef.current !== argsKey) return null;
 		const { tokenValue, ttlMs } = extractTokenResult(result);
 		setIssued({ token: tokenValue, argsKey });
 		setAttempt(null);

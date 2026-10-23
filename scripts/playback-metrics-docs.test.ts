@@ -30,7 +30,7 @@ function sentFields(): string[] {
 	collector.handlePlayIntent(0);
 	collector.handlePlaying(100);
 	const beacon = collector.flush(1000);
-	// `token` rides on top of the collector's beacon, only for a private video's viewer JWT.
+	// `token` rides on top of the collector's beacon, only when the player's token is JWT-shaped.
 	return [...Object.keys(beacon ?? {}), "token"].sort();
 }
 

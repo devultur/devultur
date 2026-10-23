@@ -32,9 +32,9 @@ export interface MediaSession {
 	/** Issues the viewer token again (after a failure, for example). Resolves to the new token, or `null`. */
 	retryToken: () => Promise<string | null>;
 	/**
-	 * Asks for the viewer token where it's issued lazily (`<DevulturViewerProvider>`): the first private media shown
-	 * calls it, and so must code that reads `token` itself. A no-op once asked, and under `<DevulturProvider>`, which
-	 * issues the token right away.
+	 * Asks for the viewer token where it's issued lazily (`<DevulturViewerProvider lazyToken>`): the first private media
+	 * shown calls it, and so must code that reads `token` itself. A no-op once asked, and where the token is issued
+	 * right away (the default).
 	 */
 	requestToken: () => void;
 	baseUrl: string | null;

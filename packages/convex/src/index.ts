@@ -28,6 +28,7 @@ export {
 export { type DevulturErrorData, devulturErrorOf, isDevulturError } from "./errors";
 export type { CallerContext, RegisteredFunctions } from "./exposed-functions";
 export {
+	type DevulturArgsRewrite,
 	type DevulturFunctionsOptions,
 	type DevulturGuard,
 	type DevulturGuardCtx,

@@ -50,6 +50,11 @@ export interface PreviewProps {
 	pdfWorkerSrc?: string;
 	/** Overrides any string shown or announced; wins over `PdfPreviewProvider`'s `labels`. English by default. */
 	labels?: Partial<PreviewLabels>;
+	/**
+	 * A video's playback metrics (`<VideoPlayer metrics>`): anonymous, no cookies, sent to the media host. On by
+	 * default; `false` turns them off.
+	 */
+	metrics?: boolean;
 }
 
 /**
@@ -61,7 +66,7 @@ export interface PreviewProps {
  * @example
  * <Preview media={document.file} maxBytes={20_000_000} className="h-[80vh] w-full" />
  */
-export function Preview({ media, contentType, fallback, loading, labels, ...viewProps }: PreviewProps) {
+export function Preview({ media, contentType, fallback, loading, labels, metrics, ...viewProps }: PreviewProps) {
 	const text = usePreviewLabels(labels);
 	if (!media) return null;
 
@@ -72,12 +77,15 @@ export function Preview({ media, contentType, fallback, loading, labels, ...view
 		if (fallback !== undefined) return fallback;
 		return <DefaultFallback media={media} error={fetchError} labels={text} />;
 	};
+	const loadingNode = loading === undefined ? <LoadingStatus text={text.loading} /> : loading;
 	if (media.kind === "video") {
 		return (
 			<VideoPreview
 				key={mediaPath(media)}
 				media={media}
 				renderFallback={renderFallback}
+				loading={loadingNode}
+				metrics={metrics}
 				className={viewProps.className}
 			/>
 		);
@@ -86,7 +94,6 @@ export function Preview({ media, contentType, fallback, loading, labels, ...view
 	const kind = previewKindOf(expectedType);
 	if (!expectedType || !kind) return <>{renderFallback(unsupportedType(expectedType))}</>;
 
-	const loadingNode = loading === undefined ? <LoadingStatus text={text.loading} /> : loading;
 	const props = { ...viewProps, media, expectedType, renderFallback, loading: loadingNode, labels: text };
 	if (kind === "text") return <TextPreview {...props} />;
 	if (kind === "pdf") return <PdfPreview {...props} maxBytes={props.maxBytes ?? DEFAULT_MAX_BYTES} />;

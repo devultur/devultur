@@ -13,6 +13,10 @@ import { useDevultur, useVideoProps } from "./react";
 interface VideoPreviewProps {
 	media: DevulturMedia;
 	renderFallback: RenderFallback;
+	/** Shown while a private video waits for its viewer token. */
+	loading: React.ReactNode;
+	/** `<VideoPlayer metrics>`: `false` turns playback metrics off. */
+	metrics?: boolean;
 	className?: string;
 }
 
@@ -36,8 +40,8 @@ function fetchErrorOf(error: VideoPlayerError): MediaFetchError {
 	return renderFailedError(error);
 }
 
-export function VideoPreview({ media, renderFallback, className }: VideoPreviewProps) {
-	const { tokenStatus, tokenError, reissueToken } = useDevultur();
+export function VideoPreview({ media, renderFallback, loading, metrics, className }: VideoPreviewProps) {
+	const { token, tokenStatus, tokenError, reissueToken } = useDevultur();
 	const videoProps = useVideoProps(media);
 	const [failure, setFailure] = React.useState<PlaybackFailure | null>(null);
 	const hasReissuedRef = React.useRef(false);
@@ -58,9 +62,10 @@ export function VideoPreview({ media, renderFallback, className }: VideoPreviewP
 	);
 
 	if (!videoProps) return null;
-	if (media.visibility === "private" && tokenStatus === "error") {
-		return <>{renderFallback(tokenUnavailableError(tokenError))}</>;
-	}
+	const isPrivate = media.visibility === "private";
+	if (isPrivate && tokenStatus === "error") return <>{renderFallback(tokenUnavailableError(tokenError))}</>;
+	// Without a token the playlist request would be refused (a 401) and flash the fallback.
+	if (isPrivate && !token) return <>{loading}</>;
 	if (failure && failure.token === playerToken) return <>{renderFallback(failure.error)}</>;
-	return <VideoPlayer {...videoProps} className={className} onError={handleError} />;
+	return <VideoPlayer {...videoProps} className={className} metrics={metrics} onError={handleError} />;
 }
