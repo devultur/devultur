@@ -308,7 +308,8 @@ there until `retryToken()`: a failed issuance isn't retried on its own. Meanwhil
 receives it), and `<DownloadLink onDownloadError>` receives it on click. They load once `retryToken()` gets a token.
 
 `<Preview>`'s video plays in `<VideoPlayer>` from `@devultur/react`, with its playback metrics on: anonymous, no
-cookies, sent to the media host (see [Playback metrics](https://github.com/devultur/devultur/blob/main/docs/guides/video-player.md#playback-metrics)).
+cookies, sent to the media host (see [Playback metrics](https://github.com/devultur/devultur/blob/main/docs/guides/video-player.md#playback-metrics),
+also in `node_modules/@devultur/convex/docs/guides/video-player.md`).
 `<Preview metrics={false}>` turns them off. A private video shows `loading` until its viewer token is issued.
 
 `<Preview>`'s video re-issues the token once when the delivery answers the playlist or a segment with a 401
@@ -814,6 +815,8 @@ what's enforced and the caveats.
 ## Documentation
 
 Guides and API reference: [github.com/devultur/devultur/tree/main/docs](https://github.com/devultur/devultur/tree/main/docs).
+The guides this README links to ship with the package, for the installed version, in
+`node_modules/@devultur/convex/docs/guides/`: `video-player.md`, `self-host.md`, `plugins.md` and `object-lock.md`.
 
 ## License
 

@@ -49,7 +49,8 @@ Turn them off with `metrics={false}`:
 ```
 
 Every field and when it's sent:
-[docs/guides/video-player.md#playback-metrics](https://github.com/devultur/devultur/blob/main/docs/guides/video-player.md#playback-metrics).
+[docs/guides/video-player.md#playback-metrics](https://github.com/devultur/devultur/blob/main/docs/guides/video-player.md#playback-metrics),
+also shipped with the package as `node_modules/@devultur/react/docs/guides/video-player.md`.
 
 ## Labels
 
@@ -59,6 +60,8 @@ Every field and when it's sent:
 ## Documentation
 
 Components, hooks and guides: [github.com/devultur/devultur/tree/main/docs](https://github.com/devultur/devultur/tree/main/docs).
+The [video player guide](https://github.com/devultur/devultur/blob/main/docs/guides/video-player.md) ships with the
+package, for the installed version: `node_modules/@devultur/react/docs/guides/video-player.md`.
 
 ## License
 

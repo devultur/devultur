@@ -37,6 +37,8 @@ const src = buildMediaUrl("https://media.example.com", key, { token, width: 640,
 ## Documentation
 
 Guides and API reference: [github.com/devultur/devultur/tree/main/docs](https://github.com/devultur/devultur/tree/main/docs).
+The [retention and holds guide](https://github.com/devultur/devultur/blob/main/docs/guides/object-lock.md) ships with
+the package, for the installed version: `node_modules/@devultur/core/docs/guides/object-lock.md`.
 
 ## License
 
