@@ -1,6 +1,6 @@
 {
 	"name": "@devultur/core",
-	"version": "1.5.1",
+	"version": "1.5.2",
 	"description": "Shared config, types, storage path conventions, media references and URL signing for the Devultur media SDKs",
 	"keywords": [
 		"media",
