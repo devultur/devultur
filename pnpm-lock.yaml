@@ -21,7 +21,7 @@ importers:
         specifier: ^0.28.1
         version: 0.28.1
       rolldown:
-        specifier: ^1.0.3
+        specifier: 1.0.3
         version: 1.0.3
       turbo:
         specifier: ^2.5.0

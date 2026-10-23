@@ -286,7 +286,7 @@ function Cover({ media, fallbackUrl }) {
 }
 ```
 
-A public media needs nothing more. A private one also needs the viewer token, which a provider may not have yet
+Public media needs nothing more. Private media also needs the viewer token, which a provider may not have yet
 (`lazyToken`) or can't issue (a `<DevulturViewerProvider>` without `issueViewerToken`); `tokenStatus` from
 `useDevultur()` tells, and the components show their error state when it fails.
 
