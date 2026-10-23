@@ -1,5 +1,6 @@
 // Formal Spanish («usted») for everything `@devultur/convex/locales/es` exports, under the same names. It is derived
 // from `es`: only the strings that address the reader are overridden, so the rest can't drift between the two.
+import type { VideoPlayerLabels } from "@devultur/react";
 import type { AttachmentLabels } from "../attachment-labels";
 import type { DevulturErrorLabels } from "../error-labels";
 import { describeDevulturError, labelText } from "../error-labels";
@@ -58,3 +59,6 @@ export const mediaPickerLabels: MediaPickerLabels = {
 	dropHint: (multiple) => (multiple ? "o suelte los archivos aquí" : "o suelte un archivo aquí"),
 	uploadError: (error) => describeDevulturError(error, devulturErrorLabels) ?? `La subida falló. ${TRY_AGAIN}`,
 };
+
+// No string of the player addresses the viewer.
+export const videoPlayerLabels: VideoPlayerLabels = es.videoPlayerLabels;

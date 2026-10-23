@@ -14,7 +14,7 @@ export type ViewerTokenArgs = Record<string, Value>;
  */
 export type TokenStatus = "idle" | "loading" | "ready" | "error";
 
-type IssueViewerToken = (
+export type IssueViewerToken = (
 	args: ViewerTokenArgs & { sessionSecret: string },
 ) => Promise<ViewerTokenResult | null | undefined>;
 
@@ -22,6 +22,8 @@ interface UseViewerTokenOptions {
 	issueViewerToken: IssueViewerToken;
 	sessionSecret: string;
 	tokenArgs?: ViewerTokenArgs;
+	/** `true` → nothing is issued until `requestToken()` is called (a private media needs it). Default `false`. */
+	isLazy?: boolean;
 }
 
 interface IssuedToken {
@@ -72,25 +74,30 @@ export function tokenArgsKey(tokenArgs: ViewerTokenArgs | undefined): string {
  * Issues the viewer token for the current `tokenArgs`, renews it before it expires, and re-issues it on demand
  * (single-flight). When `tokenArgs` change, the current token is dropped and a new one is issued; a response for
  * arguments that are no longer current is ignored. A failed issuance isn't retried on its own: `retryToken` does.
+ * Lazy, the first issuance waits for `requestToken()`; once requested, the token is kept and renewed like an eager one.
  */
-export function useViewerToken({ issueViewerToken, sessionSecret, tokenArgs }: UseViewerTokenOptions) {
+export function useViewerToken({ issueViewerToken, sessionSecret, tokenArgs, isLazy = false }: UseViewerTokenOptions) {
 	const argsKey = tokenArgsKey(tokenArgs);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: tokenArgs are compared by their stable JSON, not identity
 	const stableArgs = React.useMemo(() => tokenArgs ?? {}, [argsKey]);
 	const [issued, setIssued] = React.useState<IssuedToken | null>(null);
 	const [attempt, setAttempt] = React.useState<Attempt | null>(null);
+	const [isRequested, setIsRequested] = React.useState(!isLazy);
 	const token = issued?.argsKey === argsKey ? issued.token : null;
 	const currentAttempt = attempt?.argsKey === argsKey ? attempt : null;
 	const currentArgsKeyRef = React.useRef(argsKey);
 	const refreshTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 	const inFlightRef = React.useRef<Issuance | null>(null);
+	const isMountedRef = React.useRef(true);
 
 	React.useEffect(() => {
 		currentArgsKeyRef.current = argsKey;
 	}, [argsKey]);
 
 	React.useEffect(() => {
+		isMountedRef.current = true;
 		return () => {
+			isMountedRef.current = false;
 			if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
 		};
 	}, []);
@@ -100,7 +107,8 @@ export function useViewerToken({ issueViewerToken, sessionSecret, tokenArgs }: U
 			request().catch((error: unknown) => console.warn("Devultur: could not renew the viewer token", error));
 		};
 		const result = await issueViewerToken({ ...stableArgs, sessionSecret });
-		if (currentArgsKeyRef.current !== argsKey) return null;
+		// Unmounted while issuing: no renewal timer outlives the provider.
+		if (!isMountedRef.current || currentArgsKeyRef.current !== argsKey) return null;
 		const { tokenValue, ttlMs } = extractTokenResult(result);
 		setIssued({ token: tokenValue, argsKey });
 		setAttempt(null);
@@ -129,9 +137,12 @@ export function useViewerToken({ issueViewerToken, sessionSecret, tokenArgs }: U
 	// The first issuance per arguments. After a failure it waits for `retryToken`, so a broken action isn't hammered.
 	const hasAttempt = currentAttempt !== null;
 	React.useEffect(() => {
-		if (token || hasAttempt) return;
+		if (!isRequested || token || hasAttempt) return;
 		issueOnce().catch(() => {});
-	}, [token, hasAttempt, issueOnce]);
+	}, [isRequested, token, hasAttempt, issueOnce]);
+
+	// Stable, and a no-op once requested: a render may call it for every private media it shows.
+	const requestToken = React.useCallback(() => setIsRequested(true), []);
 
 	// Called when the delivery refused the token (`session_mismatch`): when no new one comes, the old one is useless.
 	const reissueToken = React.useCallback(
@@ -143,10 +154,13 @@ export function useViewerToken({ issueViewerToken, sessionSecret, tokenArgs }: U
 		[issueOnce, argsKey],
 	);
 
-	const retryToken = React.useCallback((): Promise<string | null> => issueOnce().catch(() => null), [issueOnce]);
+	const retryToken = React.useCallback((): Promise<string | null> => {
+		setIsRequested(true);
+		return issueOnce().catch(() => null);
+	}, [issueOnce]);
 
 	const tokenStatus: TokenStatus = token ? "ready" : (currentAttempt?.status ?? "idle");
 	const tokenError = !token && currentAttempt?.status === "error" ? currentAttempt.error : null;
 
-	return { token, tokenStatus, tokenError, reissueToken, retryToken };
+	return { token, tokenStatus, tokenError, reissueToken, retryToken, requestToken };
 }

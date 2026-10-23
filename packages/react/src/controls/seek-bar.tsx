@@ -3,6 +3,7 @@
 import React from "react";
 import { type StoryboardCue, storyboardCueAt } from "../storyboard";
 import type { VideoPlayerRenderProps } from "../types";
+import { resolveVideoPlayerLabels, type VideoPlayerLabels } from "../video-player-labels";
 import { StoryboardPreview } from "./storyboard-preview";
 import { preventArrowDefault } from "./utils";
 
@@ -11,6 +12,8 @@ interface SeekBarProps {
 	controls: VideoPlayerRenderProps["controls"];
 	/** Storyboard cues (`useStoryboard`): when present, hovering the bar shows a thumbnail of that instant. */
 	storyboard?: StoryboardCue[];
+	/** Any of the player's strings (`VideoPlayerLabels`); the rest keep the English defaults. */
+	labels?: Partial<VideoPlayerLabels>;
 	className?: string;
 }
 
@@ -23,7 +26,8 @@ interface HoverPoint {
 /**
  * Range slider showing played and buffered progress that seeks on change, with optional storyboard previews.
  */
-export function SeekBar({ state, controls, storyboard, className }: SeekBarProps): React.ReactElement {
+export function SeekBar({ state, controls, storyboard, labels, className }: SeekBarProps): React.ReactElement {
+	const text = resolveVideoPlayerLabels(labels);
 	const [hover, setHover] = React.useState<HoverPoint | null>(null);
 	const handleChange = React.useCallback(
 		(event: React.ChangeEvent<HTMLInputElement>) => controls.seek(Number(event.target.value)),
@@ -43,7 +47,7 @@ export function SeekBar({ state, controls, storyboard, className }: SeekBarProps
 			value={state.currentTime}
 			onChange={handleChange}
 			onKeyDown={preventArrowDefault}
-			aria-label="Seek"
+			aria-label={text.seek}
 			data-dvltr-seek=""
 			style={{
 				background: `linear-gradient(to right, var(--dvltr-accent, #fff) ${percent}%, var(--dvltr-buffered, rgba(255,255,255,0.5)) ${percent}%, var(--dvltr-buffered, rgba(255,255,255,0.5)) ${bufferedPercent}%, var(--dvltr-track-bg, rgba(255,255,255,0.3)) ${bufferedPercent}%)`,

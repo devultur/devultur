@@ -2,6 +2,7 @@
 
 import React from "react";
 import type { VideoPlayerRenderProps } from "../types";
+import { resolveVideoPlayerLabels, type VideoPlayerLabels } from "../video-player-labels";
 import { useClickOutside } from "./use-click-outside";
 
 const DEFAULT_PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2];
@@ -10,6 +11,8 @@ interface SpeedButtonProps {
 	state: VideoPlayerRenderProps["state"];
 	controls: VideoPlayerRenderProps["controls"];
 	rates?: number[];
+	/** Any of the player's strings (`VideoPlayerLabels`); the rest keep the English defaults. */
+	labels?: Partial<VideoPlayerLabels>;
 	className?: string;
 }
 
@@ -20,8 +23,10 @@ export function SpeedButton({
 	state,
 	controls,
 	rates = DEFAULT_PLAYBACK_RATES,
+	labels,
 	className,
 }: SpeedButtonProps): React.ReactElement {
+	const text = resolveVideoPlayerLabels(labels);
 	const [isOpen, setIsOpen] = React.useState(false);
 	const containerRef = React.useRef<HTMLDivElement>(null);
 
@@ -36,7 +41,7 @@ export function SpeedButton({
 				className={className}
 				data-dvltr-speed-label=""
 				onClick={() => setIsOpen((prev) => !prev)}
-				aria-label="Playback speed"
+				aria-label={text.speed}
 				aria-expanded={isOpen}
 			>
 				{label}
@@ -54,7 +59,7 @@ export function SpeedButton({
 								setIsOpen(false);
 							}}
 						>
-							{rate === 1 ? "Normal" : `${rate}x`}
+							{rate === 1 ? text.speedNormal : `${rate}x`}
 						</button>
 					))}
 				</div>

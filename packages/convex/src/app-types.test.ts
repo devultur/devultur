@@ -17,6 +17,7 @@ import type { ComponentApi } from "./component/_generated/component.js";
 import type schema from "./component/schema";
 import { defineDevulturFunctions } from "./guarded-functions";
 import type { ViewerTokenAction } from "./media-session";
+import type { DevulturContextValue, DevulturViewerProviderProps, useDevulturOptional } from "./react";
 import type { MediaRecord } from "./types";
 
 const appSchema = defineSchema({
@@ -68,6 +69,15 @@ describe("an app's types", () => {
 		expectTypeOf<
 			FunctionReference<"action", "public", { sessionSecret: string; workspaceId: string }>
 		>().toExtend<ViewerTokenAction>();
+	});
+
+	it("returns the context or null from useDevulturOptional", () => {
+		expectTypeOf<ReturnType<typeof useDevulturOptional>>().toEqualTypeOf<DevulturContextValue | null>();
+	});
+
+	it("takes a viewer provider without a token action", () => {
+		expectTypeOf<{ baseUrl: string; children: null }>().toExtend<DevulturViewerProviderProps>();
+		expectTypeOf<DevulturViewerProviderProps["issueViewerToken"]>().toEqualTypeOf<ViewerTokenAction | undefined>();
 	});
 
 	it("types every field the component stores on a media record", () => {

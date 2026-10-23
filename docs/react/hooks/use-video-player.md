@@ -41,6 +41,7 @@ return (
 | `onProgress` | `(currentTime: number, percent: number) => void` | — | Fired as playback advances. |
 | `onEnded` | `() => void` | — | Fired when playback ends. |
 | `onError` | `(error: VideoPlayerError) => void` | — | Fired when the playlist or a segment can't load (a `401`, or an error hls.js can't recover from). |
+| `metrics` | `boolean` | `true` | Anonymous playback quality beacons, with no cookies, to the video's own host. `false` turns them off. See [Playback metrics](../../guides/video-player.md#playback-metrics). |
 
 ## Returns
 

@@ -107,8 +107,13 @@ export const { createUploadUrl, confirmUpload, issueViewerToken, getMedia, listM
   signed-in user can't read or overwrite someone else's progress. Return `{ userId, canActForOthers: true }` for a
   caller who may (an admin resetting a learner's progress). A guard that returns no `userId` keeps the browser's, as
   `exposeApi` does: return one whenever the progress functions are exported.
+- The guard may also return a `rewrite`, `{ name, args }`: each key of `args` replaces the caller's argument of that
+  name, on your server, before the function runs (see [Upload visibility](#upload-visibility)). `name` is the guarded
+  operation's, so `args` are typed for it; a rewrite named for another operation throws. The rewritten arguments
+  aren't validated again.
 - `visibility: "internal"` registers them as internal functions, for your own actions and mutations to call.
-- `config` takes what `Devultur.exposeApi` does (transcode preset, caption locales, upload lock).
+- `config` takes what `Devultur.exposeApi` does (transcode preset, caption locales, upload lock and default
+  visibility).
 - Each function keeps its arguments and result types, so `api.devultur.confirmUpload` is typed as before and
   `<DevulturProvider api={api.devultur}>` takes them as it takes `exposeApi`'s.
 
@@ -116,6 +121,44 @@ export const { createUploadUrl, confirmUpload, issueViewerToken, getMedia, listM
 > deployment can create upload URLs, confirm uploads, list the whole library and delete media. It keeps working, but
 > use it only for a deployment where every caller is trusted, or move to `defineDevulturFunctions`, which takes the
 > same `config`.
+
+## Upload visibility
+
+`config.upload.visibility` sets the visibility of an upload whose caller passes none. Without it, the Worker's default
+by type applies.
+
+```typescript
+export const { createUploadUrl, confirmUpload } = defineDevulturFunctions(devultur, {
+  guard,
+  config: { upload: { visibility: "public" } }, // a site whose uploads are public unless the browser asks otherwise
+});
+```
+
+The browser can still pass `visibility` (`upload(file, { visibility })`, `useMediaUpload({ visibility })`). To decide
+it on your server instead, rewrite it in the guard: the guard's `rewrite` replaces the browser's arguments.
+
+```typescript
+guard: async (ctx, operation) => {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) throw new ConvexError("Sign in first");
+  // Members' uploads are always private, whatever the browser asked for.
+  if (operation.name === "createUploadUrl") {
+    return { userId: identity.subject, rewrite: { name: "createUploadUrl", args: { visibility: "private" } } };
+  }
+  return { userId: identity.subject };
+},
+```
+
+Which one wins, from first to last:
+
+1. The guard's `rewrite.args.visibility`.
+2. The caller's `visibility`.
+3. `config.upload.visibility`.
+4. The Worker's default by type.
+
+The guard sees the caller's arguments as they arrived (`operation.args.visibility` is `undefined` when the browser
+passed none): the config's default is applied after the guard. `config.upload.lock` isn't an argument, so neither
+the browser nor the guard's `rewrite` change it.
 
 ## Upload progress
 
@@ -175,7 +218,7 @@ ignored. Your action returns what the component's action returns: `{ token, expi
 ### Display-only apps
 
 An app that only shows media (no uploads, no deletes) uses `<DevulturViewerProvider>`, which needs only the base URL
-and a viewer token action:
+and, for private media, a viewer token action:
 
 ```tsx
 import { DevulturViewerProvider, Preview } from "@devultur/convex/react";
@@ -194,13 +237,49 @@ import { DevulturViewerProvider, Preview } from "@devultur/convex/react";
 that need the `api` (`useDevulturApi`, `useMediaUpload`, `<MediaLibrary>`, `<MediaPicker>`), throw a
 `DevulturCapabilityError` whose `code` is `capability_unavailable`.
 
+Like `<DevulturProvider>`, it issues the viewer token as soon as it mounts. With `lazyToken`, it issues it only when
+a private media is shown, and renews it from then on: while every media on the page is public, it calls nothing,
+`tokenStatus` stays `"idle"` and `token` stays `null`. Code that reads `token` itself then calls
+`useDevultur().requestToken()` first; the built-in components and hooks do it for private media.
+
+```tsx
+<DevulturViewerProvider baseUrl={MEDIA_URL} issueViewerToken={api.devultur.issueViewerToken} lazyToken>
+  <Gallery />
+</DevulturViewerProvider>
+```
+
+When all the media is public, leave `issueViewerToken` out. The provider then needs no Convex client and issues
+nothing:
+
+```tsx
+<DevulturViewerProvider baseUrl={MEDIA_URL}>
+  <Image media={post.cover} alt={post.title} />
+</DevulturViewerProvider>
+```
+
+A private media shown under it fails with `token_unavailable`, and `tokenError` says the provider has no
+`issueViewerToken`.
+
+### Components outside a provider
+
+`useDevultur()` throws outside `<DevulturProvider>` and `<DevulturViewerProvider>`. A component that also renders
+without one uses `useDevulturOptional()`, which returns the same value, or `null` outside both:
+
+```tsx
+function Avatar({ media, fallbackUrl }) {
+  const devultur = useDevulturOptional();
+  if (!devultur || !media) return <img src={fallbackUrl} alt="" />;
+  return <Image media={media} alt="" width={64} />;
+}
+```
+
 ### When the viewer token can't be issued
 
 `useDevultur()` tells where the viewer token stands:
 
 ```tsx
 const { tokenStatus, tokenError, retryToken } = useDevultur();
-// tokenStatus: "idle" | "loading" | "ready" | "error"
+// tokenStatus: "idle" (not asked for yet) | "loading" | "ready" | "error"
 if (tokenStatus === "error") return <button onClick={retryToken}>Try again</button>; // tokenError has why
 ```
 
@@ -209,6 +288,10 @@ there until `retryToken()`: a failed issuance isn't retried on its own. Meanwhil
 `MediaFetchError` code `token_unavailable` instead of loading: `useMediaObjectUrl` returns it as `error`,
 `<Preview>` passes it to its `fallback`, `<PdfThumbnail>` and `<Image>` render their `fallback` (`<Image onLoadError>`
 receives it), and `<DownloadLink onDownloadError>` receives it on click. They load once `retryToken()` gets a token.
+
+`<Preview>`'s video plays in `<VideoPlayer>` from `@devultur/react`, with its playback metrics on: anonymous, no
+cookies, sent to the media host (see [Playback metrics](https://github.com/devultur/devultur/blob/main/docs/guides/video-player.md#playback-metrics)).
+`<Preview metrics={false}>` turns them off. A private video shows `loading` until its viewer token is issued.
 
 `<Preview>`'s video re-issues the token once when the delivery answers the playlist or a segment with a 401
 `session_mismatch`; after that, or on any other 401, it renders its `fallback` with `session_mismatch` or
@@ -658,8 +741,8 @@ the same name.
 
 `@devultur/convex/locales/es` addresses the reader with «tú» ("Vuelve a intentarlo"). For «usted» ("Vuelva a
 intentarlo", "No tiene permiso…"), import the same names from `@devultur/convex/locales/es-formal`: it exports exactly
-what `locales/es` does (error, attachment, preview, library and picker labels), and differs only in the strings that
-address the reader.
+what `locales/es` does (error, attachment, preview, library, picker and video player labels), and differs only in the
+strings that address the reader.
 
 ```tsx
 import { describeDevulturError } from "@devultur/convex";
@@ -683,6 +766,18 @@ Pass a partial map to change some messages and keep the rest, or a full one for 
 
 ```ts
 describeDevulturError(error, { ...spanishLabels, lock_conflict: "Alguien más acaba de cambiarlo." });
+```
+
+### Video player labels
+
+`<VideoPlayer>` from `@devultur/react` takes `labels` like the components here do. Both Spanish locales export
+`videoPlayerLabels`:
+
+```tsx
+import { VideoPlayer } from "@devultur/react";
+import { videoPlayerLabels } from "@devultur/convex/locales/es";
+
+<VideoPlayer {...useVideoProps(lesson.video)} labels={videoPlayerLabels} />;
 ```
 
 ## Object lock

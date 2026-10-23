@@ -64,7 +64,7 @@ function Harness({ tokenArgs, issueViewerToken }: HarnessProps) {
 
 function renderProvider(props: HarnessProps) {
 	const view = render(<Harness {...props} />);
-	return { rerender: (next: HarnessProps) => view.rerender(<Harness {...next} />) };
+	return { rerender: (next: HarnessProps) => view.rerender(<Harness {...next} />), unmount: view.unmount };
 }
 
 afterEach(() => {
@@ -162,5 +162,20 @@ describe("DevulturProvider tokenArgs", () => {
 		await waitFor(() => expect(customCalls).toHaveLength(1));
 		expect(customCalls[0]!.args).toMatchObject({ workspaceId: "w1" });
 		expect(defaultCalls).toHaveLength(0);
+	});
+});
+
+describe("DevulturProvider unmount", () => {
+	it("schedules no renewal when the issuance resolves after unmount", async () => {
+		const calls = deferredAction("issueViewerToken");
+		const { unmount } = renderProvider({});
+		await waitFor(() => expect(calls).toHaveLength(1));
+		unmount();
+
+		const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+		await act(async () => calls[0]!.resolve("late-token"));
+		const renewals = setTimeoutSpy.mock.calls.filter(([, delay]) => typeof delay === "number" && delay >= 60_000);
+		setTimeoutSpy.mockRestore();
+		expect(renewals).toHaveLength(0);
 	});
 });

@@ -109,6 +109,9 @@ import { UploadZone, VideoPlayer } from "@devultur/react";
 <VideoPlayer src={playlistUrl} token={viewerToken} />;
 ```
 
+`<VideoPlayer>` sends anonymous playback quality metrics (no cookies) to the media host by default; `metrics={false}`
+turns them off ([what is sent](docs/guides/video-player.md#playback-metrics)).
+
 Using Convex? `@devultur/convex` wraps all of this in a component with typed validators and hooks.
 
 ## Documentation

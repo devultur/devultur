@@ -79,7 +79,11 @@ function progressArgsFor<Args extends { userId: string }>(args: Args, caller: Ca
 }
 
 /** The media id of a media id or an object key (`{visibility}/{kind}/{id}/…`). */
-function mediaIdOf(key: string): string {
+function mediaIdOf(key: unknown): string {
+	// A guard's rewrite isn't validated again: refuse a key that isn't a string instead of crashing on it.
+	if (typeof key !== "string") {
+		throw new ConvexError({ code: "invalid_key", message: "The media key must be a string", status: 400 });
+	}
 	return key.includes("/") ? extractId(key) : key;
 }
 
@@ -89,6 +93,7 @@ export function exposedFunctions(component: ComponentApi, config?: DevulturCompo
 	const locales = config?.video?.captionLocales ?? [];
 	// The lock comes from the config only: a browser calling this never picks one.
 	const uploadLock = config?.upload?.lock;
+	const defaultVisibility = config?.upload?.visibility;
 
 	return {
 		issueViewerToken: exposed("action", { sessionSecret: v.optional(v.string()) }, async (ctx, args, caller) =>
@@ -98,12 +103,18 @@ export function exposedFunctions(component: ComponentApi, config?: DevulturCompo
 			}),
 		),
 
-		// Optional per-resource visibility; omitted → the component resolves the config's default (secure-by-default).
+		// Visibility: the caller's (after the guard's rewrite), else `config.upload.visibility`, else the Worker's default.
 		createUploadUrl: exposed(
 			"action",
 			{ filename: v.string(), contentType: v.string(), visibility: visibilityArg },
-			async (ctx, args) =>
-				ctx.runAction(component.public.createUploadUrl, { ...args, ...(uploadLock ? { lock: uploadLock } : {}) }),
+			async (ctx, args) => {
+				const visibility = args.visibility ?? defaultVisibility;
+				return ctx.runAction(component.public.createUploadUrl, {
+					...args,
+					...(visibility ? { visibility } : {}),
+					...(uploadLock ? { lock: uploadLock } : {}),
+				});
+			},
 		),
 
 		// Records an upload once its bytes are stored (the Worker HEADs the key): a browser can't list anything

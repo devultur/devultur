@@ -1,4 +1,5 @@
 import type React from "react";
+import type { VideoPlayerLabels } from "./video-player-labels";
 
 export interface MediaRouterLike {
 	transcode(key: string, options?: { preset?: string; callbackUrl?: string }): Promise<{ jobId: string }>;
@@ -97,6 +98,8 @@ export interface VideoPlayerProps {
 	metrics?: boolean;
 	/** CSS aspect ratio applied to the player container. Optional. */
 	aspectRatio?: string;
+	/** Any of the player's strings (`VideoPlayerLabels`, e.g. Spanish ones); the rest keep the English defaults. */
+	labels?: Partial<VideoPlayerLabels>;
 	/** Class name applied to the player container. Optional. */
 	className?: string;
 	/** Custom UI, or a render function receiving the current {@link VideoPlayerRenderProps}. Optional. */

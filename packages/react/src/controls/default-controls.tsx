@@ -3,6 +3,7 @@
 import React from "react";
 import type { StoryboardCue } from "../storyboard";
 import type { CaptionTrack, VideoPlayerRenderProps } from "../types";
+import { resolveVideoPlayerLabels, type VideoPlayerLabels } from "../video-player-labels";
 import { CaptionButton } from "./caption-button";
 import { FullscreenButton } from "./fullscreen-button";
 import { PlayButton } from "./play-button";
@@ -23,6 +24,8 @@ interface DefaultControlsProps {
 	/** Storyboard cues for seek bar hover previews (`useStoryboard`). */
 	storyboard?: StoryboardCue[];
 	onVisibilityChange?: (visible: boolean) => void;
+	/** Any of the player's strings (`VideoPlayerLabels`); the rest keep the English defaults. */
+	labels?: Partial<VideoPlayerLabels>;
 	className?: string;
 }
 
@@ -36,9 +39,11 @@ export function DefaultControls({
 	playbackRates,
 	storyboard,
 	onVisibilityChange,
+	labels,
 	className,
 }: DefaultControlsProps): React.ReactElement {
 	useControlStyles();
+	const text = React.useMemo(() => resolveVideoPlayerLabels(labels), [labels]);
 	const [isVisible, setIsVisible] = React.useState(true);
 	const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -70,7 +75,7 @@ export function DefaultControls({
 		<div
 			className={className}
 			role="toolbar"
-			aria-label="Video controls"
+			aria-label={text.controls}
 			onMouseMove={resetTimer}
 			onMouseLeave={() => state.isPlaying && setIsVisible(false)}
 			data-dvltr-controls=""
@@ -84,7 +89,7 @@ export function DefaultControls({
 			}}
 		>
 			{!state.isPlaying && state.currentTime === 0 && (
-				<button type="button" onClick={controls.togglePlay} aria-label="Play" data-dvltr-big-play="">
+				<button type="button" onClick={controls.togglePlay} aria-label={text.play} data-dvltr-big-play="">
 					<svg viewBox="0 0 24 24" aria-hidden="true">
 						<path d="M8 5v14l11-7z" />
 					</svg>
@@ -99,17 +104,17 @@ export function DefaultControls({
 					pointerEvents: showControls ? "auto" : "none",
 				}}
 			>
-				<SeekBar state={state} controls={controls} storyboard={storyboard} />
+				<SeekBar state={state} controls={controls} storyboard={storyboard} labels={text} />
 
 				<div data-dvltr-bar-row="">
-					<PlayButton state={state} controls={controls} />
+					<PlayButton state={state} controls={controls} labels={text} />
 					<TimeDisplay state={state} />
 					<div data-dvltr-spacer="" />
-					<QualityButton state={state} controls={controls} />
-					<SpeedButton state={state} controls={controls} rates={playbackRates} />
-					<VolumeControl state={state} controls={controls} />
-					<CaptionButton state={state} controls={controls} captions={captions} />
-					<FullscreenButton state={state} controls={controls} />
+					<QualityButton state={state} controls={controls} labels={text} />
+					<SpeedButton state={state} controls={controls} rates={playbackRates} labels={text} />
+					<VolumeControl state={state} controls={controls} labels={text} />
+					<CaptionButton state={state} controls={controls} captions={captions} labels={text} />
+					<FullscreenButton state={state} controls={controls} labels={text} />
 				</div>
 			</div>
 		</div>

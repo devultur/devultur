@@ -11,6 +11,7 @@
 // });
 // ```
 import type {
+	DefaultFunctionArgs,
 	FunctionVisibility,
 	GenericActionCtx,
 	GenericDataModel,
@@ -52,19 +53,38 @@ export type DevulturGuardCtx<DataModel extends GenericDataModel = any> =
 /**
  * Throws to deny the call. May return what it learned about the caller: a `userId` becomes the subject of the token
  * `issueViewerToken` issues, and the only user the progress functions act for (another `userId` in their arguments is
- * refused with `user_mismatch`, unless the guard also returns `canActForOthers: true`).
+ * refused with `user_mismatch`, unless the guard also returns `canActForOthers: true`). May also return a `rewrite` of
+ * the caller's arguments (see `DevulturArgsRewrite`).
  */
-export type DevulturGuard = (ctx: DevulturGuardCtx, operation: DevulturOperation) => GuardResult | Promise<GuardResult>;
+export type DevulturGuard = (
+	ctx: DevulturGuardCtx,
+	operation: DevulturOperation,
+) => DevulturGuardResult | Promise<DevulturGuardResult>;
 
-// `void`: a guard that only checks (and throws) returns nothing, including one typed `() => void`.
-// biome-ignore lint/suspicious/noConfusingVoidType: see above.
-type GuardResult = CallerContext | undefined | void;
+/**
+ * Arguments a guard rewrites, on your server, before the function runs: each key of `args` replaces the caller's
+ * argument of that name. `name` is the operation's, so `args` are typed for it:
+ * `{ name: "createUploadUrl", args: { visibility: "private" } }` uploads privately whatever the browser asked for.
+ * A rewrite named for another operation than the one being guarded throws. The rewritten arguments aren't validated
+ * again.
+ */
+export type DevulturArgsRewrite = {
+	[Name in ExposedFunctionName]: { name: Name; args: Partial<ArgsOf<ExposedFunctions[Name]>> };
+}[ExposedFunctionName];
+
+/** What a guard returns: what it learned about the caller, and the arguments it rewrites. */
+export type DevulturGuardResult =
+	| (CallerContext & { rewrite?: DevulturArgsRewrite })
+	| undefined
+	// `void`: a guard that only checks (and throws) returns nothing, including one typed `() => void`.
+	// biome-ignore lint/suspicious/noConfusingVoidType: see above.
+	| void;
 
 export interface DevulturFunctionsOptions<Visibility extends FunctionVisibility> {
 	guard: DevulturGuard;
 	/** `"internal"` registers them as internal functions (callable from your server only). Default `"public"`. */
 	visibility?: Visibility;
-	/** Same as `Devultur.exposeApi`'s: the transcode preset, caption locales and upload lock. */
+	/** Same as `Devultur.exposeApi`'s: the transcode preset, caption locales, upload lock and default visibility. */
 	config?: DevulturComponentConfig;
 }
 
@@ -78,8 +98,16 @@ export function defineDevulturFunctions<Visibility extends FunctionVisibility = 
 	return registerFunctions(exposedFunctions(devultur.component, config), visibility, (name, fn) => {
 		return async (ctx, args) => {
 			const operation = { name, kind: fn.kind, args } as DevulturOperation;
-			const caller = (await guard(ctx as DevulturGuardCtx, operation)) ?? {};
-			return fn.handler(ctx, args, caller);
+			const { rewrite, ...caller } = (await guard(ctx as DevulturGuardCtx, operation)) ?? {};
+			return fn.handler(ctx, rewrittenArgs(name, args, rewrite), caller);
 		};
 	});
+}
+
+function rewrittenArgs(name: ExposedFunctionName, args: DefaultFunctionArgs, rewrite?: DevulturArgsRewrite) {
+	if (!rewrite) return args;
+	if (rewrite.name !== name) {
+		throw new Error(`The guard rewrote ${rewrite.name}'s arguments while guarding ${name}`);
+	}
+	return { ...args, ...rewrite.args };
 }

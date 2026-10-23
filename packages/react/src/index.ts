@@ -47,4 +47,5 @@ export { useUpload } from "./use-upload";
 export { useVideoPlayer } from "./use-video-player";
 export { useVideoProcessing } from "./use-video-processing";
 export { VideoPlayer } from "./video-player";
+export { defaultVideoPlayerLabels, type VideoPlayerLabels } from "./video-player-labels";
 export type { VttCue } from "./vtt-parser";

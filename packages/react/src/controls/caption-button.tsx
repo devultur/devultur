@@ -2,6 +2,7 @@
 
 import React from "react";
 import type { CaptionTrack, VideoPlayerRenderProps } from "../types";
+import { resolveVideoPlayerLabels, type VideoPlayerLabels } from "../video-player-labels";
 import { IconCaptions } from "./icons";
 import { useClickOutside } from "./use-click-outside";
 
@@ -9,13 +10,22 @@ interface CaptionButtonProps {
 	state: VideoPlayerRenderProps["state"];
 	controls: VideoPlayerRenderProps["controls"];
 	captions?: CaptionTrack[];
+	/** Any of the player's strings (`VideoPlayerLabels`); the rest keep the English defaults. */
+	labels?: Partial<VideoPlayerLabels>;
 	className?: string;
 }
 
 /**
  * Control button with a menu for toggling captions and selecting a caption track.
  */
-export function CaptionButton({ state, controls, captions, className }: CaptionButtonProps): React.ReactElement | null {
+export function CaptionButton({
+	state,
+	controls,
+	captions,
+	labels,
+	className,
+}: CaptionButtonProps): React.ReactElement | null {
+	const text = resolveVideoPlayerLabels(labels);
 	const [isOpen, setIsOpen] = React.useState(false);
 	const containerRef = React.useRef<HTMLDivElement>(null);
 
@@ -31,7 +41,7 @@ export function CaptionButton({ state, controls, captions, className }: CaptionB
 				data-dvltr-btn=""
 				style={{ opacity: state.activeCaption ? 1 : 0.6 }}
 				onClick={() => setIsOpen((prev) => !prev)}
-				aria-label="Captions"
+				aria-label={text.captions}
 				aria-expanded={isOpen}
 			>
 				<IconCaptions />
@@ -47,7 +57,7 @@ export function CaptionButton({ state, controls, captions, className }: CaptionB
 							setIsOpen(false);
 						}}
 					>
-						Off
+						{text.captionsOff}
 					</button>
 					{captions.map((track) => (
 						<button

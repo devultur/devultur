@@ -1,7 +1,9 @@
 // Spanish messages for Devultur errors (`describeDevulturError(error, devulturErrorLabels)`), attachment labels
 // (`<AttachmentCard labels={attachmentLabels} />`), previews (`<PdfPreviewProvider labels={previewLabels}>`), the
-// library's (`<MediaLibrary labels={mediaLibraryLabels} />`) and the media picker's
-// (`<MediaPicker labels={mediaPickerLabels} />`). Informal «tú»; `@devultur/convex/locales/es-formal` has «usted».
+// library's (`<MediaLibrary labels={mediaLibraryLabels} />`), the media picker's
+// (`<MediaPicker labels={mediaPickerLabels} />`) and the video player's (`<VideoPlayer labels={videoPlayerLabels} />`).
+// Informal «tú»; `@devultur/convex/locales/es-formal` has «usted».
+import type { VideoPlayerLabels } from "@devultur/react";
 import { type AttachmentKind, type AttachmentLabels, formatDuration, formatFileSize } from "../attachment-labels";
 import type { DevulturErrorLabels } from "../error-labels";
 import { describeDevulturError, formatBytes, formatDate, labelText } from "../error-labels";
@@ -186,4 +188,23 @@ export const mediaPickerLabels: MediaPickerLabels = {
 	selected: (name) => `${name} seleccionado.`,
 	removed: (name) => `${name} se quitó.`,
 	cleared: "Se limpió la selección.",
+};
+
+export const videoPlayerLabels: VideoPlayerLabels = {
+	player: "Reproductor de video",
+	controls: "Controles del video",
+	play: "Reproducir",
+	pause: "Pausar",
+	seek: "Posición del video",
+	mute: "Silenciar",
+	unmute: "Activar el sonido",
+	volume: "Volumen",
+	captions: "Subtítulos",
+	captionsOff: "Desactivados",
+	quality: "Calidad del video",
+	qualityAuto: "Automática",
+	speed: "Velocidad de reproducción",
+	speedNormal: "Normal",
+	fullscreen: "Pantalla completa",
+	exitFullscreen: "Salir de pantalla completa",
 };
