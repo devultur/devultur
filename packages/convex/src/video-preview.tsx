@@ -6,9 +6,10 @@
 import React from "react";
 import type { DevulturMedia } from "@devultur/core";
 import { VideoPlayer, type VideoPlayerError } from "@devultur/react";
+import { useDevultur } from "./devultur-context";
 import { MediaFetchError, networkError, renderFailedError, tokenUnavailableError } from "./media-fetch";
+import { useVideoProps } from "./media-url-hooks";
 import type { RenderFallback } from "./pdf-preview";
-import { useDevultur, useVideoProps } from "./react";
 
 interface VideoPreviewProps {
 	media: DevulturMedia;

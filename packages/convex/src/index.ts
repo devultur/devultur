@@ -27,6 +27,12 @@ export {
 } from "./error-labels";
 export { type DevulturErrorData, devulturErrorOf, isDevulturError } from "./errors";
 export type { CallerContext, RegisteredFunctions } from "./exposed-functions";
+export type {
+	ComponentSystemFields,
+	DevulturFunctionResults,
+	MediaDocument,
+	ProgressDocument,
+} from "./function-results";
 export {
 	type DevulturArgsRewrite,
 	type DevulturFunctionsOptions,

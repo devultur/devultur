@@ -6,7 +6,7 @@ import React from "react";
 import { type DevulturMedia, mediaPath, mediaUrl } from "@devultur/core";
 import { useDevultur } from "./devultur-context";
 import { loadMedia, tokenUnavailableError } from "./media-fetch";
-import { useRequestTokenWhen } from "./media-session";
+import { useRequestTokenWhen } from "./request-token";
 
 export interface MediaResourceOptions<Value> {
 	isEnabled: boolean;

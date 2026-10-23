@@ -114,8 +114,11 @@ export const { createUploadUrl, confirmUpload, issueViewerToken, getMedia, listM
 - `visibility: "internal"` registers them as internal functions, for your own actions and mutations to call.
 - `config` takes what `Devultur.exposeApi` does (transcode preset, caption locales, upload lock and default
   visibility).
-- Each function keeps its arguments and result types, so `api.devultur.confirmUpload` is typed as before and
-  `<DevulturProvider api={api.devultur}>` takes them as it takes `exposeApi`'s.
+- Each function keeps its arguments and returns the component's result, typed: with no annotation,
+  `useQuery(api.devultur.getMedia, { key })` is a `MediaDocument | null` (a `MediaRecord` with its `_id` and
+  `_creationTime`), and `listMediaPage` and `searchMedia` are a `PaginationResult<MediaDocument>`.
+  `DevulturFunctionResults` names every function's result. `<DevulturProvider api={api.devultur}>` takes them as it
+  takes `exposeApi`'s, whose results are the same.
 
 > **`Devultur.exposeApi` has no auth.** It returns the same functions with no guard: anyone who can reach your Convex
 > deployment can create upload URLs, confirm uploads, list the whole library and delete media. It keeps working, but
@@ -273,6 +276,21 @@ function Avatar({ media, fallbackUrl }) {
 }
 ```
 
+### Only the hooks
+
+`@devultur/convex/react/hooks` exports the contexts and the hooks that only read them, without the components or
+Convex's client: `useDevultur`, `useDevulturOptional`, `useDevulturApi`, `useDevulturProgress`, `useMediaUrl`,
+`useVideoProps`, and the `DevulturContext`, `DevulturApiContext` and `DevulturProgressContext` objects. A shared
+component that only checks for a provider adds well under 1 kB gzipped to the bundle:
+
+```tsx
+import { useDevulturOptional } from "@devultur/convex/react/hooks";
+```
+
+They're the very objects `@devultur/convex/react` exports, so a `<DevulturProvider>` or `<DevulturViewerProvider>`
+imported from there fills them. The hooks that call your Convex functions (`useDevulturMedia`, `useVideoState`,
+`useMediaUpload`, `useMediaLibrary`) stay in `@devultur/convex/react`, with the components.
+
 ### When the viewer token can't be issued
 
 `useDevultur()` tells where the viewer token stands:
@@ -290,7 +308,8 @@ there until `retryToken()`: a failed issuance isn't retried on its own. Meanwhil
 receives it), and `<DownloadLink onDownloadError>` receives it on click. They load once `retryToken()` gets a token.
 
 `<Preview>`'s video plays in `<VideoPlayer>` from `@devultur/react`, with its playback metrics on: anonymous, no
-cookies, sent to the media host (see [Playback metrics](https://github.com/devultur/devultur/blob/main/docs/guides/video-player.md#playback-metrics)).
+cookies, sent to the media host (see [Playback metrics](https://github.com/devultur/devultur/blob/main/docs/guides/video-player.md#playback-metrics),
+also in `node_modules/@devultur/convex/docs/guides/video-player.md`).
 `<Preview metrics={false}>` turns them off. A private video shows `loading` until its viewer token is issued.
 
 `<Preview>`'s video re-issues the token once when the delivery answers the playlist or a segment with a 401
@@ -796,6 +815,8 @@ what's enforced and the caveats.
 ## Documentation
 
 Guides and API reference: [github.com/devultur/devultur/tree/main/docs](https://github.com/devultur/devultur/tree/main/docs).
+The guides this README links to ship with the package, for the installed version, in
+`node_modules/@devultur/convex/docs/guides/`: `video-player.md`, `self-host.md`, `plugins.md` and `object-lock.md`.
 
 ## License
 

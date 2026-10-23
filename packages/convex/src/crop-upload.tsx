@@ -2,8 +2,8 @@
 
 import React from "react";
 import type { DevulturMedia, Visibility } from "@devultur/core";
-import { type BakeOutputFormat, ImageCropper } from "@devultur/react";
-import { type MediaUploadState, useMediaUpload } from "./react";
+import { type BakeOutputFormat, ImageCropper, type MediaUploadState } from "@devultur/react";
+import { useMediaUpload } from "./use-media-upload";
 
 export interface CropUploadRenderProps {
 	/** The state machine of the full cycle (idle → uploading → ready / failed). */

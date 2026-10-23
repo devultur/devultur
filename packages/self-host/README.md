@@ -71,6 +71,8 @@ middleware of your own.
 - Retention and holds (compliance and governance locks, holds, audit, caveats):
   [github.com/devultur/devultur/blob/main/docs/guides/object-lock.md](https://github.com/devultur/devultur/blob/main/docs/guides/object-lock.md).
 
+The three guides ship with the package, for the installed version, in `node_modules/@devultur/self-host/docs/guides/`.
+
 ## License
 
 [AGPL-3.0-only](https://github.com/devultur/devultur/blob/main/packages/self-host/LICENSE)

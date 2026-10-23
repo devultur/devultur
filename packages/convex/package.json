@@ -43,6 +43,10 @@
 			"import": "./dist/react.js",
 			"types": "./dist/react.d.ts"
 		},
+		"./react/hooks": {
+			"import": "./dist/react/hooks.js",
+			"types": "./dist/react/hooks.d.ts"
+		},
 		"./pdfjs": {
 			"import": "./dist/pdfjs.js",
 			"types": "./dist/pdfjs.d.ts"
@@ -61,10 +65,11 @@
 		"devultur-init": "./dist/bin/init.js"
 	},
 	"files": [
-		"dist"
+		"dist",
+		"docs"
 	],
 	"scripts": {
-		"build": "tsup src/index.ts src/validators.ts src/react.tsx src/pdfjs.ts src/locales/es.ts src/locales/es-formal.ts src/bin/init.ts --format esm --dts && tsc -p src/component/tsconfig.json",
+		"build": "tsup src/index.ts src/validators.ts src/react.tsx src/react/hooks.ts src/pdfjs.ts src/locales/es.ts src/locales/es-formal.ts src/bin/init.ts --format esm --dts --clean && tsc -p src/component/tsconfig.json && node scripts/add-import-extensions.ts && node ../../scripts/copy-guides.mts",
 		"codegen": "node scripts/codegen.ts",
 		"dev": "tsup src/index.ts src/react.tsx --format esm --dts --watch",
 		"typecheck": "tsc --noEmit"

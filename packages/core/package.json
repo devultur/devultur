@@ -34,10 +34,11 @@
 		}
 	},
 	"files": [
-		"dist"
+		"dist",
+		"docs"
 	],
 	"scripts": {
-		"build": "tsup src/index.ts --format esm --dts",
+		"build": "tsup src/index.ts --format esm --dts && node ../../scripts/copy-guides.mts",
 		"dev": "tsup src/index.ts --format esm --dts --watch",
 		"typecheck": "tsc --noEmit"
 	},
