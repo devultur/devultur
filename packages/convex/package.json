@@ -1,6 +1,6 @@
 {
 	"name": "@devultur/convex",
-	"version": "1.4.3",
+	"version": "1.5.0",
 	"description": "Convex component for Devultur media: media records, uploads, transcodes, watch progress and React bindings",
 	"keywords": [
 		"convex",
