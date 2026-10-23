@@ -23,6 +23,7 @@ import {
 } from "convex/server";
 import { ConvexError, type ObjectType, type PropertyValidators, v } from "convex/values";
 import type { ComponentApi } from "./component/_generated/component.js";
+import type { DevulturFunctionResults } from "./function-results";
 import type { DevulturComponentConfig } from "./types";
 
 export type FunctionKind = "query" | "mutation" | "action";
@@ -195,18 +196,19 @@ export function exposedFunctions(component: ComponentApi, config?: DevulturCompo
 export type ExposedFunctions = ReturnType<typeof exposedFunctions>;
 export type ExposedFunctionName = keyof ExposedFunctions;
 
-type Registered<Fn, Visibility extends FunctionVisibility> =
-	Fn extends ExposedFunction<"query", infer Args, infer Result>
+// The result is `DevulturFunctionResults`, not the handler's: the component's references type every result `any`.
+type Registered<Fn, Visibility extends FunctionVisibility, Result> =
+	Fn extends ExposedFunction<"query", infer Args, unknown>
 		? RegisteredQuery<Visibility, Args, Promise<Result>>
-		: Fn extends ExposedFunction<"mutation", infer Args, infer Result>
+		: Fn extends ExposedFunction<"mutation", infer Args, unknown>
 			? RegisteredMutation<Visibility, Args, Promise<Result>>
-			: Fn extends ExposedFunction<"action", infer Args, infer Result>
+			: Fn extends ExposedFunction<"action", infer Args, unknown>
 				? RegisteredAction<Visibility, Args, Promise<Result>>
 				: never;
 
 /** The Convex functions registered from `ExposedFunctions`, each with its own args and result. */
 export type RegisteredFunctions<Visibility extends FunctionVisibility> = {
-	[Name in ExposedFunctionName]: Registered<ExposedFunctions[Name], Visibility>;
+	[Name in ExposedFunctionName]: Registered<ExposedFunctions[Name], Visibility, DevulturFunctionResults[Name]>;
 };
 
 const BUILDERS = {

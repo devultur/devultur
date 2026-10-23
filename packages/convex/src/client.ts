@@ -2,7 +2,8 @@ import type { HoldPage, LockView, ObjectLock, SetLockOptions } from "@devultur/c
 import type { GenericActionCtx, GenericDataModel, PaginationOptions, PaginationResult } from "convex/server";
 import type { ComponentApi } from "./component/_generated/component.js";
 import { exposedFunctions, registerFunctions } from "./exposed-functions";
-import type { DevulturComponentConfig, MediaRecord } from "./types";
+import type { DevulturFunctionResults, MediaDocument, ProgressDocument } from "./function-results";
+import type { DevulturComponentConfig } from "./types";
 
 type DevulturComponent = ComponentApi;
 // Only the runner each method calls, so an app's ctx fits whatever its `DataModel` (a `GenericQueryCtx<DataModel>`
@@ -29,20 +30,24 @@ export class Devultur {
 		this.component = component;
 	}
 
-	async getMedia(ctx: QueryCtx, key: string) {
+	async getMedia(ctx: QueryCtx, key: string): Promise<MediaDocument | null> {
 		return ctx.runQuery(this.component.public.getMediaByKey, { key });
 	}
 
-	async saveProgress(ctx: MutationCtx, args: { userId: string; videoId: string; position: number }) {
+	/** Returns the progress record's id. */
+	async saveProgress(ctx: MutationCtx, args: { userId: string; videoId: string; position: number }): Promise<string> {
 		return ctx.runMutation(this.component.public.saveProgress, args);
 	}
 
-	async loadProgress(ctx: QueryCtx, args: { userId: string; videoId: string }) {
+	async loadProgress(ctx: QueryCtx, args: { userId: string; videoId: string }): Promise<ProgressDocument | null> {
 		return ctx.runQuery(this.component.public.loadProgress, args);
 	}
 
 	/** An upload URL from your server, optionally locked (retention and/or hold, written with the bytes). */
-	async createUploadUrl(ctx: ActionCtx, args: UploadUrlArgs & { lock?: ObjectLock; hold?: boolean }) {
+	async createUploadUrl(
+		ctx: ActionCtx,
+		args: UploadUrlArgs & { lock?: ObjectLock; hold?: boolean },
+	): Promise<DevulturFunctionResults["createUploadUrl"]> {
 		return ctx.runAction(this.component.public.createUploadUrl, args);
 	}
 
@@ -52,7 +57,7 @@ export class Devultur {
 	 * `width`, `height` and `pageCount` are the client's hints (positive integers up to 100,000); an image size the
 	 * Worker read from the bytes wins over them.
 	 */
-	async confirmUpload(ctx: ActionCtx, args: ConfirmUploadArgs): Promise<MediaRecord | null> {
+	async confirmUpload(ctx: ActionCtx, args: ConfirmUploadArgs): Promise<MediaDocument | null> {
 		return ctx.runAction(this.component.uploads.confirmUpload, args);
 	}
 
@@ -61,7 +66,7 @@ export class Devultur {
 	 * the tags). `key` is the media id. Trimmed and deduplicated; past title 200, alt 1000 or 20 tags of 50 characters
 	 * it throws `invalid_media_metadata`. Returns the updated record, or `null` when there is none.
 	 */
-	async updateMediaMeta(ctx: MutationCtx, args: MediaMetaArgs): Promise<MediaRecord | null> {
+	async updateMediaMeta(ctx: MutationCtx, args: MediaMetaArgs): Promise<MediaDocument | null> {
 		return ctx.runMutation(this.component.metadata.updateMediaMeta, args);
 	}
 
@@ -70,12 +75,12 @@ export class Devultur {
 	 * `mediaFromRecord(record)` turns a row into the reference `<Image>` and `dv.media()` take. Unbounded: it reads every
 	 * record, so a media library pages with `listMediaPage`.
 	 */
-	async listMedia(ctx: QueryCtx, args?: { type?: MediaType }): Promise<MediaRecord[]> {
+	async listMedia(ctx: QueryCtx, args?: { type?: MediaType }): Promise<MediaDocument[]> {
 		return ctx.runQuery(this.component.public.listMedia, args ?? {});
 	}
 
 	/** One page of the recorded media, newest first, optionally of one type. Takes Convex's `paginationOpts`. */
-	async listMediaPage(ctx: QueryCtx, args: MediaPageArgs): Promise<PaginationResult<MediaRecord>> {
+	async listMediaPage(ctx: QueryCtx, args: MediaPageArgs): Promise<PaginationResult<MediaDocument>> {
 		return ctx.runQuery(this.component.public.listMediaPage, args);
 	}
 
@@ -84,7 +89,7 @@ export class Devultur {
 	 * optionally of one type. A blank `search` lists newest first, like `listMediaPage`. Records from before 1.4.0
 	 * match once `backfillSearchText` (or any write) gives them a `searchText`.
 	 */
-	async searchMedia(ctx: QueryCtx, args: SearchMediaArgs): Promise<PaginationResult<MediaRecord>> {
+	async searchMedia(ctx: QueryCtx, args: SearchMediaArgs): Promise<PaginationResult<MediaDocument>> {
 		return ctx.runQuery(this.component.library.searchMedia, args);
 	}
 

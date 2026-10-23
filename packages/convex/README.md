@@ -114,8 +114,11 @@ export const { createUploadUrl, confirmUpload, issueViewerToken, getMedia, listM
 - `visibility: "internal"` registers them as internal functions, for your own actions and mutations to call.
 - `config` takes what `Devultur.exposeApi` does (transcode preset, caption locales, upload lock and default
   visibility).
-- Each function keeps its arguments and result types, so `api.devultur.confirmUpload` is typed as before and
-  `<DevulturProvider api={api.devultur}>` takes them as it takes `exposeApi`'s.
+- Each function keeps its arguments and returns the component's result, typed: with no annotation,
+  `useQuery(api.devultur.getMedia, { key })` is a `MediaDocument | null` (a `MediaRecord` with its `_id` and
+  `_creationTime`), and `listMediaPage` and `searchMedia` are a `PaginationResult<MediaDocument>`.
+  `DevulturFunctionResults` names every function's result. `<DevulturProvider api={api.devultur}>` takes them as it
+  takes `exposeApi`'s, whose results are the same.
 
 > **`Devultur.exposeApi` has no auth.** It returns the same functions with no guard: anyone who can reach your Convex
 > deployment can create upload URLs, confirm uploads, list the whole library and delete media. It keeps working, but
