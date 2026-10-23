@@ -1,6 +1,6 @@
 {
 	"name": "@devultur/react",
-	"version": "1.5.0",
+	"version": "1.5.1",
 	"description": "React components and hooks for Devultur media: HLS video player, uploads with progress, image cropper and captions",
 	"keywords": [
 		"react",
