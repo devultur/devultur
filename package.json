@@ -19,6 +19,7 @@
 		"@changesets/changelog-github": "^0.7.0",
 		"@changesets/cli": "^2.31.0",
 		"esbuild": "^0.28.1",
+		"rolldown": "1.0.3",
 		"turbo": "^2.5.0",
 		"vitest": "^4.1.9"
 	},

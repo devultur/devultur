@@ -8,7 +8,8 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 // `@devultur/convex/react` and `@devultur/convex/react/hooks` are two entries of the built package: a provider from one
-// must fill the hooks of the other, so both must export the very same context objects (one shared chunk).
+// must fill the hooks of the other, so both must export the very same context objects (one shared chunk, which holds
+// the contexts and the hooks that only read them, apart from the URL hooks).
 const distDir = join(import.meta.dirname, "..", "dist");
 
 type Entry = Record<string, unknown>;
@@ -36,6 +37,7 @@ describe("@devultur/convex/react/hooks", () => {
 	});
 
 	it.each([
+		"useCanDeliver",
 		"useDevultur",
 		"useDevulturOptional",
 		"useDevulturApi",

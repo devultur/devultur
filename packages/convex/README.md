@@ -276,12 +276,28 @@ function Avatar({ media, fallbackUrl }) {
 }
 ```
 
+`useDevulturOptional()` is non-null under a `<DevulturProvider>` given no `baseUrl` too, where the hooks that build
+URLs throw. `useCanDeliver()` answers that instead: `true` only under a provider with a non-empty `baseUrl`.
+
+```tsx
+function Cover({ media, fallbackUrl }) {
+  if (!useCanDeliver() || !media) return <img src={fallbackUrl} alt="" />;
+  return <Image media={media} alt="" />;
+}
+```
+
+Public media needs nothing more. Private media also needs the viewer token, which a provider may not have yet
+(`lazyToken`) or can't issue (a `<DevulturViewerProvider>` without `issueViewerToken`); `tokenStatus` from
+`useDevultur()` tells, and the components show their error state when it fails.
+
 ### Only the hooks
 
 `@devultur/convex/react/hooks` exports the contexts and the hooks that only read them, without the components or
-Convex's client: `useDevultur`, `useDevulturOptional`, `useDevulturApi`, `useDevulturProgress`, `useMediaUrl`,
-`useVideoProps`, and the `DevulturContext`, `DevulturApiContext` and `DevulturProgressContext` objects. A shared
-component that only checks for a provider adds well under 1 kB gzipped to the bundle:
+Convex's client: `useDevultur`, `useDevulturOptional`, `useCanDeliver`, `useDevulturApi`, `useDevulturProgress`,
+`useMediaUrl`, `useVideoProps`, and the `DevulturContext`, `DevulturApiContext` and `DevulturProgressContext` objects.
+The contexts and the hooks that only read them sit in a chunk of their own, apart from `useMediaUrl`, `useVideoProps`
+and `@devultur/core`'s URL helpers, so a shared component that only checks for a provider adds under 0.5 kB gzipped,
+even to the entry of an app that lazy-loads `@devultur/convex/react` on a route:
 
 ```tsx
 import { useDevulturOptional } from "@devultur/convex/react/hooks";

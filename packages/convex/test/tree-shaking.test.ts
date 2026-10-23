@@ -1,9 +1,10 @@
-import { access, mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import { build } from "esbuild";
+import { rolldown } from "rolldown";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // What a consumer's bundler keeps from `@devultur/convex/react`. An app importing one component is bundled against the
@@ -48,6 +49,38 @@ async function bundleApp(contents: string) {
 		.filter(([, input]) => input.bytesInOutput > 0)
 		.map(([path]) => path);
 	return { code, inputs, gzipBytes: gzipSync(code).length };
+}
+
+// The same app code-split around a lazy-loaded route, bundled with Rolldown (Vite's bundler): what loads first is the
+// entry and the chunks it imports statically. Rolldown places modules by the exports an entry actually uses, as Rollup
+// does; esbuild places whole files by what the entry imports, so its split output can't show this.
+async function bundleLazyRouteApp(contents: string) {
+	const entryPath = join(appDir, "entry.ts");
+	await writeFile(entryPath, contents);
+	const bundle = await rolldown({
+		input: entryPath,
+		platform: "browser",
+		external: [/^react($|\/)/, /^react-dom($|\/)/],
+		logLevel: "silent",
+	});
+	const initial = async (minify: boolean) => {
+		const { output } = await bundle.generate({ format: "esm", minify });
+		const chunks = new Map(output.flatMap((item) => (item.type === "chunk" ? [[item.fileName, item] as const] : [])));
+		const entry = [...chunks.values()].find((chunk) => chunk.isEntry);
+		if (!entry) throw new Error("rolldown emitted no entry chunk");
+		const imported = entry.imports.flatMap((fileName) => chunks.get(fileName) ?? []);
+		return { entry, imported };
+	};
+	const readable = await initial(false);
+	const minified = await initial(true);
+	await bundle.close();
+	return {
+		initialCode: [readable.entry, ...readable.imported].map((chunk) => chunk.code).join("\n"),
+		initialModules: [readable.entry, ...readable.imported].flatMap((chunk) => Object.keys(chunk.modules)),
+		// The entry chunk holds the app's own code; the devultur code it loads first is in the chunks it imports.
+		entryDevulturModules: Object.keys(readable.entry.modules).filter((id) => id.includes("/packages/")),
+		devulturGzipBytes: minified.imported.reduce((total, chunk) => total + gzipSync(chunk.code).length, 0),
+	};
 }
 
 describe("tree-shaking @devultur/convex/react", () => {
@@ -102,5 +135,23 @@ describe("tree-shaking @devultur/convex/react/hooks", () => {
 		expect(code).not.toMatch(/function (MediaPicker|MediaLibrary|Preview|PdfPreview|DownloadLink|Image)\b/);
 		expect(inputs.filter((input) => /hls\.js|pdfjs-dist|@aws-sdk|node_modules\/convex\//.test(input))).toEqual([]);
 		expect(gzipBytes).toBeLessThan(5_000);
+	});
+
+	it("keeps the URL hooks and core out of what loads first in an app that lazy-loads the react entry", async () => {
+		const { initialCode, initialModules, entryDevulturModules, devulturGzipBytes } = await bundleLazyRouteApp(
+			[
+				'import { useDevulturOptional } from "@devultur/convex/react/hooks";',
+				"console.log(useDevulturOptional);",
+				'export const loadMedia = () => import("@devultur/convex/react");',
+			].join("\n"),
+		);
+
+		expect(initialCode).toMatch(/function useDevulturOptional\b/);
+		expect(initialCode).not.toMatch(/function (useMediaUrl|useVideoProps|buildMediaUrl|mediaPath|mediaCaptionPath)\b/);
+		expect(initialModules.filter((id) => /packages\/core\//.test(id))).toEqual([]);
+		expect(entryDevulturModules).toEqual([]);
+		// Minified and gzipped: about 0.4 kB (the contexts and their hooks), against 3.2 kB when one chunk held every hook
+		// and core's URL helpers came along.
+		expect(devulturGzipBytes).toBeLessThan(500);
 	});
 });

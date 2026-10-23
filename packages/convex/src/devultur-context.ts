@@ -92,6 +92,17 @@ export function useDevulturOptional(): DevulturContextValue | null {
 }
 
 /**
+ * Whether the media hooks can build delivery URLs here: `true` under `<DevulturProvider>` or `<DevulturViewerProvider>`
+ * with a non-empty `baseUrl`; `false` outside both, or under a `<DevulturProvider>` without one, where `useMediaUrl`,
+ * `useVideoProps` and `url()` throw. That's all a public media needs. A private media also needs the viewer token,
+ * which the provider may not have yet (lazy issuance) or can't issue (no `issueViewerToken`): `tokenStatus` from
+ * `useDevultur()` tells, and the components handle it themselves.
+ */
+export function useCanDeliver(): boolean {
+	return Boolean(React.use(DevulturContext)?.baseUrl);
+}
+
+/**
  * The `api` passed to `<DevulturProvider>`: your app's exported Devultur functions. Under a `<DevulturViewerProvider>`
  * it throws a `DevulturCapabilityError`.
  */
