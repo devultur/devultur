@@ -1,20 +1,17 @@
 import type { HoldPage, LockView, ObjectLock, SetLockOptions } from "@devultur/core";
-import type {
-	GenericActionCtx,
-	GenericDataModel,
-	GenericMutationCtx,
-	GenericQueryCtx,
-	PaginationOptions,
-	PaginationResult,
-} from "convex/server";
+import type { GenericActionCtx, GenericDataModel, PaginationOptions, PaginationResult } from "convex/server";
 import type { ComponentApi } from "./component/_generated/component.js";
 import { exposedFunctions, registerFunctions } from "./exposed-functions";
 import type { DevulturComponentConfig, MediaRecord } from "./types";
 
 type DevulturComponent = ComponentApi;
-type QueryCtx = GenericQueryCtx<GenericDataModel>;
-type MutationCtx = GenericMutationCtx<GenericDataModel>;
-type ActionCtx = GenericActionCtx<GenericDataModel>;
+// Only the runner each method calls, so an app's ctx fits whatever its `DataModel` (a `GenericQueryCtx<DataModel>`
+// isn't a `GenericQueryCtx<GenericDataModel>`: its `db` knows only the app's tables). The action ctx's runners, which
+// take no options, so a query's, a mutation's and an action's all fit where they have the runner.
+type Runners = GenericActionCtx<GenericDataModel>;
+type QueryCtx = Pick<Runners, "runQuery">;
+type MutationCtx = Pick<Runners, "runMutation">;
+type ActionCtx = Pick<Runners, "runAction">;
 type UploadUrlArgs = { filename: string; contentType: string; visibility?: "public" | "private" };
 type MediaType = "video" | "image" | "file";
 type MediaPageArgs = { type?: MediaType; paginationOpts: PaginationOptions };

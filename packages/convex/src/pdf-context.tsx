@@ -16,7 +16,7 @@ export interface PdfPreviewConfig {
 	labels?: Partial<PreviewLabels>;
 }
 
-const PdfPreviewContext = React.createContext<PdfPreviewConfig>({});
+const PdfPreviewContext = /* @__PURE__ */ React.createContext<PdfPreviewConfig>({});
 
 /**
  * Renders the PDFs of every `<Preview>` and `<PdfThumbnail>` below it with pdf.js, on a `<canvas>`, and gives them

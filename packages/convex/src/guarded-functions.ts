@@ -39,11 +39,15 @@ export type DevulturOperation = {
 	};
 }[ExposedFunctionName];
 
-/** The ctx of the guarded function: a query's, a mutation's or an action's (all of them have `auth`). */
-export type DevulturGuardCtx =
-	| GenericQueryCtx<GenericDataModel>
-	| GenericMutationCtx<GenericDataModel>
-	| GenericActionCtx<GenericDataModel>;
+/**
+ * The ctx of the guarded function: a query's, a mutation's or an action's (all of them have `auth`). Of any data
+ * model, so a guard typed with the app's own ctx (`QueryCtx | MutationCtx | ActionCtx` from `_generated/server`) fits.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: the app's data model, which the component can't name.
+export type DevulturGuardCtx<DataModel extends GenericDataModel = any> =
+	| GenericQueryCtx<DataModel>
+	| GenericMutationCtx<DataModel>
+	| GenericActionCtx<DataModel>;
 
 /**
  * Throws to deny the call. May return what it learned about the caller: a `userId` becomes the subject of the token

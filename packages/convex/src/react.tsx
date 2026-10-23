@@ -146,9 +146,9 @@ interface ProgressContextValue {
 	reset: (videoId: string) => Promise<void>;
 }
 
-const DevulturContext = React.createContext<DevulturContextValue | null>(null);
-const DevulturApiContext = React.createContext<DevulturApi | null>(null);
-const ProgressContext = React.createContext<ProgressContextValue | null>(null);
+const DevulturContext = /* @__PURE__ */ React.createContext<DevulturContextValue | null>(null);
+const DevulturApiContext = /* @__PURE__ */ React.createContext<DevulturApi | null>(null);
+const ProgressContext = /* @__PURE__ */ React.createContext<ProgressContextValue | null>(null);
 
 interface DevulturProviderProps {
 	api: DevulturApi;
