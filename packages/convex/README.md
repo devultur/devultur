@@ -273,6 +273,21 @@ function Avatar({ media, fallbackUrl }) {
 }
 ```
 
+### Only the hooks
+
+`@devultur/convex/react/hooks` exports the contexts and the hooks that only read them, without the components or
+Convex's client: `useDevultur`, `useDevulturOptional`, `useDevulturApi`, `useDevulturProgress`, `useMediaUrl`,
+`useVideoProps`, and the `DevulturContext`, `DevulturApiContext` and `DevulturProgressContext` objects. A shared
+component that only checks for a provider adds well under 1 kB gzipped to the bundle:
+
+```tsx
+import { useDevulturOptional } from "@devultur/convex/react/hooks";
+```
+
+They're the very objects `@devultur/convex/react` exports, so a `<DevulturProvider>` or `<DevulturViewerProvider>`
+imported from there fills them. The hooks that call your Convex functions (`useDevulturMedia`, `useVideoState`,
+`useMediaUpload`, `useMediaLibrary`) stay in `@devultur/convex/react`, with the components.
+
 ### When the viewer token can't be issued
 
 `useDevultur()` tells where the viewer token stands:

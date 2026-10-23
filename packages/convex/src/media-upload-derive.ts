@@ -1,6 +1,6 @@
 import type { DevulturMedia } from "@devultur/core";
 import type { MediaUploadError, MediaUploadState } from "@devultur/react";
-import type { VideoState } from "./react";
+import type { VideoState } from "./media-hooks";
 
 export type UploadPhase = "idle" | "uploading" | "uploaded" | "upload-failed";
 

@@ -1,22 +1,9 @@
 "use client";
 
 import React from "react";
-import {
-	buildMediaUrl,
-	CaptionLocaleLabel,
-	type DevulturMedia,
-	type FailureReason,
-	MediaStatus,
-	type MediaStatusValue,
-	mediaCaptionPath,
-	mediaPath,
-	mediaUrl,
-	type ProcessingPhase,
-	type Visibility,
-	visibilityFromKey,
-} from "@devultur/core";
-import { type MediaUploadError, type MediaUploadState, UploadHttpError, uploadFileWithProgress } from "@devultur/react";
-import { useAction, useConvex, useMutation, useQuery } from "convex/react";
+import { type DevulturMedia, mediaPath } from "@devultur/core";
+import { uploadFileWithProgress } from "@devultur/react";
+import { useAction, useConvex, useMutation } from "convex/react";
 import type { FunctionReference } from "convex/server";
 import {
 	type DevulturApi,
@@ -25,12 +12,10 @@ import {
 	type UploadedMedia,
 	type UploadOptions,
 	type UploadTarget,
-	useDevultur,
-	useDevulturApi,
 } from "./devultur-context";
-import { fetchMedia, MediaFetchError, tokenUnavailableError } from "./media-fetch";
-import { type MediaRenderOptions, useMediaSession, useRequestTokenWhen, type ViewerTokenAction } from "./media-session";
-import { deriveUploadState, type UploadPhase } from "./media-upload-derive";
+import { useMediaSession, type ViewerTokenAction } from "./media-session";
+import { DevulturProgressContext } from "./progress-context";
+import { confirmUploadBestEffort, readImageDimensions } from "./upload-hints";
 import type { ViewerTokenArgs } from "./viewer-token";
 
 export type { MediaUploadError, MediaUploadState, UploadProgress } from "@devultur/react";
@@ -46,6 +31,8 @@ export type { CropUploadLabels, CropUploadProps, CropUploadRenderProps } from ".
 export { CropUpload } from "./crop-upload";
 export {
 	type DevulturApi,
+	DevulturApiContext,
+	DevulturContext,
 	type DevulturContextValue,
 	type UploadedMedia,
 	type UploadOptions,
@@ -59,8 +46,16 @@ export {
 	DocumentLink,
 	type DocumentLinkProps,
 } from "./document-renderers";
+export { DownloadLink, type DownloadLinkProps } from "./download-link";
 export { Image, type ImageProps } from "./image";
 export { MediaFetchError, type MediaFetchErrorCode } from "./media-fetch";
+export {
+	type CaptionTrack,
+	type MediaStatusReturn,
+	useDevulturMedia,
+	useVideoState,
+	type VideoState,
+} from "./media-hooks";
 export { MediaLibrary, type MediaLibraryPart, type MediaLibraryProps } from "./media-library";
 export type { MediaLibraryItemState } from "./media-library-item";
 export { defaultMediaLibraryLabels, type MediaLibraryLabels } from "./media-library-labels";
@@ -72,6 +67,7 @@ export { defaultMediaPickerLabels, type MediaPickerLabels } from "./media-picker
 export type { MediaPickerLibraryProps } from "./media-picker-library";
 export type { MediaPickerSelectionProps } from "./media-picker-selection";
 export type { MediaPickerUploadProps } from "./media-picker-upload";
+export { useMediaUrl, useVideoProps, type VideoProps } from "./media-url-hooks";
 export { type PdfPreviewConfig, PdfPreviewProvider } from "./pdf-context";
 export type { PdfjsLoader, PdfjsModule } from "./pdf-render";
 export { PdfThumbnail, type PdfThumbnailProps } from "./pdf-thumbnail";
@@ -79,26 +75,23 @@ export { Preview, type PreviewProps } from "./preview";
 export { defaultPreviewLabels, type PreviewLabels } from "./preview-labels";
 export type { PreviewKind } from "./preview-type";
 export {
+	DevulturProgressContext,
+	type DevulturProgressContextValue,
+	useDevulturProgress,
+} from "./progress-context";
+export {
 	type MediaLibraryState,
 	type MediaLibraryStatus,
 	type UseMediaLibraryOptions,
 	useMediaLibrary,
 } from "./use-media-library";
 export type { MediaPickerUpload, MediaPickerUploads } from "./use-media-picker-uploads";
+export { type UseMediaUploadOptions, type UseMediaUploadReturn, useMediaUpload } from "./use-media-upload";
 export { DevulturViewerProvider, type DevulturViewerProviderProps } from "./viewer-provider";
 export type { TokenStatus, ViewerTokenArgs, ViewerTokenResult } from "./viewer-token";
 
 type AnyMutation = FunctionReference<"mutation">;
 type AnyQuery = FunctionReference<"query">;
-
-interface ProgressContextValue {
-	save: (videoId: string, position: number) => Promise<void>;
-	load: (videoId: string) => Promise<{ lastPosition: number; completedAt: Date | null } | null>;
-	markComplete: (videoId: string) => Promise<void>;
-	reset: (videoId: string) => Promise<void>;
-}
-
-const ProgressContext = /* @__PURE__ */ React.createContext<ProgressContextValue | null>(null);
 
 interface DevulturProviderProps {
 	api: DevulturApi;
@@ -264,533 +257,5 @@ function ProgressBridge({
 		[onSave, onLoad, onMarkComplete, onReset],
 	);
 
-	return <ProgressContext value={value}>{children}</ProgressContext>;
-}
-
-export function useDevulturProgress(): ProgressContextValue {
-	const context = React.use(ProgressContext);
-	if (!context) throw new Error("useDevulturProgress requires progress API in DevulturProvider");
-	return context;
-}
-
-/**
- * Ready-to-use delivery URL for a key, with the context's viewer token already injected. The consumer
- * never touches the token or the query — it only declares what it wants (download, resize, etc.).
- *
- * @example
- * <img src={useMediaUrl(key)} />
- * <a href={useMediaUrl(key, { download: true })} download>Download</a>
- * <img src={useMediaUrl(key, { width: 512, format: "webp" })} />
- */
-export function useMediaUrl(key: string | null | undefined, options?: MediaRenderOptions): string | null {
-	const devultur = useDevultur();
-	const { token, baseUrl } = devultur;
-	useRequestTokenWhen(devultur, Boolean(key) && visibilityFromKey(key ?? "") !== "public");
-	return React.useMemo(() => {
-		if (!key) return null;
-		if (!baseUrl) throw new Error("useMediaUrl requires `baseUrl` on <DevulturProvider>");
-		// Token-transparent via the visibility in the key's prefix: public doesn't attach a token.
-		const isPublic = visibilityFromKey(key) === "public";
-		return buildMediaUrl(baseUrl, key, { ...options, token: isPublic ? undefined : (token ?? undefined) });
-	}, [key, baseUrl, token, options]);
-}
-
-// Records the upload in the component. Best-effort: the bytes are stored, and the component's scheduled check records
-// an upload nobody confirmed, so a failure here never fails the upload.
-async function confirmUploadBestEffort(
-	confirmUpload: (args: Record<string, unknown>) => Promise<unknown>,
-	key: string,
-	file: File,
-	hints: { width?: number; height?: number; pageCount?: number },
-): Promise<void> {
-	try {
-		await confirmUpload({ key, filename: file.name, ...hints });
-	} catch (error) {
-		console.warn("Devultur: could not record the upload; it is recorded later", error);
-	}
-}
-
-// Captures an image's intrinsic dimensions in the browser (for <img> with no CLS). No-op outside the
-// browser or for non-images → empty object. Fails silently: dimensions are best-effort.
-async function readImageDimensions(file: File): Promise<{ width?: number; height?: number }> {
-	if (typeof createImageBitmap !== "function" || !file.type.startsWith("image/")) return {};
-	try {
-		const bitmap = await createImageBitmap(file);
-		const dimensions = { width: bitmap.width, height: bitmap.height };
-		bitmap.close();
-		return dimensions;
-	} catch {
-		return {};
-	}
-}
-
-export interface VideoProps {
-	src: string;
-	token: string | undefined;
-	captions: { locale: string; label: string; src: string }[];
-	/** Session secret → `<VideoPlayer>` sends it in `${SESSION_HEADER}` on hls.js/captions requests. */
-	sessionSecret?: string;
-}
-
-/**
- * Token-transparent props for `<VideoPlayer>` from a video reference: builds the HLS playlist `src`,
- * the viewer `token` (only if private), and the `captions` for the requested locales.
- * The consumer just does `<VideoPlayer {...useVideoProps(lesson.video, { locales })} />`.
- */
-export function useVideoProps(
-	media: DevulturMedia | null | undefined,
-	options?: { locales?: string[] },
-): VideoProps | null {
-	const devultur = useDevultur();
-	const { token, baseUrl, sessionSecret } = devultur;
-	useRequestTokenWhen(devultur, media?.kind === "video" && media.visibility === "private");
-	const locales = options?.locales;
-	return React.useMemo(() => {
-		if (media?.kind !== "video") return null;
-		if (!baseUrl) throw new Error("useVideoProps requires `baseUrl` on <DevulturProvider>");
-		const viewerToken = media.visibility === "private" ? (token ?? undefined) : undefined;
-		const captions = (locales ?? []).flatMap((locale) => {
-			const path = mediaCaptionPath(media, locale);
-			if (!path) return [];
-			const label = CaptionLocaleLabel[locale as keyof typeof CaptionLocaleLabel] ?? locale;
-			return [{ locale, label, src: buildMediaUrl(baseUrl, path, { token: viewerToken }) }];
-		});
-		return {
-			src: buildMediaUrl(baseUrl, mediaPath(media), { token: viewerToken }),
-			token: viewerToken,
-			captions,
-			sessionSecret: media.visibility === "private" ? sessionSecret : undefined,
-		};
-	}, [media, baseUrl, token, locales, sessionSecret]);
-}
-
-// --- <DownloadLink> (declarative download, token-transparent, usable in .map) ---
-
-interface DownloadLinkProps extends Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, "href" | "download" | "media"> {
-	media: DevulturMedia | null | undefined;
-	/** Name it downloads as. Without this it uses the upload's original name. */
-	filename?: string;
-	/**
-	 * A private download that failed: `token_unavailable` right away when the viewer token couldn't be issued
-	 * (`useDevultur().retryToken()` tries again), `http_error` when the delivery refused it.
-	 */
-	onDownloadError?: (error: MediaFetchError) => void;
-	children: React.ReactNode;
-}
-
-/**
- * `<a>` that downloads a media with its original name (token-transparent). The worker serves it with
- * `Content-Disposition: attachment`, so a click downloads the file instead of opening it in a tab.
- *
- * Private: an `<a download>` NAVIGATES, and a navigation can't send `${SESSION_HEADER}` → with session
- * binding the gate gives a 401. So, for private media, we intercept the click, blob-fetch with the header
- * (like private `<Image>`) and trigger the download from the object URL. Public keeps native navigation.
- */
-export function DownloadLink({ media, filename, onDownloadError, children, ...anchorProps }: DownloadLinkProps) {
-	const devultur = useDevultur();
-	const { url, token, tokenStatus, tokenError, baseUrl, sessionSecret, reissueToken } = devultur;
-	useRequestTokenWhen(devultur, media?.visibility === "private");
-
-	const handleClick = React.useCallback(
-		async (event: React.MouseEvent<HTMLAnchorElement>) => {
-			// Public (or no media/baseUrl) → let the `<a>` navigate (tokenless, cacheable, no header).
-			if (media?.visibility !== "private" || !baseUrl) return;
-			event.preventDefault();
-			if (tokenStatus === "error") {
-				onDownloadError?.(tokenUnavailableError(tokenError));
-				return;
-			}
-			// URL with an explicit token → on retry we use the fresh token (the context's `url()` would stay
-			// stale inside the handler until the next render).
-			const response = await fetchMedia({
-				buildUrl: (viewerToken) => mediaUrl(baseUrl, media, { download: filename ?? true, token: viewerToken }),
-				token,
-				sessionSecret,
-				reissueToken,
-			});
-			if (!response.ok) {
-				const status = response.status;
-				onDownloadError?.(new MediaFetchError("http_error", `Media fetch failed: ${status}`, status));
-				return;
-			}
-			const objectUrl = URL.createObjectURL(await response.blob());
-			const anchor = document.createElement("a");
-			anchor.href = objectUrl;
-			anchor.download = filename ?? media.filename ?? "download";
-			anchor.click();
-			URL.revokeObjectURL(objectUrl);
-		},
-		[media, baseUrl, token, tokenStatus, tokenError, filename, sessionSecret, reissueToken, onDownloadError],
-	);
-
-	if (!media) return null;
-	return (
-		<a href={url(media, { download: filename ?? true })} download {...anchorProps} onClick={handleClick}>
-			{children}
-		</a>
-	);
-}
-
-// --- useDevulturMedia (reactive media status from component's table) ---
-
-interface MediaStatusReturn {
-	status: MediaStatusValue;
-	/** Typed progress: `phase` is the pipeline step (no `as any`). */
-	progress: { current: number; total: number; percent: number; phase?: ProcessingPhase } | null;
-	error: string | null;
-	/** Categorized failure reason (null if it didn't fail). */
-	failureReason: FailureReason | null;
-	/** Whether the failure is retriable (null if it didn't fail). */
-	retriable: boolean | null;
-	isQueued: boolean;
-	isTranscoding: boolean;
-	isCaptioning: boolean;
-	isReady: boolean;
-	isFailed: boolean;
-	playlistUrl: string | null;
-	thumbnailKey: string | null;
-	captionLocales: string[];
-	duration: number | null;
-	isLoading: boolean;
-}
-
-export function useDevulturMedia(key: string | null | undefined): MediaStatusReturn {
-	const apiCtx = React.use(DevulturApiContext);
-	if (!apiCtx?.getMedia) {
-		throw new Error("useDevulturMedia requires getMedia in DevulturProvider api");
-	}
-
-	const record = useQuery(apiCtx.getMedia, key ? { key } : "skip");
-
-	if (!record) {
-		return {
-			status: MediaStatus.IDLE,
-			progress: null,
-			error: null,
-			failureReason: null,
-			retriable: null,
-			isQueued: false,
-			isTranscoding: false,
-			isCaptioning: false,
-			isReady: false,
-			isFailed: false,
-			playlistUrl: null,
-			thumbnailKey: null,
-			captionLocales: [],
-			duration: null,
-			isLoading: record === undefined,
-		};
-	}
-
-	const status = (record.transcodeStatus as MediaStatusValue) ?? MediaStatus.IDLE;
-	const isReady = status === MediaStatus.READY;
-	const isFailed = status === MediaStatus.FAILED;
-
-	const progress = record.transcodeProgress
-		? {
-				current: record.transcodeProgress.current as number,
-				total: record.transcodeProgress.total as number,
-				percent:
-					(record.transcodeProgress.total as number) > 0
-						? Math.round(
-								((record.transcodeProgress.current as number) / (record.transcodeProgress.total as number)) * 100,
-							)
-						: 0,
-				phase: record.transcodeProgress.phase as ProcessingPhase | undefined,
-			}
-		: null;
-
-	return {
-		status,
-		progress,
-		error: (record.transcodeError as string) ?? null,
-		failureReason: isFailed ? ((record.failureReason as FailureReason) ?? "internal") : null,
-		retriable: isFailed ? ((record.retriable as boolean) ?? true) : null,
-		isQueued: status === MediaStatus.QUEUED,
-		isTranscoding: status === MediaStatus.TRANSCODING,
-		isCaptioning: status === MediaStatus.CAPTIONING,
-		isReady,
-		isFailed,
-		playlistUrl: (record.playlistUrl as string) ?? null,
-		thumbnailKey: (record.thumbnailKey as string) ?? null,
-		captionLocales: (record.captionLocales as string[]) ?? [],
-		duration: (record.duration as number) ?? null,
-		isLoading: false,
-	};
-}
-
-// --- useVideoState (discriminated union — exhaustive, typed, no boolean bag) ---
-
-export interface CaptionTrack {
-	locale: string;
-	label: string;
-	src: string;
-}
-
-/**
- * A video's pipeline state as a **discriminated union** on `phase`: the render is an exhaustive
- * `switch` (no boolean ordering or `as any`), and adding a new phase is a compile error until it's
- * handled. `processing` carries typed `step`/`percent`; `ready` carries the ref + props ready for
- * `<VideoPlayer>` (token-transparent); `failed` carries a categorized `reason` + `retriable`.
- */
-export type VideoState =
-	| { phase: "idle" }
-	| { phase: "queued" }
-	| { phase: "processing"; step: ProcessingPhase; percent: number }
-	| {
-			phase: "ready";
-			media: DevulturMedia;
-			playlist: string;
-			duration: number;
-			captions: CaptionTrack[];
-			playerProps: VideoProps;
-	  }
-	| { phase: "failed"; reason: FailureReason; message: string; retriable: boolean };
-
-export function useVideoState(media: DevulturMedia | null | undefined, options?: { locales?: string[] }): VideoState {
-	const devultur = useDevultur();
-	const { token, baseUrl, sessionSecret } = devultur;
-	useRequestTokenWhen(devultur, media?.kind === "video" && media.visibility === "private");
-	const status = useDevulturMedia(media?.kind === "video" ? media.id : null);
-	const locales = options?.locales;
-
-	return React.useMemo((): VideoState => {
-		if (media?.kind !== "video") return { phase: "idle" };
-
-		if (status.isFailed) {
-			return {
-				phase: "failed",
-				reason: status.failureReason ?? "internal",
-				message: status.error ?? "Video processing failed",
-				retriable: status.retriable ?? true,
-			};
-		}
-
-		if (status.isReady) {
-			if (!baseUrl) throw new Error("useVideoState requires `baseUrl` on <DevulturProvider>");
-			const viewerToken = media.visibility === "private" ? (token ?? undefined) : undefined;
-			const playlist = buildMediaUrl(baseUrl, mediaPath(media), { token: viewerToken });
-			const captions = (locales ?? status.captionLocales).flatMap((locale) => {
-				const path = mediaCaptionPath(media, locale);
-				if (!path) return [];
-				const label = CaptionLocaleLabel[locale as keyof typeof CaptionLocaleLabel] ?? locale;
-				return [{ locale, label, src: buildMediaUrl(baseUrl, path, { token: viewerToken }) }];
-			});
-			return {
-				phase: "ready",
-				media,
-				playlist,
-				duration: status.duration ?? 0,
-				captions,
-				playerProps: {
-					src: playlist,
-					token: viewerToken,
-					captions,
-					sessionSecret: media.visibility === "private" ? sessionSecret : undefined,
-				},
-			};
-		}
-
-		if (status.isQueued) return { phase: "queued" };
-
-		if (status.isTranscoding || status.isCaptioning) {
-			const step: ProcessingPhase = status.progress?.phase ?? (status.isCaptioning ? "captioning" : "encoding");
-			return { phase: "processing", step, percent: status.progress?.percent ?? 0 };
-		}
-
-		return { phase: "idle" };
-	}, [media, status, baseUrl, token, locales, sessionSecret]);
-}
-
-// --- useMediaUpload (unified lifecycle: upload → transcode → ready, one state machine) ---
-
-export interface UseMediaUploadOptions {
-	/** Resource visibility. Omitted → `config.upload.visibility`, else the Worker's default by type. Your guard can rewrite it. */
-	visibility?: Visibility;
-	/** Fires ONCE, at the persistence point (PUT done + transcode requested). */
-	onComplete?: (media: DevulturMedia) => void;
-	onError?: (error: MediaUploadError) => void;
-	/** Deletes this old video/asset after a successful PUT (best-effort). */
-	replaces?: DevulturMedia | null;
-	/** Auto-request the transcode for videos. Default `true`; `false` = upload the raw file unprocessed. */
-	process?: boolean;
-	/** Caption locales to request when transcoding. */
-	locales?: string[];
-}
-
-export interface UseMediaUploadReturn {
-	/** Triggers the upload; resolves with the `DevulturMedia` at the persistence point, or `null` if cancelled/failed. */
-	upload: (file: File) => Promise<DevulturMedia | null>;
-	/** The reactive state machine for the full cycle. */
-	state: MediaUploadState;
-	/** Aborts the in-progress PUT (`uploading` phase). */
-	cancel: () => void;
-	/** Returns to `idle` and clears everything. */
-	reset: () => void;
-}
-
-/**
- * Unified upload primitive: hides the seam between the (imperative) upload and the (reactive)
- * transcode behind ONE state machine. The consumer calls `upload(file)`, persists the ref in
- * `onComplete`, and renders a `switch` over `state.phase`. Video triggers the transcode on its own;
- * image/file go straight to `ready`. Requires `createUploadUrl` + `getMedia` in the provider (and
- * `processVideo` for video).
- */
-export function useMediaUpload(options?: UseMediaUploadOptions): UseMediaUploadReturn {
-	const { visibility, onComplete, onError, replaces, process, locales } = options ?? {};
-
-	const api = useDevulturApi();
-	const createUploadUrlAction = useAction(api.createUploadUrl);
-	const deleteMediaAction = useAction(api.deleteMedia);
-	// Fallback refs to respect the rules of hooks; only invoked if `api.confirmUpload` / `api.processVideo` exist.
-	const confirmUploadAction = useAction(api.confirmUpload ?? api.createUploadUrl);
-	const processVideoAction = useAction(api.processVideo ?? api.createUploadUrl);
-
-	const [phase, setPhase] = React.useState<UploadPhase>("idle");
-	const [percent, setPercent] = React.useState(0);
-	const [currentFile, setCurrentFile] = React.useState<File | null>(null);
-	const [media, setMedia] = React.useState<DevulturMedia | null>(null);
-	const [uploadFailure, setUploadFailure] = React.useState<MediaUploadError | null>(null);
-	const [processRequested, setProcessRequested] = React.useState(false);
-
-	const abortRef = React.useRef<AbortController | null>(null);
-	const lastFileRef = React.useRef<File | null>(null);
-	const lastKeyRef = React.useRef<string | null>(null);
-
-	const videoState = useVideoState(media, { locales });
-
-	const triggerProcess = React.useCallback(
-		(key: string) => {
-			if (!api.processVideo) {
-				throw new Error("useMediaUpload: processing a video requires `processVideo` in the <DevulturProvider> api");
-			}
-			lastKeyRef.current = key;
-			setProcessRequested(true);
-			processVideoAction({ key }).catch((err: unknown) => {
-				// The real pipeline failure arrives via the component's state (transcode.failed → state.failed);
-				// here we only leave a trace if the request itself couldn't even be made.
-				console.error("useMediaUpload: could not request the transcode", err);
-			});
-		},
-		[api.processVideo, processVideoAction],
-	);
-
-	const runUpload = React.useCallback(
-		async (file: File): Promise<DevulturMedia | null> => {
-			const controller = new AbortController();
-			abortRef.current = controller;
-			lastFileRef.current = file;
-			setUploadFailure(null);
-			setMedia(null);
-			setProcessRequested(false);
-			setCurrentFile(file);
-			setPercent(0);
-			setPhase("uploading");
-
-			const fail = (reason: MediaUploadError["reason"], message: string): null => {
-				const failure: MediaUploadError = { stage: "upload", reason, retriable: true, message };
-				setUploadFailure(failure);
-				setPhase("upload-failed");
-				onError?.(failure);
-				return null;
-			};
-
-			let result: UploadTarget;
-			try {
-				result = (await createUploadUrlAction({
-					filename: file.name,
-					contentType: file.type,
-					visibility,
-				})) as typeof result;
-			} catch (err) {
-				return fail("rejected", err instanceof Error ? err.message : "Could not start the upload");
-			}
-
-			const dimensions = await readImageDimensions(file);
-
-			try {
-				await uploadFileWithProgress(result.url, file, { onProgress: setPercent, signal: controller.signal });
-			} catch (err) {
-				if (err instanceof DOMException && err.name === "AbortError") {
-					setPhase("idle");
-					setCurrentFile(null);
-					setPercent(0);
-					return null;
-				}
-				const rejected = err instanceof UploadHttpError && (err.status === 413 || err.status === 415);
-				return fail(rejected ? "rejected" : "network", err instanceof Error ? err.message : "The upload failed");
-			}
-
-			// Before the transcode request: both write the media record, and this one carries the upload's fields.
-			if (api.confirmUpload) await confirmUploadBestEffort(confirmUploadAction, result.key, file, dimensions);
-
-			const uploaded: DevulturMedia = {
-				id: result.id,
-				kind: result.kind,
-				visibility: result.visibility,
-				filename: file.name,
-				key: result.key,
-				...dimensions,
-			};
-			setMedia(uploaded);
-			setPhase("uploaded");
-
-			if (replaces) deleteMediaAction({ key: mediaPath(replaces) }).catch(() => {});
-			onComplete?.(uploaded);
-
-			if ((process ?? true) && uploaded.kind === "video") triggerProcess(result.key);
-
-			return uploaded;
-		},
-		[
-			createUploadUrlAction,
-			confirmUploadAction,
-			api.confirmUpload,
-			deleteMediaAction,
-			triggerProcess,
-			visibility,
-			replaces,
-			process,
-			onComplete,
-			onError,
-		],
-	);
-
-	const cancel = React.useCallback(() => {
-		abortRef.current?.abort();
-	}, []);
-
-	const reset = React.useCallback(() => {
-		abortRef.current?.abort();
-		setPhase("idle");
-		setPercent(0);
-		setCurrentFile(null);
-		setMedia(null);
-		setUploadFailure(null);
-		setProcessRequested(false);
-	}, []);
-
-	const retry = React.useCallback(() => {
-		if (phase === "upload-failed" && lastFileRef.current) {
-			runUpload(lastFileRef.current);
-			return;
-		}
-		if (lastKeyRef.current) triggerProcess(lastKeyRef.current);
-	}, [phase, runUpload, triggerProcess]);
-
-	React.useEffect(() => () => abortRef.current?.abort(), []);
-
-	const state = React.useMemo(
-		(): MediaUploadState =>
-			deriveUploadState(
-				{ phase, percent, file: currentFile, failure: uploadFailure, media, processRequested },
-				videoState,
-				retry,
-			),
-		[phase, percent, currentFile, uploadFailure, media, processRequested, videoState, retry],
-	);
-
-	const upload = React.useCallback((file: File) => runUpload(file), [runUpload]);
-
-	return { upload, state, cancel, reset };
+	return <DevulturProgressContext value={value}>{children}</DevulturProgressContext>;
 }

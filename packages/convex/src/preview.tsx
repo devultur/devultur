@@ -2,6 +2,8 @@
 
 import type React from "react";
 import { type DevulturMedia, mediaPath } from "@devultur/core";
+import { useDevultur } from "./devultur-context";
+import { DownloadLink } from "./download-link";
 import { MediaFetchError, networkError } from "./media-fetch";
 import { useMediaObjectUrl } from "./media-object-url";
 import { useMediaResource } from "./media-resource";
@@ -9,7 +11,6 @@ import { usePreviewLabels } from "./pdf-context";
 import { PdfPreview, type RenderFallback, VISUALLY_HIDDEN } from "./pdf-preview";
 import type { PreviewLabels } from "./preview-labels";
 import { expectedContentType, type PreviewKind, previewKindOf } from "./preview-type";
-import { DownloadLink, useDevultur } from "./react";
 import { VideoPreview } from "./video-preview";
 
 /** Default cap for text previews: a `<pre>` with megabytes of text isn't a preview. */

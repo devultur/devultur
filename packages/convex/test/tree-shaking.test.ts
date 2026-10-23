@@ -15,7 +15,7 @@ const linkedPackages = ["core", "react", "convex"];
 let appDir = "";
 
 beforeAll(async () => {
-	await access(join(packagesDir, "convex", "dist", "react.js")).catch(() => {
+	await access(join(packagesDir, "convex", "dist", "react", "hooks.js")).catch(() => {
 		throw new Error("tree-shaking.test.ts bundles the built packages: run `pnpm build` first");
 	});
 	appDir = await mkdtemp(join(tmpdir(), "devultur-tree-shaking-"));
@@ -76,5 +76,31 @@ describe("tree-shaking @devultur/convex/react", () => {
 		expect(code).toContain("function MediaPickerUpload");
 		expect(code).toContain("function MediaPickerLibrary");
 		expect(code).toMatch(/function usePaginatedQuery\b/);
+	});
+});
+
+describe("tree-shaking @devultur/convex/react/hooks", () => {
+	it("keeps an app that only reads the context to the context and its hook", async () => {
+		const { code, inputs, gzipBytes } = await bundleApp(
+			'import { useDevulturOptional } from "@devultur/convex/react/hooks"; console.log(useDevulturOptional);',
+		);
+
+		expect(code).toMatch(/function useDevulturOptional\b/);
+		expect(code).not.toMatch(/MediaPicker|MediaLibrary|PdfPreview|VideoPlayer/);
+		expect(code).not.toMatch(/function usePaginatedQuery\b/);
+		expect(inputs.filter((input) => /hls\.js|pdfjs-dist|@aws-sdk/.test(input))).toEqual([]);
+		// Against about 21 kB when the same import came from `@devultur/convex/react`.
+		expect(gzipBytes).toBeLessThan(3_000);
+	});
+
+	it("leaves the components and Convex's client out of an app that uses every hook", async () => {
+		const { code, inputs, gzipBytes } = await bundleApp(
+			'import * as hooks from "@devultur/convex/react/hooks"; console.log(hooks);',
+		);
+
+		expect(code).toMatch(/function useMediaUrl\b/);
+		expect(code).not.toMatch(/function (MediaPicker|MediaLibrary|Preview|PdfPreview|DownloadLink|Image)\b/);
+		expect(inputs.filter((input) => /hls\.js|pdfjs-dist|@aws-sdk|node_modules\/convex\//.test(input))).toEqual([]);
+		expect(gzipBytes).toBeLessThan(5_000);
 	});
 });

@@ -13,6 +13,7 @@ export default defineConfig({
 			{ find: /^@devultur\/react$/, replacement: source("react/src/index.ts") },
 			{ find: /^@devultur\/convex$/, replacement: source("convex/src/index.ts") },
 			{ find: /^@devultur\/convex\/react$/, replacement: source("convex/src/react.tsx") },
+			{ find: /^@devultur\/convex\/react\/hooks$/, replacement: source("convex/src/react/hooks.ts") },
 			{ find: /^@devultur\/convex\/pdfjs$/, replacement: source("convex/src/pdfjs.ts") },
 			{ find: /^@devultur\/convex\/locales\/es$/, replacement: source("convex/src/locales/es.ts") },
 			{ find: /^@devultur\/convex\/locales\/es-formal$/, replacement: source("convex/src/locales/es-formal.ts") },
