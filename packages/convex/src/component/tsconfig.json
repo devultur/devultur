@@ -5,8 +5,9 @@
 		"moduleResolution": "bundler",
 		"strict": true,
 		"declaration": true,
-		"declarationMap": true,
+		"declarationMap": false,
 		"sourceMap": true,
+		"inlineSources": true,
 		"outDir": "../../dist/component",
 		"rootDir": ".",
 		"skipLibCheck": true

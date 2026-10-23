@@ -83,7 +83,7 @@ const isSame = (a: DevulturMedia, b: DevulturMedia) => a.id === b.id;
  * @example
  * <MediaPicker accept={["image/*"]} value={cover} onChange={setCover} />
  */
-export function MediaPicker(props: MediaPickerProps) {
+function MediaPickerRoot(props: MediaPickerProps) {
 	const isMultiple = props.multiple ?? false;
 	const labels = React.useMemo(() => mergeMediaPickerLabels(props.labels), [props.labels]);
 	const accept = uploadAcceptOf(props.accept, props.type);
@@ -227,6 +227,11 @@ export function MediaPicker(props: MediaPickerProps) {
 	);
 }
 
-MediaPicker.Upload = MediaPickerUpload;
-MediaPicker.Library = MediaPickerLibrary;
-MediaPicker.Selection = MediaPickerSelection;
+// One pure expression rather than `MediaPicker.Upload = …` statements: a bundler must keep those as side effects, and
+// they kept the picker (and the library's paginated query) in apps that only import `<Image>`.
+export const MediaPicker = /* @__PURE__ */ Object.assign(MediaPickerRoot, {
+	displayName: "MediaPicker",
+	Upload: MediaPickerUpload,
+	Library: MediaPickerLibrary,
+	Selection: MediaPickerSelection,
+});

@@ -3,7 +3,7 @@
 import React from "react";
 import type { ProgressContextValue, ProgressProviderProps } from "./types";
 
-const ProgressContext = React.createContext<ProgressContextValue | null>(null);
+const ProgressContext = /* @__PURE__ */ React.createContext<ProgressContextValue | null>(null);
 
 /**
  * Provides playback progress persistence callbacks to descendant hooks.

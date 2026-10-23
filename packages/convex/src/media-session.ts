@@ -18,7 +18,11 @@ import { type TokenStatus, useViewerToken, type ViewerTokenArgs } from "./viewer
 /** Transform/delivery options for media URLs (without `token`, which the context injects). */
 export type MediaRenderOptions = Omit<MediaUrlOptions, "token">;
 
-export type ViewerTokenAction = FunctionReference<"action", "public", { sessionSecret: string }>;
+/**
+ * The viewer token action: the component's `issueViewerToken` (as `defineDevulturFunctions` or `exposeApi` export it,
+ * where `sessionSecret` is optional) or an app's own, which may require it. The providers always send it.
+ */
+export type ViewerTokenAction = FunctionReference<"action", "public", { sessionSecret?: string }>;
 
 export interface MediaSession {
 	token: string | null;

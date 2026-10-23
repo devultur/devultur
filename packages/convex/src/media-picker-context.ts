@@ -34,7 +34,7 @@ export interface MediaPickerState extends MediaPickerUploads {
 	selectionRef: React.RefObject<HTMLElement | null>;
 }
 
-export const MediaPickerContext = React.createContext<MediaPickerState | null>(null);
+export const MediaPickerContext = /* @__PURE__ */ React.createContext<MediaPickerState | null>(null);
 
 /** The state of the nearest `<MediaPicker>`, to build a part of your own. */
 export function useMediaPicker(): MediaPickerState {

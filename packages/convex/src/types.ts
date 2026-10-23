@@ -1,4 +1,6 @@
 import type { ObjectLock, VideoModuleConfig } from "@devultur/core";
+import type { Infer } from "convex/values";
+import type schema from "./component/schema";
 
 export interface DevulturComponentConfig {
 	video?: VideoModuleConfig;
@@ -10,42 +12,12 @@ export interface DevulturComponentConfig {
 	upload?: { lock?: ObjectLock };
 }
 
-export interface MediaRecord {
-	/** The media id (the `id` of its `DevulturMedia`), for every kind. */
-	key: string;
-	type: "video" | "image" | "file";
-	filename: string;
-	contentType: string;
-	sizeBytes: number;
-	/** Set by a confirmed upload; unset on records from before 1.1.0. */
-	visibility?: "public" | "private";
-	/** Key of the uploaded object (a video's raw file). Set by a confirmed upload. */
-	objectKey?: string;
-	/** An image's intrinsic size: read by the Worker from the bytes when it can, else the uploading client's hint. */
-	width?: number;
-	height?: number;
-	/** A PDF's page count, as the uploading client reported it (a hint). */
-	pageCount?: number;
-	/** Set by the app with `updateMediaMeta`. */
-	title?: string;
-	alt?: string;
-	tags?: string[];
-	/** `title + " " + filename`, lowercased, for search. Unset on records from before 1.4.0. */
-	searchText?: string;
-	transcodeStatus?: "queued" | "transcoding" | "captioning" | "ready" | "failed";
-	transcodeProgress?: { current: number; total: number };
-	transcodeError?: string;
-	playlistUrl?: string;
-	thumbnailKey?: string;
-	/** Key of the storyboard VTT (hover previews); URL via `buildStoryboardUrl` from `@devultur/core`. */
-	storyboardKey?: string;
-	captionLocales?: string[];
-	/** True while requested captions haven't arrived; the video waits in "captioning" only then. */
-	captionsPending?: boolean;
-	/** A video's duration in seconds, from the transcode. */
-	duration?: number;
-	createdAt: number;
-}
+/**
+ * A media record as the component stores it (without the system fields), inferred from the schema's `media` table so
+ * it has every field the component writes: the transcode's progress phase, outputs (`renditions`, `posterUrls`,
+ * `hasAudio`) and failure (`failureReason`, `retriable`), the metadata, the upload hints. The schema documents each.
+ */
+export type MediaRecord = Infer<typeof schema.tables.media.validator>;
 
 export interface ProgressRecord {
 	userId: string;
