@@ -13,6 +13,7 @@ export {
 	type DevulturProgressContextValue,
 	type UploadedMedia,
 	type UploadOptions,
+	useCanDeliver,
 	useDevultur,
 	useDevulturApi,
 	useDevulturOptional,

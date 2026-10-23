@@ -10,6 +10,7 @@ export {
 	type DevulturContextValue,
 	type UploadedMedia,
 	type UploadOptions,
+	useCanDeliver,
 	useDevultur,
 	useDevulturApi,
 	useDevulturOptional,
