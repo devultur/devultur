@@ -1,5 +1,12 @@
 # @devultur/self-host
 
+## 1.4.3
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @devultur/core@1.4.3
+
 ## 1.4.2
 
 ### Patch Changes
