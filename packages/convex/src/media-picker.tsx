@@ -230,6 +230,7 @@ function MediaPickerRoot(props: MediaPickerProps) {
 // One pure expression rather than `MediaPicker.Upload = …` statements: a bundler must keep those as side effects, and
 // they kept the picker (and the library's paginated query) in apps that only import `<Image>`.
 export const MediaPicker = /* @__PURE__ */ Object.assign(MediaPickerRoot, {
+	displayName: "MediaPicker",
 	Upload: MediaPickerUpload,
 	Library: MediaPickerLibrary,
 	Selection: MediaPickerSelection,

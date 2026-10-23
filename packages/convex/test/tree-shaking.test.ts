@@ -1,4 +1,4 @@
-import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,44 +6,32 @@ import { gzipSync } from "node:zlib";
 import { build } from "esbuild";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-// What a consumer's bundler keeps from `@devultur/convex/react`. The packages are first built the way tsup builds them
-// (one ESM file per entry, dependencies external) into a scratch `node_modules` with their real `package.json`, then an
-// app importing one component is bundled against it: the `sideEffects` fields and the statements left at the top of
-// each built file decide what comes along, as they do with the published `dist`.
+// What a consumer's bundler keeps from `@devultur/convex/react`. An app importing one component is bundled against the
+// packages' real `dist` (run `pnpm build` first), linked into a scratch `node_modules`: tsup splits each package into
+// shared chunks, so the `sideEffects` fields decide which chunks and modules come along, as they do once published.
 const packagesDir = fileURLToPath(new URL("../..", import.meta.url));
-const builtEntries = [
-	{ name: "core", entry: "src/index.ts", out: "dist/index.js" },
-	{ name: "react", entry: "src/index.ts", out: "dist/index.js" },
-	{ name: "convex", entry: "src/react.tsx", out: "dist/react.js" },
-];
+const linkedPackages = ["core", "react", "convex"];
 
 let appDir = "";
 
 beforeAll(async () => {
+	await access(join(packagesDir, "convex", "dist", "react.js")).catch(() => {
+		throw new Error("tree-shaking.test.ts bundles the built packages: run `pnpm build` first");
+	});
 	appDir = await mkdtemp(join(tmpdir(), "devultur-tree-shaking-"));
-	for (const { name, entry, out } of builtEntries) {
-		const packageDir = join(appDir, "node_modules", "@devultur", name);
-		await mkdir(packageDir, { recursive: true });
-		await copyFile(join(packagesDir, name, "package.json"), join(packageDir, "package.json"));
-		await build({
-			entryPoints: [join(packagesDir, name, entry)],
-			outfile: join(packageDir, out),
-			bundle: true,
-			format: "esm",
-			packages: "external",
-			logLevel: "silent",
-		});
+	const scopeDir = join(appDir, "node_modules", "@devultur");
+	await mkdir(scopeDir, { recursive: true });
+	for (const name of linkedPackages) {
+		await symlink(join(packagesDir, name), join(scopeDir, name), "dir");
 	}
-}, 60_000);
+});
 
 afterAll(async () => {
 	if (appDir) await rm(appDir, { recursive: true, force: true });
 });
 
-// Third-party packages resolve from the workspace packages' own `node_modules` and are bundled too (only React stays
-// external), so their `sideEffects` fields apply as in an app.
-const dependencyDirs = builtEntries.map(({ name }) => join(packagesDir, name, "node_modules"));
-
+// Only React stays external: third-party packages resolve from the linked packages' own `node_modules` and are bundled
+// too, so their `sideEffects` fields apply as in an app.
 async function bundleApp(contents: string) {
 	const result = await build({
 		stdin: { contents, resolveDir: appDir, loader: "ts" },
@@ -52,7 +40,6 @@ async function bundleApp(contents: string) {
 		format: "esm",
 		platform: "browser",
 		external: ["react", "react-dom", "react/*"],
-		nodePaths: dependencyDirs,
 		metafile: true,
 		logLevel: "silent",
 	});
