@@ -31,9 +31,10 @@ export {
 	type DevulturFunctionsOptions,
 	type DevulturGuard,
 	type DevulturGuardCtx,
+	type DevulturGuardResult,
 	type DevulturOperation,
 	defineDevulturFunctions,
 } from "./guarded-functions";
 export { mediaFromRecord } from "./media-record";
-export type { DevulturComponentConfig, MediaRecord, ProgressRecord } from "./types";
+export type { DevulturComponentConfig, DevulturUploadConfig, MediaRecord, ProgressRecord } from "./types";
 export { dv } from "./validators";

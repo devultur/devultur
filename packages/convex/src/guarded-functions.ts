@@ -52,19 +52,32 @@ export type DevulturGuardCtx<DataModel extends GenericDataModel = any> =
 /**
  * Throws to deny the call. May return what it learned about the caller: a `userId` becomes the subject of the token
  * `issueViewerToken` issues, and the only user the progress functions act for (another `userId` in their arguments is
- * refused with `user_mismatch`, unless the guard also returns `canActForOthers: true`).
+ * refused with `user_mismatch`, unless the guard also returns `canActForOthers: true`). May also return `args`, which
+ * replace the caller's for this call (see `DevulturGuardResult`).
  */
-export type DevulturGuard = (ctx: DevulturGuardCtx, operation: DevulturOperation) => GuardResult | Promise<GuardResult>;
+export type DevulturGuard = (
+	ctx: DevulturGuardCtx,
+	operation: DevulturOperation,
+) => DevulturGuardResult | Promise<DevulturGuardResult>;
 
-// `void`: a guard that only checks (and throws) returns nothing, including one typed `() => void`.
-// biome-ignore lint/suspicious/noConfusingVoidType: see above.
-type GuardResult = CallerContext | undefined | void;
+/**
+ * What a guard returns: what it learned about the caller, and the `args` it rewrites. Each key of `args` replaces the
+ * caller's argument of that name, on your server, before the function runs: `createUploadUrl` with
+ * `{ args: { visibility: "private" } }` uploads privately whatever the browser asked for. Rewrite the arguments of the
+ * operation the guard was called for (narrow on `operation.name`): they aren't validated again.
+ */
+export type DevulturGuardResult =
+	| (CallerContext & { args?: Partial<DevulturOperation["args"]> })
+	| undefined
+	// `void`: a guard that only checks (and throws) returns nothing, including one typed `() => void`.
+	// biome-ignore lint/suspicious/noConfusingVoidType: see above.
+	| void;
 
 export interface DevulturFunctionsOptions<Visibility extends FunctionVisibility> {
 	guard: DevulturGuard;
 	/** `"internal"` registers them as internal functions (callable from your server only). Default `"public"`. */
 	visibility?: Visibility;
-	/** Same as `Devultur.exposeApi`'s: the transcode preset, caption locales and upload lock. */
+	/** Same as `Devultur.exposeApi`'s: the transcode preset, caption locales, upload lock and default visibility. */
 	config?: DevulturComponentConfig;
 }
 
@@ -78,8 +91,8 @@ export function defineDevulturFunctions<Visibility extends FunctionVisibility = 
 	return registerFunctions(exposedFunctions(devultur.component, config), visibility, (name, fn) => {
 		return async (ctx, args) => {
 			const operation = { name, kind: fn.kind, args } as DevulturOperation;
-			const caller = (await guard(ctx as DevulturGuardCtx, operation)) ?? {};
-			return fn.handler(ctx, args, caller);
+			const { args: rewrittenArgs, ...caller } = (await guard(ctx as DevulturGuardCtx, operation)) ?? {};
+			return fn.handler(ctx, rewrittenArgs ? { ...args, ...rewrittenArgs } : args, caller);
 		};
 	});
 }

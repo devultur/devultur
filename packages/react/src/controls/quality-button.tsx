@@ -2,18 +2,22 @@
 
 import React from "react";
 import type { VideoPlayerRenderProps } from "../types";
+import { resolveVideoPlayerLabels, type VideoPlayerLabels } from "../video-player-labels";
 import { useClickOutside } from "./use-click-outside";
 
 interface QualityButtonProps {
 	state: VideoPlayerRenderProps["state"];
 	controls: VideoPlayerRenderProps["controls"];
+	/** Any of the player's strings (`VideoPlayerLabels`); the rest keep the English defaults. */
+	labels?: Partial<VideoPlayerLabels>;
 	className?: string;
 }
 
 /**
  * Control button with a menu for selecting an HLS quality level or automatic switching.
  */
-export function QualityButton({ state, controls, className }: QualityButtonProps): React.ReactElement | null {
+export function QualityButton({ state, controls, labels, className }: QualityButtonProps): React.ReactElement | null {
+	const text = resolveVideoPlayerLabels(labels);
 	const [isOpen, setIsOpen] = React.useState(false);
 	const containerRef = React.useRef<HTMLDivElement>(null);
 
@@ -22,7 +26,7 @@ export function QualityButton({ state, controls, className }: QualityButtonProps
 	if (state.qualityLevels.length < 2) return null;
 
 	const activeLevel = state.currentQuality >= 0 ? state.qualityLevels[state.currentQuality] : null;
-	const label = activeLevel ? `${activeLevel.height}p` : "Auto";
+	const label = activeLevel ? `${activeLevel.height}p` : text.qualityAuto;
 
 	return (
 		<div ref={containerRef} data-dvltr-quality-wrap="">
@@ -31,7 +35,7 @@ export function QualityButton({ state, controls, className }: QualityButtonProps
 				className={className}
 				data-dvltr-quality-label=""
 				onClick={() => setIsOpen((prev) => !prev)}
-				aria-label="Video quality"
+				aria-label={text.quality}
 				aria-expanded={isOpen}
 			>
 				{label}
@@ -47,7 +51,7 @@ export function QualityButton({ state, controls, className }: QualityButtonProps
 							setIsOpen(false);
 						}}
 					>
-						Auto
+						{text.qualityAuto}
 					</button>
 					{state.qualityLevels.map((level, index) => (
 						<button

@@ -5,11 +5,18 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { devulturErrorLabels as spanishErrorLabels } from "./locales/es";
 
-const { calls } = vi.hoisted(() => ({ calls: [] as Array<{ reference: string; args: unknown }> }));
+const { calls, convexClient } = vi.hoisted(() => ({
+	calls: [] as Array<{ reference: string; args: unknown }>,
+	// Off → `useAction` throws like it does with no `<ConvexProvider>` above it.
+	convexClient: { isMounted: true },
+}));
 vi.mock("convex/react", () => ({
-	useAction: (reference: string) => async (args: unknown) => {
-		calls.push({ reference, args });
-		return { token: "viewer-token", expiresIn: 3600 };
+	useAction: (reference: string) => {
+		if (!convexClient.isMounted) throw new Error("Could not find Convex client!");
+		return async (args: unknown) => {
+			calls.push({ reference, args });
+			return { token: "viewer-token", expiresIn: 3600 };
+		};
 	},
 	useMutation: () => vi.fn(),
 	useQuery: () => undefined,
@@ -17,12 +24,24 @@ vi.mock("convex/react", () => ({
 	usePaginatedQuery: () => ({ results: [], status: "Exhausted", loadMore: vi.fn() }),
 }));
 
-const { DevulturCapabilityError, DevulturViewerProvider, Preview, useDevultur, useDevulturApi, useMediaUpload } =
-	await import("./react");
+const {
+	DevulturCapabilityError,
+	DevulturProvider,
+	DevulturViewerProvider,
+	Image,
+	Preview,
+	useDevultur,
+	useDevulturApi,
+	useDevulturOptional,
+	useMediaUpload,
+} = await import("./react");
 const { describeDevulturError } = await import("./error-labels");
 
 const BASE_URL = "https://media.example";
 const privateFile: DevulturMedia = { id: "f1", kind: "file", visibility: "private", filename: "notes.txt" };
+const publicFile: DevulturMedia = { id: "f2", kind: "file", visibility: "public", filename: "readme.txt" };
+const publicImage: DevulturMedia = { id: "i1", kind: "image", visibility: "public", filename: "cover.png" };
+const unavailable = (error: { code: string }) => <span>Unavailable: {error.code}</span>;
 
 let latest: ReturnType<typeof useDevultur> | null = null;
 function Probe() {
@@ -54,6 +73,7 @@ afterEach(() => {
 	cleanup();
 	vi.unstubAllGlobals();
 	calls.length = 0;
+	convexClient.isMounted = true;
 	latest = null;
 });
 
@@ -66,6 +86,78 @@ describe("<DevulturViewerProvider>", () => {
 			{ reference: "admin.issueViewerToken", args: { workspaceId: "w1", sessionSecret: expect.any(String) } },
 		]);
 		expect(latest?.tokenStatus).toBe("ready");
+	});
+
+	it("issues no token while every media shown is public", async () => {
+		renderViewer(<Preview media={publicFile} />);
+
+		expect(await screen.findByText("hello")).toBeTruthy();
+		expect(calls).toEqual([]);
+		expect(latest?.tokenStatus).toBe("idle");
+		expect(latest?.token).toBeNull();
+	});
+
+	it("issues the token once the first private media is shown", async () => {
+		const view = renderViewer(<Preview media={publicFile} />);
+		await screen.findByText("hello");
+		expect(calls).toHaveLength(0);
+
+		view.rerender(
+			<DevulturViewerProvider
+				baseUrl={BASE_URL}
+				issueViewerToken={"admin.issueViewerToken" as never}
+				tokenArgs={{ workspaceId: "w1" }}
+			>
+				<Probe />
+				<Preview media={publicFile} />
+				<Preview media={privateFile} />
+			</DevulturViewerProvider>,
+		);
+
+		await waitFor(() => expect(latest?.tokenStatus).toBe("ready"));
+		expect(calls).toHaveLength(1);
+	});
+
+	it("issues the token when url() builds a private URL during a render", async () => {
+		function PrivateLink() {
+			const { url } = useDevultur();
+			return <a href={url(privateFile)}>Download notes</a>;
+		}
+		renderViewer(<PrivateLink />);
+
+		await waitFor(() => expect(latest?.tokenStatus).toBe("ready"));
+		expect(calls).toHaveLength(1);
+		expect(screen.getByText("Download notes").getAttribute("href")).toContain("viewer-token");
+	});
+
+	it("shows public media with no token action and no Convex client", async () => {
+		convexClient.isMounted = false;
+		render(
+			<DevulturViewerProvider baseUrl={BASE_URL}>
+				<Probe />
+				<Preview media={publicFile} />
+				<Image media={publicImage} alt="cover" />
+			</DevulturViewerProvider>,
+		);
+
+		expect(await screen.findByText("hello")).toBeTruthy();
+		expect(screen.getByAltText("cover").getAttribute("src")).toBe(`${BASE_URL}/v1/media/public/image/i1/cover.png`);
+		expect(latest?.tokenStatus).toBe("idle");
+	});
+
+	it("fails private media with token_unavailable when there is no token action", async () => {
+		convexClient.isMounted = false;
+		render(
+			<DevulturViewerProvider baseUrl={BASE_URL}>
+				<Probe />
+				<Preview media={privateFile} fallback={unavailable} />
+			</DevulturViewerProvider>,
+		);
+
+		expect(await screen.findByText("Unavailable: token_unavailable")).toBeTruthy();
+		expect(latest?.tokenStatus).toBe("error");
+		expect(latest?.tokenError?.message).toMatch(/no `issueViewerToken`/);
+		await expect(latest!.retryToken()).resolves.toBeNull();
 	});
 
 	it("rejects upload and uploadUrl, and throws on deleteMedia, with capability_unavailable", async () => {
@@ -99,9 +191,47 @@ describe("<DevulturViewerProvider>", () => {
 		for (const error of errors) expect(error).toMatchObject({ code: "capability_unavailable", capability: "api" });
 	});
 
+	it("keeps issuing the token right away under <DevulturProvider>", async () => {
+		const api = {
+			issueViewerToken: "issueViewerToken",
+			createUploadUrl: "createUploadUrl",
+			deleteMedia: "deleteMedia",
+		};
+		render(
+			<DevulturProvider api={api as never} baseUrl={BASE_URL}>
+				<Probe />
+			</DevulturProvider>,
+		);
+
+		await waitFor(() => expect(latest?.tokenStatus).toBe("ready"));
+		expect(calls).toEqual([{ reference: "issueViewerToken", args: { sessionSecret: expect.any(String) } }]);
+	});
+
 	it("describes the capability error in English and Spanish", () => {
 		const error = new DevulturCapabilityError("upload");
 		expect(describeDevulturError(error)).toBe("This app can't do that here.");
 		expect(describeDevulturError(error, spanishErrorLabels)).toBe("Esta aplicación no puede hacer eso aquí.");
+	});
+});
+
+describe("useDevulturOptional", () => {
+	let optional: ReturnType<typeof useDevulturOptional> | undefined;
+	function OptionalProbe() {
+		optional = useDevulturOptional();
+		return null;
+	}
+
+	afterEach(() => {
+		optional = undefined;
+	});
+
+	it("returns null outside a provider instead of throwing", () => {
+		render(<OptionalProbe />);
+		expect(optional).toBeNull();
+	});
+
+	it("returns what useDevultur returns under a provider", () => {
+		renderViewer(<OptionalProbe />);
+		expect(optional).toBe(latest);
 	});
 });

@@ -9,7 +9,8 @@ import type {
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { Devultur } from "./client";
 import type { ComponentApi } from "./component/_generated/component.js";
-import { type DevulturOperation, defineDevulturFunctions } from "./guarded-functions";
+import { type DevulturGuardResult, type DevulturOperation, defineDevulturFunctions } from "./guarded-functions";
+import type { DevulturUploadConfig } from "./types";
 
 // The builders return their definition, tagged with kind and visibility, so a test can call the handler.
 vi.mock("convex/server", async (importOriginal) => {
@@ -218,5 +219,73 @@ describe("defineDevulturFunctions", () => {
 		expectTypeOf<Parameters<typeof defineDevulturFunctions>[1]["guard"]>()
 			.parameter(0)
 			.toExtend<GenericActionCtx<GenericDataModel> | object>();
+	});
+});
+
+describe("upload visibility", () => {
+	const uploadArgs = { filename: "a.png", contentType: "image/png" };
+	const createUploadUrlOf = (functions: object) => definitionOf(functions, "createUploadUrl");
+
+	it("lets the Worker pick the default when neither the caller nor the config sets one", async () => {
+		const { ctx, run } = fakeCtx();
+		await createUploadUrlOf(Devultur.exposeApi(component as ComponentApi)).handler(ctx, uploadArgs);
+		expect(run).toHaveBeenCalledWith("public.createUploadUrl", uploadArgs);
+	});
+
+	it("uses config.upload.visibility when the caller passes none", async () => {
+		const { ctx, run } = fakeCtx();
+		const exposed = Devultur.exposeApi(component as ComponentApi, { upload: { visibility: "public" } });
+		await createUploadUrlOf(exposed).handler(ctx, uploadArgs);
+		expect(run).toHaveBeenCalledWith("public.createUploadUrl", { ...uploadArgs, visibility: "public" });
+	});
+
+	it("keeps the caller's visibility over the config's", async () => {
+		const { ctx, run } = fakeCtx();
+		const config = { upload: { visibility: "public" as const } };
+		const guarded = defineDevulturFunctions(devultur, { guard: () => {}, config });
+		await createUploadUrlOf(guarded).handler(ctx, { ...uploadArgs, visibility: "private" });
+		expect(run).toHaveBeenCalledWith("public.createUploadUrl", { ...uploadArgs, visibility: "private" });
+	});
+
+	it("applies the guard's args over the caller's and the config's", async () => {
+		const { ctx, run } = fakeCtx();
+		const guarded = defineDevulturFunctions(devultur, {
+			guard: (_ctx, operation) => {
+				if (operation.name !== "createUploadUrl") return;
+				return { args: { visibility: "private", filename: `team-${operation.args.filename}` } };
+			},
+			config: { upload: { visibility: "public", lock: { hold: true } } },
+		});
+		await createUploadUrlOf(guarded).handler(ctx, { ...uploadArgs, visibility: "public" });
+		expect(run).toHaveBeenCalledWith("public.createUploadUrl", {
+			filename: "team-a.png",
+			contentType: "image/png",
+			visibility: "private",
+			lock: { hold: true },
+		});
+	});
+
+	it("shows the guard the caller's own args, before the config's default", async () => {
+		const { ctx } = fakeCtx();
+		const guard = vi.fn(() => {});
+		const config = { upload: { visibility: "public" as const } };
+		await createUploadUrlOf(defineDevulturFunctions(devultur, { guard, config })).handler(ctx, uploadArgs);
+		expect(guard).toHaveBeenCalledWith(ctx, { name: "createUploadUrl", kind: "action", args: uploadArgs });
+	});
+
+	it("rewrites any operation's args, and keeps them out of the caller context", async () => {
+		const { ctx, run } = fakeCtx();
+		const guarded = defineDevulturFunctions(devultur, {
+			guard: () => ({ userId: "user-1", args: { sessionSecret: "server-secret" } }),
+		});
+		await definitionOf(guarded, "issueViewerToken").handler(ctx, { sessionSecret: "browser-secret" });
+		expect(run).toHaveBeenCalledWith("public.issueViewerToken", { sessionSecret: "server-secret", userId: "user-1" });
+	});
+
+	it("types the guard's args and the config's visibility", () => {
+		expectTypeOf<{ args: { visibility: "private" } }>().toExtend<DevulturGuardResult>();
+		expectTypeOf<{ args: { visibility: "secret" } }>().not.toExtend<DevulturGuardResult>();
+		expectTypeOf<{ args: { position: "3" } }>().not.toExtend<DevulturGuardResult>();
+		expectTypeOf<DevulturUploadConfig["visibility"]>().toEqualTypeOf<"public" | "private" | undefined>();
 	});
 });

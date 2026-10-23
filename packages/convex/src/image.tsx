@@ -2,8 +2,9 @@
 
 import React from "react";
 import { type DevulturMedia, type MediaUrlOptions, mediaUrl } from "@devultur/core";
+import { useDevultur } from "./devultur-context";
 import { fetchMedia, MediaFetchError, tokenUnavailableError } from "./media-fetch";
-import { useDevultur } from "./react";
+import { useRequestTokenWhen } from "./media-session";
 import { buildSrcSet, normalizeWidths, pickWidth, renderedWidthFromSizes, scaledHeight } from "./responsive-image";
 
 type ImageTransforms = Pick<MediaUrlOptions, "width" | "height" | "fit" | "format" | "quality">;
@@ -134,7 +135,8 @@ function usePrivateImage(
 	transforms: ImageTransforms,
 	onLoadError?: (error: Error) => void,
 ) {
-	const { token, tokenStatus, tokenError, baseUrl, reissueToken, sessionSecret } = useDevultur();
+	const devultur = useDevultur();
+	const { token, tokenStatus, tokenError, baseUrl, reissueToken, sessionSecret } = devultur;
 	const [isFailed, setIsFailed] = React.useState(false);
 	const [blobSrc, setBlobSrc] = React.useState<string | null>(null);
 	// Read when the fetch starts: a re-issued or renewed token must not re-run the fetch (each run downloads the file again).
@@ -144,6 +146,7 @@ function usePrivateImage(
 	});
 
 	const isPrivate = media?.visibility === "private";
+	useRequestTokenWhen(devultur, isPrivate);
 	const hasToken = token !== null;
 	const isTokenUnavailable = isPrivate && tokenStatus === "error";
 	const { width, height, fit, format, quality } = transforms;

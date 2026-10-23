@@ -6,6 +6,7 @@ import { DefaultControls } from "./controls";
 import type { VideoPlayerProps, VideoPlayerRef, VideoPlayerRenderProps } from "./types";
 import { useStoryboard } from "./use-storyboard";
 import { useVideoPlayer } from "./use-video-player";
+import { resolveVideoPlayerLabels } from "./video-player-labels";
 
 const SEEK_STEP = 10;
 const VOLUME_STEP = 0.1;
@@ -29,6 +30,7 @@ export function VideoPlayer({
 	onError,
 	metrics,
 	aspectRatio,
+	labels,
 	className,
 	children,
 }: VideoPlayerProps & { ref?: React.Ref<VideoPlayerRef> }): React.ReactElement {
@@ -48,6 +50,7 @@ export function VideoPlayer({
 	const storyboardCues = useStoryboard({ src: storyboard, token, sessionSecret });
 	const hasSetDefaultCaption = React.useRef(false);
 	const [controlsVisible, setControlsVisible] = React.useState(true);
+	const text = React.useMemo(() => resolveVideoPlayerLabels(labels), [labels]);
 
 	React.useImperativeHandle(
 		forwardedRef,
@@ -138,6 +141,7 @@ export function VideoPlayer({
 			aspectRatio={aspectRatio}
 			isPlaying={state.isPlaying}
 			isFullscreen={state.isFullscreen}
+			label={text.player}
 			onKeyDown={handleKeyDown}
 		>
 			{/* biome-ignore lint/a11y/useMediaCaption: captions rendered via CaptionOverlay */}
@@ -162,6 +166,7 @@ export function VideoPlayer({
 				playbackRates={playbackRates}
 				storyboard={storyboardCues}
 				onVisibilityChange={setControlsVisible}
+				labels={text}
 			/>
 		</Container>
 	);
@@ -173,16 +178,26 @@ interface ContainerProps {
 	aspectRatio?: string;
 	isPlaying: boolean;
 	isFullscreen: boolean;
+	label: string;
 	onKeyDown: (event: React.KeyboardEvent) => void;
 	children: React.ReactNode;
 }
 
-function Container({ ref, className, aspectRatio, isPlaying, isFullscreen, onKeyDown, children }: ContainerProps) {
+function Container({
+	ref,
+	className,
+	aspectRatio,
+	isPlaying,
+	isFullscreen,
+	label,
+	onKeyDown,
+	children,
+}: ContainerProps) {
 	return (
 		<div
 			ref={ref}
 			role="application"
-			aria-label="Video player"
+			aria-label={label}
 			className={className}
 			tabIndex={0}
 			onKeyDown={onKeyDown}

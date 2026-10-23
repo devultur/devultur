@@ -89,6 +89,7 @@ export function exposedFunctions(component: ComponentApi, config?: DevulturCompo
 	const locales = config?.video?.captionLocales ?? [];
 	// The lock comes from the config only: a browser calling this never picks one.
 	const uploadLock = config?.upload?.lock;
+	const defaultVisibility = config?.upload?.visibility;
 
 	return {
 		issueViewerToken: exposed("action", { sessionSecret: v.optional(v.string()) }, async (ctx, args, caller) =>
@@ -98,12 +99,18 @@ export function exposedFunctions(component: ComponentApi, config?: DevulturCompo
 			}),
 		),
 
-		// Optional per-resource visibility; omitted → the component resolves the config's default (secure-by-default).
+		// Visibility: the caller's (after the guard's rewrite), else `config.upload.visibility`, else the Worker's default.
 		createUploadUrl: exposed(
 			"action",
 			{ filename: v.string(), contentType: v.string(), visibility: visibilityArg },
-			async (ctx, args) =>
-				ctx.runAction(component.public.createUploadUrl, { ...args, ...(uploadLock ? { lock: uploadLock } : {}) }),
+			async (ctx, args) => {
+				const visibility = args.visibility ?? defaultVisibility;
+				return ctx.runAction(component.public.createUploadUrl, {
+					...args,
+					...(visibility ? { visibility } : {}),
+					...(uploadLock ? { lock: uploadLock } : {}),
+				});
+			},
 		),
 
 		// Records an upload once its bytes are stored (the Worker HEADs the key): a browser can't list anything

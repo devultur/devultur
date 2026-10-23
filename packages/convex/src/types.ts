@@ -1,15 +1,24 @@
-import type { ObjectLock, VideoModuleConfig } from "@devultur/core";
+import type { ObjectLock, VideoModuleConfig, Visibility } from "@devultur/core";
 import type { Infer } from "convex/values";
 import type schema from "./component/schema";
 
 export interface DevulturComponentConfig {
 	video?: VideoModuleConfig;
+	upload?: DevulturUploadConfig;
+}
+
+/** How the exposed `createUploadUrl` uploads. */
+export interface DevulturUploadConfig {
 	/**
-	 * Lock every upload through the exposed `createUploadUrl` gets (retention and/or hold). Set here, on your server:
-	 * the browser never chooses a lock. To lock per upload, call `devultur.createUploadUrl(ctx, { lock })` from your
-	 * own function.
+	 * Lock every upload gets (retention and/or hold). Set here, on your server: the browser never chooses a lock. To
+	 * lock per upload, call `devultur.createUploadUrl(ctx, { lock })` from your own function.
 	 */
-	upload?: { lock?: ObjectLock };
+	lock?: ObjectLock;
+	/**
+	 * Visibility of an upload whose caller passes none. Without it, the Worker's default by type applies. A default,
+	 * not a rule: the browser's `visibility` wins over it, and a guard's `args` win over both (see `DevulturGuardResult`).
+	 */
+	visibility?: Visibility;
 }
 
 /**

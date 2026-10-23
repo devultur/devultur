@@ -2,6 +2,10 @@
 
 Adaptive HLS player with captions, a quality picker, and keyboard shortcuts.
 
+> [!IMPORTANT]
+> Playback metrics are on by default: anonymous, with no cookies, sent to the media host that serves the video.
+> `metrics={false}` turns them off. [What is sent and where](../../guides/video-player.md#playback-metrics).
+
 `VideoPlayer` streams HLS with adaptive bitrate, a built-in quality picker,
 caption tracks, and keyboard shortcuts. Use it styled out of the box, or pass a
 render function for a fully custom UI.
@@ -43,7 +47,8 @@ import { VideoPlayer } from "@devultur/react";
 | `onProgress` | `(currentTime: number, percent: number) => void` | — | Fired as playback advances. |
 | `onEnded` | `() => void` | — | Fired when playback reaches the end. |
 | `onError` | `(error: VideoPlayerError) => void` | — | Fired when the playlist or a segment can't load: on a `401` (even when hls.js would keep trying) and on any error hls.js can't recover from. `VideoPlayerError` has the HTTP `status`, the response body's `code` (e.g. `session_mismatch`), `fatal` and hls.js's `details`. |
-| `metrics` | `boolean` | `true` | Playback analytics beacons (startup, rebuffering, errors, bitrate, watch time) to `POST /v1/metrics/playback` on the media host. The self-host Worker accepts and discards them. `false` opts out. |
+| `metrics` | `boolean` | `true` | Anonymous playback quality beacons (startup, rebuffering, errors, bitrate, watch time), with no cookies, to `POST /v1/metrics/playback` on the video's own host, for Devultur delivery URLs only. The self-host Worker accepts and discards them. `false` turns them off. See [Playback metrics](../../guides/video-player.md#playback-metrics). |
+| `labels` | `Partial<VideoPlayerLabels>` | English | The strings the player and its controls show or announce (accessible names, menu items). Pass any subset; `defaultVideoPlayerLabels` has the rest. Spanish: `videoPlayerLabels` from `@devultur/convex/locales/es` or `locales/es-formal`. |
 | `aspectRatio` | `string` | — | CSS `aspect-ratio` for the player container (e.g. `"16 / 9"`). |
 | `className` | `string` | — | Class applied to the player container. |
 | `children` | `ReactNode \| (state: VideoPlayerRenderProps) => ReactNode` | — | Custom UI, or a render function for headless control. |
@@ -58,6 +63,18 @@ import { VideoPlayer } from "@devultur/react";
 | `F` | Fullscreen |
 | `C` | Toggle captions |
 | `M` | Mute |
+
+## Labels
+
+```tsx
+import { VideoPlayer } from "@devultur/react";
+import { videoPlayerLabels } from "@devultur/convex/locales/es";
+
+<VideoPlayer src={video.playlistUrl} labels={videoPlayerLabels} />;
+```
+
+The controls exported on their own (`PlayButton`, `SeekBar`, `VolumeControl`, `CaptionButton`, `QualityButton`,
+`SpeedButton`, `FullscreenButton`, `DefaultControls`) take the same `labels` prop.
 
 ## Imperative ref
 

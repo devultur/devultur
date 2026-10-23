@@ -10,10 +10,9 @@ import {
 	mediaUrl,
 	SESSION_HEADER,
 } from "@devultur/core";
-import { useAction } from "convex/react";
 import type { FunctionReference } from "convex/server";
 import { isSessionMismatch } from "./image-recovery";
-import { type TokenStatus, useViewerToken, type ViewerTokenArgs } from "./viewer-token";
+import { type IssueViewerToken, type TokenStatus, useViewerToken, type ViewerTokenArgs } from "./viewer-token";
 
 /** Transform/delivery options for media URLs (without `token`, which the context injects). */
 export type MediaRenderOptions = Omit<MediaUrlOptions, "token">;
@@ -32,6 +31,12 @@ export interface MediaSession {
 	tokenError: Error | null;
 	/** Issues the viewer token again (after a failure, for example). Resolves to the new token, or `null`. */
 	retryToken: () => Promise<string | null>;
+	/**
+	 * Asks for the viewer token where it's issued lazily (`<DevulturViewerProvider>`): the first private media shown
+	 * calls it, and so must code that reads `token` itself. A no-op once asked, and under `<DevulturProvider>`, which
+	 * issues the token right away.
+	 */
+	requestToken: () => void;
 	baseUrl: string | null;
 	/** Browser session secret → sent in `${SESSION_HEADER}` on every private delivery. */
 	sessionSecret: string;
@@ -48,29 +53,39 @@ export interface MediaSession {
 }
 
 interface MediaSessionOptions {
-	issueViewerToken: ViewerTokenAction;
+	issueViewerToken: IssueViewerToken;
 	tokenArgs?: ViewerTokenArgs;
 	baseUrl?: string;
+	/** Issue the viewer token only once a private media asks for it (`requestToken`). Default `false`. */
+	isLazy?: boolean;
 }
 
-export function useMediaSession({ issueViewerToken, tokenArgs, baseUrl }: MediaSessionOptions): MediaSession {
+export function useMediaSession({ issueViewerToken, tokenArgs, baseUrl, isLazy }: MediaSessionOptions): MediaSession {
 	// Client session secret: generated ONCE (in memory, per app session), bound to the token at
 	// issuance, and sent in `${SESSION_HEADER}` on every delivery → real session binding (works even
 	// when the token is issued server-side). Empty outside the browser (SSR) → no binding.
 	const [sessionSecret] = React.useState(() => (typeof crypto !== "undefined" ? crypto.randomUUID() : ""));
-	const issueViewerTokenAction = useAction(issueViewerToken);
-	const { token, tokenStatus, tokenError, reissueToken, retryToken } = useViewerToken({
-		issueViewerToken: issueViewerTokenAction,
+	const { token, tokenStatus, tokenError, reissueToken, retryToken, requestToken } = useViewerToken({
+		issueViewerToken,
 		sessionSecret,
 		tokenArgs,
+		isLazy,
 	});
+	// `url()` runs during a render, where setting the provider's state isn't allowed: it asks once, after the render.
+	const hasRequestedRef = React.useRef(!isLazy);
+	const requestTokenAfterRender = React.useCallback(() => {
+		if (hasRequestedRef.current) return;
+		hasRequestedRef.current = true;
+		queueMicrotask(requestToken);
+	}, [requestToken]);
 
 	const url = React.useCallback(
 		(media: DevulturMedia, options?: MediaRenderOptions): string => {
 			if (!baseUrl) throw new Error("Devultur `url()` requires `baseUrl` on <DevulturProvider>");
+			if (media.visibility === "private" && !token) requestTokenAfterRender();
 			return mediaUrl(baseUrl, media, { ...options, token: token ?? undefined });
 		},
-		[baseUrl, token],
+		[baseUrl, token, requestTokenAfterRender],
 	);
 
 	const getCaptionsText = React.useCallback(
@@ -85,7 +100,9 @@ export function useMediaSession({ issueViewerToken, tokenArgs, baseUrl }: MediaS
 					headers: sessionSecret ? { [SESSION_HEADER]: sessionSecret } : undefined,
 				});
 
-			let response = await fetchWith(isPrivate ? (token ?? undefined) : undefined);
+			// Lazy issuance may not have a token yet: this asks for one and waits for it.
+			const viewerToken = isPrivate ? (token ?? (await retryToken())) : null;
+			let response = await fetchWith(viewerToken ?? undefined);
 			// 401 `session_mismatch` → re-issue once and retry. Transparent.
 			if (isPrivate && response.status === 401 && (await isSessionMismatch(response))) {
 				const fresh = await reissueToken();
@@ -94,7 +111,7 @@ export function useMediaSession({ issueViewerToken, tokenArgs, baseUrl }: MediaS
 			if (!response.ok) throw new Error(`Captions fetch failed: ${response.status}`);
 			return response.text();
 		},
-		[baseUrl, token, reissueToken, sessionSecret],
+		[baseUrl, token, reissueToken, retryToken, sessionSecret],
 	);
 
 	return React.useMemo(
@@ -103,12 +120,33 @@ export function useMediaSession({ issueViewerToken, tokenArgs, baseUrl }: MediaS
 			tokenStatus,
 			tokenError,
 			retryToken,
+			requestToken,
 			baseUrl: baseUrl ?? null,
 			sessionSecret,
 			url,
 			getCaptionsText,
 			reissueToken,
 		}),
-		[token, tokenStatus, tokenError, retryToken, baseUrl, sessionSecret, url, getCaptionsText, reissueToken],
+		[
+			token,
+			tokenStatus,
+			tokenError,
+			retryToken,
+			requestToken,
+			baseUrl,
+			sessionSecret,
+			url,
+			getCaptionsText,
+			reissueToken,
+		],
 	);
+}
+
+/** Asks for the viewer token while `isNeeded` (a private media is shown). Under eager issuance it does nothing. */
+export function useRequestTokenWhen(session: Pick<MediaSession, "requestToken" | "token">, isNeeded: boolean): void {
+	const { requestToken, token } = session;
+	const hasToken = token !== null;
+	React.useEffect(() => {
+		if (isNeeded && !hasToken) requestToken();
+	}, [isNeeded, hasToken, requestToken]);
 }

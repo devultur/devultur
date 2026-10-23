@@ -4,8 +4,9 @@
 // the in-flight fetch and release what was built from it (an object URL) when the media changes or on unmount.
 import React from "react";
 import { type DevulturMedia, mediaPath, mediaUrl } from "@devultur/core";
+import { useDevultur } from "./devultur-context";
 import { loadMedia, tokenUnavailableError } from "./media-fetch";
-import { useDevultur } from "./react";
+import { useRequestTokenWhen } from "./media-session";
 
 export interface MediaResourceOptions<Value> {
 	isEnabled: boolean;
@@ -39,6 +40,7 @@ export function useMediaResource<Value>(
 	const devultur = useDevultur();
 	const { isEnabled, maxBytes, contentType } = options;
 	const isPrivate = media?.visibility === "private";
+	useRequestTokenWhen(devultur, isPrivate && isEnabled);
 	// Private delivery waits for the first viewer token; later renewals don't refetch (a PDF being read stays put).
 	const isReady = !isPrivate || devultur.token !== null;
 	// No token is coming until `retryToken()`: fail now instead of loading forever.
