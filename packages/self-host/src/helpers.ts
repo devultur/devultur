@@ -1,7 +1,6 @@
 import { type SecurityPolicy, visibilityFromKey } from "@devultur/core";
 import type { Context } from "hono";
 import { isBearerAuthorized } from "./bearer";
-import { withCurrentClaimNames } from "./legacy-claims";
 import { getRequestState } from "./request-state";
 import type { WorkerApp } from "./types";
 import { HashAlgorithm } from "./types";
@@ -131,8 +130,17 @@ export async function verifyViewerToken(
 
 	const now = Math.floor(Date.now() / 1000);
 	if (typeof payload.exp === "number" && payload.exp < now) return null;
-	return withCurrentClaimNames(payload);
+	if (hasUnreadBindingClaim(payload)) return null;
+	return payload;
 }
+
+// Names that bound a token (storage prefix, path prefix, scopes) before the claims became `aud`, `res` and `scope`.
+// The gate no longer reads them, and a claim it doesn't read doesn't limit the token, so a token that still carries
+// one is refused rather than served unbound.
+const UNREAD_BINDING_CLAIMS = ["pid", "ppx", "scopes"];
+
+const hasUnreadBindingClaim = (payload: Record<string, unknown>) =>
+	UNREAD_BINDING_CLAIMS.some((name) => name in payload);
 
 import {
 	encodeEncryptionMeta,

@@ -74,6 +74,23 @@ describe("verifyViewerToken", () => {
 		const token = await signToken({ sub: "user-1", exp: past }, secret);
 		expect(await verifyViewerToken(token, secret)).toBeNull();
 	});
+
+	it.each([
+		{ pid: "prefix-a" },
+		{ ppx: "image/clientA/" },
+		{ scopes: ["media:write"] },
+	])("rejects a token bound by a claim name it no longer reads (%o), instead of serving it unbound", async (claim) => {
+		const token = await signToken({ sub: "user-1", exp: future, ...claim }, secret);
+		expect(await verifyViewerToken(token, secret)).toBeNull();
+	});
+
+	it("no longer reads an upload token's old claim names as the current ones", async () => {
+		const token = await signToken({ typ: "upload", jti: "j", pfx: "asset/ci/", mxb: 10, exp: future }, secret);
+		const payload = await verifyViewerToken(token, secret);
+		expect(payload).toMatchObject({ pfx: "asset/ci/", mxb: 10 });
+		expect(payload).not.toHaveProperty("res");
+		expect(payload).not.toHaveProperty("max_bytes");
+	});
 });
 
 describe("sanitizeFilename", () => {
