@@ -2,7 +2,7 @@
 
 import React from "react";
 import { usePaginatedQuery } from "convex/react";
-import { useDevulturApi } from "./devultur-context";
+import { useDevulturApi } from "./provider-hooks";
 import type { MediaRecord } from "./types";
 
 type MediaType = MediaRecord["type"];

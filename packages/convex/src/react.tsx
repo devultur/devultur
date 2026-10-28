@@ -37,8 +37,6 @@ export {
 	type UploadedMedia,
 	type UploadOptions,
 	useCanDeliver,
-	useDevultur,
-	useDevulturApi,
 	useDevulturOptional,
 } from "./devultur-context";
 export {
@@ -75,11 +73,8 @@ export { PdfThumbnail, type PdfThumbnailProps } from "./pdf-thumbnail";
 export { Preview, type PreviewProps } from "./preview";
 export { defaultPreviewLabels, type PreviewLabels } from "./preview-labels";
 export type { PreviewKind } from "./preview-type";
-export {
-	DevulturProgressContext,
-	type DevulturProgressContextValue,
-	useDevulturProgress,
-} from "./progress-context";
+export { DevulturProgressContext, type DevulturProgressContextValue } from "./progress-context";
+export { useDevultur, useDevulturApi, useDevulturProgress } from "./provider-hooks";
 export {
 	type MediaLibraryState,
 	type MediaLibraryStatus,

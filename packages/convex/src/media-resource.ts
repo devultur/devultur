@@ -4,8 +4,8 @@
 // the in-flight fetch and release what was built from it (an object URL) when the media changes or on unmount.
 import React from "react";
 import { type DevulturMedia, mediaPath, mediaUrl } from "@devultur/core";
-import { useDevultur } from "./devultur-context";
 import { loadMedia, tokenUnavailableError } from "./media-fetch";
+import { useDevultur } from "./provider-hooks";
 import { useRequestTokenWhen } from "./request-token";
 
 export interface MediaResourceOptions<Value> {

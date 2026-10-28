@@ -1,8 +1,8 @@
 "use client";
 
 import type { DevulturMedia } from "@devultur/core";
-import { useDevultur } from "./devultur-context";
 import { useMediaResource } from "./media-resource";
+import { useDevultur } from "./provider-hooks";
 
 export interface UseMediaObjectUrlOptions {
 	/** `false` → nothing is fetched (e.g. a list row that isn't selected). Default `true`. */

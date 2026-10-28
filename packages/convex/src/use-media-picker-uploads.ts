@@ -2,10 +2,10 @@
 
 import React from "react";
 import type { DevulturMedia } from "@devultur/core";
-import { useDevultur } from "./devultur-context";
 import { matchesAccept } from "./media-picker-accept";
 import type { MediaPickerLabels } from "./media-picker-labels";
 import type { PdfPageCounter } from "./pdf-context";
+import { useDevultur } from "./provider-hooks";
 
 /** A file the picker is uploading, or one that failed (a finished upload leaves the list for the selection). */
 export interface MediaPickerUpload {
