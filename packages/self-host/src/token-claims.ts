@@ -27,3 +27,14 @@ export function readTokenScopes(payload: Record<string, unknown>): string[] | un
 	if (typeof payload.scope !== "string") return [];
 	return payload.scope.split(" ").filter(Boolean);
 }
+
+/**
+ * Names that bound a token (storage prefix, path prefix, scopes) before the claims became `aud`, `res` and `scope`. The
+ * gate refuses a token that carries one, so no plugin may add them.
+ */
+export const RESERVED_CLAIM_NAMES: readonly string[] = ["pid", "ppx", "scopes"];
+
+/** The first reserved claim name among `claims`, or `undefined`. Pure. */
+export function reservedClaimName(claims: Record<string, unknown>): string | undefined {
+	return RESERVED_CLAIM_NAMES.find((name) => name in claims);
+}
