@@ -2,6 +2,7 @@ import { type SecurityPolicy, visibilityFromKey } from "@devultur/core";
 import type { Context } from "hono";
 import { isBearerAuthorized } from "./bearer";
 import { getRequestState } from "./request-state";
+import { reservedClaimName } from "./token-claims";
 import type { WorkerApp } from "./types";
 import { HashAlgorithm } from "./types";
 
@@ -130,17 +131,10 @@ export async function verifyViewerToken(
 
 	const now = Math.floor(Date.now() / 1000);
 	if (typeof payload.exp === "number" && payload.exp < now) return null;
-	if (hasUnreadBindingClaim(payload)) return null;
+	// A reserved claim is one the gate no longer reads, so it wouldn't limit the token: refuse it rather than serve it unbound.
+	if (reservedClaimName(payload)) return null;
 	return payload;
 }
-
-// Names that bound a token (storage prefix, path prefix, scopes) before the claims became `aud`, `res` and `scope`.
-// The gate no longer reads them, and a claim it doesn't read doesn't limit the token, so a token that still carries
-// one is refused rather than served unbound.
-const UNREAD_BINDING_CLAIMS = ["pid", "ppx", "scopes"];
-
-const hasUnreadBindingClaim = (payload: Record<string, unknown>) =>
-	UNREAD_BINDING_CLAIMS.some((name) => name in payload);
 
 import {
 	encodeEncryptionMeta,

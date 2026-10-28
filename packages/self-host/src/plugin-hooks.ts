@@ -5,6 +5,7 @@ import type { Context } from "hono";
 import type { LockAuditRecord } from "./object-lock/audit";
 import type { Json } from "./request-state";
 import type { DownloadLinkInfo } from "./route-result";
+import { reservedClaimName } from "./token-claims";
 
 /** What is being issued: a viewer token, an upload token, a download link or the transcode runner's token. */
 export type CredentialKind = "viewer" | "upload" | "download-link" | "service";
@@ -95,9 +96,19 @@ export function getPluginHooks(context: AnyContext): PluginHooks {
 const earliest = (current: number | undefined, next: number | undefined) =>
 	current === undefined ? next : next === undefined ? current : Math.min(current, next);
 
+// A token carrying a reserved claim is always refused at the gate: fail at issue time, naming the claim, instead.
+function assertNoReservedClaim(claims: Record<string, Json>): void {
+	const reserved = reservedClaimName(claims);
+	if (!reserved) return;
+	throw new Error(
+		`Devultur: an issueCredential hook added the claim \`${reserved}\`, which is reserved: a token carrying it is refused. Use another name.`,
+	);
+}
+
 /**
  * Runs every `issueCredential` hook in plugin order. The first refusal wins; otherwise the earliest `expiresAt` and the
- * claims of all of them (a later plugin's claim replaces an earlier one with the same name). No hook: allow.
+ * claims of all of them (a later plugin's claim replaces an earlier one with the same name). No hook: allow. Throws
+ * when a hook adds a reserved claim (`RESERVED_CLAIM_NAMES`).
  */
 export async function decideCredential(context: AnyContext, request: CredentialRequest): Promise<CredentialDecision> {
 	let expiresAt: number | undefined;
@@ -106,7 +117,9 @@ export async function decideCredential(context: AnyContext, request: CredentialR
 		const decision = await hook(context, request);
 		if (!decision.allow) return decision;
 		expiresAt = earliest(expiresAt, decision.expiresAt);
-		if (decision.claims) claims = { ...claims, ...decision.claims };
+		if (!decision.claims) continue;
+		assertNoReservedClaim(decision.claims);
+		claims = { ...claims, ...decision.claims };
 	}
 	return { allow: true, ...(expiresAt !== undefined ? { expiresAt } : {}), ...(claims ? { claims } : {}) };
 }
