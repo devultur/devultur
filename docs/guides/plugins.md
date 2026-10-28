@@ -99,6 +99,8 @@ service token. It gets the `kind`, the `scopes`, the `path` it is bound to and t
 Return `{ allow: false, response }` to refuse, or `{ allow: true, expiresAt?, claims? }` to issue it: `expiresAt`
 caps the expiry, and `claims` are added to a token. The hooks of every plugin run in order: the first refusal wins,
 the earliest `expiresAt` applies, and the claims of all of them are added.
+`pid`, `ppx` and `scopes` are reserved claim names: a hook that adds one makes the request fail with an error
+that names the claim, since the delivery gate refuses any token that carries it.
 
 ```typescript
 const viewerTokensOnlyRead: WorkerPlugin = {
@@ -116,6 +118,7 @@ The Worker sets the claims that bound a token itself, and a plugin can't overrid
 prefix it was issued under (without its trailing slash) and `scope` its space-separated scopes. The delivery gate
 also enforces `res`, a path prefix its keys must fall under, when a plugin adds it. A token outside what its claims
 allow gets `403 { "code": "token_rejected" }`; which claim failed is only logged.
+A token signed with the names these claims had before 1.0 (`pid`, `ppx`, `scopes`) is refused as invalid.
 
 **`beforeLinkRedeem`** runs before `GET /v1/download/<id>` spends a use of a link. Return a `Response` to refuse it
 (the use isn't spent), or `null` to let it go on. It gets the link's `storagePrefix`, `key` and plugin `context`.

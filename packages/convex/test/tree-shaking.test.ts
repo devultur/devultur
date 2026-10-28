@@ -150,8 +150,44 @@ describe("tree-shaking @devultur/convex/react/hooks", () => {
 		expect(initialCode).not.toMatch(/function (useMediaUrl|useVideoProps|buildMediaUrl|mediaPath|mediaCaptionPath)\b/);
 		expect(initialModules.filter((id) => /packages\/core\//.test(id))).toEqual([]);
 		expect(entryDevulturModules).toEqual([]);
-		// Minified and gzipped: about 0.4 kB (the contexts and their hooks), against 3.2 kB when one chunk held every hook
-		// and core's URL helpers came along.
-		expect(devulturGzipBytes).toBeLessThan(500);
+		// Minified and gzipped: about 0.15 kB (the contexts and the hooks that only read them), against 0.42 kB in 1.5.2
+		// with the throwing hooks' messages and 3.2 kB when one chunk held every hook and core's URL helpers came along.
+		expect(devulturGzipBytes).toBeLessThan(200);
+	});
+
+	// What loaded first in 1.5.2, minified and gzipped, for either hook: the contexts' chunk also held the throwing
+	// hooks, their messages and `DevulturCapabilityError`.
+	const initialGzipBytesIn152 = 421;
+
+	it.each([
+		"useCanDeliver",
+		"useDevulturOptional",
+	])("keeps the throwing hooks' messages out of what loads first in a lazy-route app that uses %s", async (hook) => {
+		const { initialCode, devulturGzipBytes } = await bundleLazyRouteApp(
+			[
+				`import { ${hook} } from "@devultur/convex/react/hooks";`,
+				`console.log(${hook});`,
+				'export const loadMedia = () => import("@devultur/convex/react");',
+			].join("\n"),
+		);
+
+		expect(initialCode).toMatch(new RegExp(`function ${hook}\\b`));
+		expect(initialCode).not.toMatch(/DevulturCapabilityError|isn't available under/);
+		expect(initialCode).not.toMatch(/must be used within|requires progress API/);
+		expect(initialCode).not.toMatch(/function (useDevultur|useDevulturApi|useDevulturProgress)\b/);
+		expect(devulturGzipBytes).toBeLessThan(initialGzipBytesIn152);
+	});
+
+	it("keeps the URL hooks out of what loads first in a lazy-route app that uses useDevultur", async () => {
+		const { initialCode } = await bundleLazyRouteApp(
+			[
+				'import { useDevultur } from "@devultur/convex/react/hooks";',
+				"console.log(useDevultur);",
+				'export const loadMedia = () => import("@devultur/convex/react");',
+			].join("\n"),
+		);
+
+		expect(initialCode).toMatch(/function useDevultur\b/);
+		expect(initialCode).not.toMatch(/function (useMediaUrl|useVideoProps|buildMediaUrl)\b/);
 	});
 });

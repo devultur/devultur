@@ -10,8 +10,8 @@ import {
 	attachmentName,
 	mergeAttachmentLabels,
 } from "./attachment-labels";
-import { useDevultur } from "./devultur-context";
 import { DownloadLink } from "./download-link";
+import { useDevultur } from "./provider-hooks";
 
 export interface DocumentLinkProps
 	extends Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, "href" | "download" | "media"> {

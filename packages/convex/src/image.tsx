@@ -2,8 +2,8 @@
 
 import React from "react";
 import { type DevulturMedia, type MediaUrlOptions, mediaUrl } from "@devultur/core";
-import { useDevultur } from "./devultur-context";
 import { fetchMedia, MediaFetchError, tokenUnavailableError } from "./media-fetch";
+import { useDevultur } from "./provider-hooks";
 import { useRequestTokenWhen } from "./request-token";
 import { buildSrcSet, normalizeWidths, pickWidth, renderedWidthFromSizes, scaledHeight } from "./responsive-image";
 
