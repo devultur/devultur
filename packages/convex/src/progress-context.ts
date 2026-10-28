@@ -1,6 +1,7 @@
 "use client";
 
-// The watch-progress functions `<DevulturProvider>` fills when its `api` has them, and the hook that reads them.
+// The watch-progress functions `<DevulturProvider>` fills when its `api` has them. `useDevulturProgress` reads them
+// (`provider-hooks.ts`).
 import React from "react";
 
 export interface DevulturProgressContextValue {
@@ -11,9 +12,3 @@ export interface DevulturProgressContextValue {
 }
 
 export const DevulturProgressContext = /* @__PURE__ */ React.createContext<DevulturProgressContextValue | null>(null);
-
-export function useDevulturProgress(): DevulturProgressContextValue {
-	const context = React.use(DevulturProgressContext);
-	if (!context) throw new Error("useDevulturProgress requires progress API in DevulturProvider");
-	return context;
-}
