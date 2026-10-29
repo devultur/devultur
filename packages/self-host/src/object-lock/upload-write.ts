@@ -3,6 +3,8 @@
 import { decodeEncryptionMeta, type ResolvedLock, resolveLock } from "@devultur/core";
 import type { Context } from "hono";
 import { storageKey } from "../helpers";
+import { emitMediaChanged } from "../media-events/emit";
+import { isMediaOriginal, mediaOfKey } from "../media-events/media-key";
 import { getRequestState } from "../request-state";
 import { alreadyExists, discardStaleVariants } from "../routes/upload-integrity";
 import type { UploadPending, WorkerApp } from "../types";
@@ -90,7 +92,8 @@ export function uploadLockOf(
 
 /**
  * After the bytes landed (single PUT or multipart complete):
- * - an overwrite drops the stale image variants and the replaced object's encryption key (the new object has its own);
+ * - an overwrite drops the stale image variants and the replaced object's encryption key (the new object has its own),
+ *   and an overwritten original (not a transcode's output) is a `media.changed` with `replaced`;
  * - a file stored with a lock gets its first audit record (`set`, from nothing), so its protection is provable from its
  *   first write. The actor is the uploader: the POST's plugin context, since the PUT may carry no credential.
  * The replaced object's lock record stays: it's bound to that object's version, so it never applies to the new one,
@@ -101,12 +104,13 @@ export async function afterUploadWrite(
 	key: string,
 	pending: UploadPending | null,
 	write: Pick<AllowedWrite, "exists" | "replacedEnc">,
-	writtenEnc: string | undefined,
+	written: { enc: string | undefined; etag: string },
 ): Promise<void> {
 	const fullKey = pending?.storageKey ?? storageKey(context, key);
 	const root = fullKey.endsWith(key) ? fullKey.slice(0, -key.length) : getRequestState(context).storagePrefix;
 	if (pending) await discardStaleVariants(context.env.MEDIA_BUCKET, pending);
-	if (write.exists) await deleteReplacedKey(context, fullKey, write.replacedEnc, writtenEnc);
+	if (write.exists) await deleteReplacedKey(context, fullKey, write.replacedEnc, written.enc);
+	if (write.exists) await emitReplaced(context, key, pending, written.etag);
 	const lock = uploadLockOf(context, key, pending);
 	if (!lock) return;
 	await recordLockAudit(context, {
@@ -118,4 +122,16 @@ export async function afterUploadWrite(
 		actor: pending ? (pending.context ?? null) : (getRequestState(context).context ?? null),
 		root,
 	});
+}
+
+async function emitReplaced(
+	context: UploadContext,
+	key: string,
+	pending: UploadPending | null,
+	etag: string,
+): Promise<void> {
+	if (pending?.isDerived || !isMediaOriginal(key)) return;
+	const media = mediaOfKey(key);
+	if (!media) return;
+	await emitMediaChanged(context, { key, mediaId: media.mediaId, changes: ["replaced"], etag });
 }

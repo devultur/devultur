@@ -4,6 +4,7 @@
 // and the hooks run after the response (`waitUntil`); a failure there is logged, never surfaced to the caller.
 import type { ObjectLock } from "@devultur/core";
 import type { Context } from "hono";
+import { inBackground } from "../background";
 import { getPluginHooks } from "../plugin-hooks";
 import { getRequestState, type PluginContext } from "../request-state";
 import type { WorkerApp } from "../types";
@@ -64,16 +65,6 @@ async function deliver(context: AuditContext, root: string, record: LockAuditRec
 	for (const result of results) {
 		if (result.status === "rejected") console.error("lock audit delivery failed:", result.reason);
 	}
-}
-
-/** Runs `task` after the response when the runtime allows it; otherwise (no execution context) waits for it. */
-async function inBackground(context: AuditContext, task: Promise<void>): Promise<void> {
-	let executionCtx: { waitUntil: (task: Promise<unknown>) => void } | undefined;
-	try {
-		executionCtx = context.executionCtx;
-	} catch {}
-	if (!executionCtx) return task;
-	executionCtx.waitUntil(task);
 }
 
 export async function recordLockAudit(context: AuditContext, input: LockAuditInput): Promise<void> {

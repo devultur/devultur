@@ -18,7 +18,7 @@ function bytes(length: number, signedAs: string | null = "image/jpeg"): Uint8Arr
 // Sets up the upload worker with mocked buckets/KV. `security` = the scope's default (context);
 // `pending` = the upload-pending record in KV (carries the security from the POST).
 function uploadSetup(options?: { security?: SecurityPolicy; pending?: Record<string, unknown> }) {
-	const mediaPut = vi.fn(async (_key: string, _body: unknown, _opts: unknown) => {});
+	const mediaPut = vi.fn(async (_key: string, _body: unknown, _opts: unknown) => ({ etag: "stored-etag" }));
 	const keysStore = new Map<string, ArrayBuffer>();
 	const keysPut = vi.fn(async (path: string, body: ArrayBuffer) => {
 		keysStore.set(path, body);

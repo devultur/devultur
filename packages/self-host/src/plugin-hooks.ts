@@ -1,6 +1,6 @@
 // Plugin hooks: decisions plugins take at fixed points of a route, with the request's context. `createWorker()` runs
 // the hooks of every plugin in order and hands the composed result to the routes through a context variable.
-import type { ObjectLock } from "@devultur/core";
+import type { ObjectLock, WebhookEvent } from "@devultur/core";
 import type { Context } from "hono";
 import type { DownloadGrantInfo } from "./download-grants";
 import type { LockAuditRecord } from "./object-lock/audit";
@@ -101,6 +101,12 @@ export type AuthorizeLockChangeHook = (
 /** After a lock event (change, rejected delete or overwrite, retained original), to store the record elsewhere. */
 export type OnLockAuditHook = (context: AnyContext, record: LockAuditRecord) => void | Promise<void>;
 
+/**
+ * After a media lifecycle event (and, when `config.webhooks.events` opts in, a transcode or captions one), to deliver
+ * it your own way. Runs after the response. While any plugin has one, the Worker's own webhook delivery is skipped.
+ */
+export type OnMediaEventHook = (context: AnyContext, event: WebhookEvent) => void | Promise<void>;
+
 /** The hooks of every plugin, in plugin order. */
 export interface PluginHooks {
 	issueCredential: IssueCredentialHook[];
@@ -108,6 +114,7 @@ export interface PluginHooks {
 	authorizeGrant: AuthorizeGrantHook[];
 	authorizeLockChange: AuthorizeLockChangeHook[];
 	onLockAudit: OnLockAuditHook[];
+	onMediaEvent: OnMediaEventHook[];
 }
 
 /** Context variable that carries the hooks to the routes. Internal. */
@@ -119,6 +126,7 @@ const NO_HOOKS: PluginHooks = {
 	authorizeGrant: [],
 	authorizeLockChange: [],
 	onLockAudit: [],
+	onMediaEvent: [],
 };
 
 export function getPluginHooks(context: AnyContext): PluginHooks {

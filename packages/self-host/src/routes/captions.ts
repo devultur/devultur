@@ -18,6 +18,7 @@ import {
 	storageKey,
 } from "../helpers";
 import { isKeysBucketMissing, keysBucketMissing } from "../keys-bucket";
+import { emitProcessingEvent } from "../media-events/emit";
 import { captionConflictResponse, prepareCaptionWrites } from "../object-lock/caption-writes";
 import { getRequestState } from "../request-state";
 import type {
@@ -327,7 +328,9 @@ captions.post("/", async (context) => {
 			expirationTtl: KV_JOB_TTL_SECONDS,
 		});
 
-		await forwardToClientWebhook({ event: "captions.complete", videoId, locales: completedLocales }, webhookData);
+		const completed: MediaEvent = { event: "captions.complete", videoId, locales: completedLocales };
+		await forwardToClientWebhook(completed, webhookData);
+		await emitProcessingEvent(context, completed);
 
 		return context.json({
 			transcriptId: jobId,
@@ -347,16 +350,15 @@ captions.post("/", async (context) => {
 		// log: the response (with `code`) and the webhook (with `reason`/`retriable`) carry a generic message.
 		logCaptionsError(`job failed for ${videoId}`, err);
 		const failure = toCaptionsFailure(err);
-		await forwardToClientWebhook(
-			{
-				event: "captions.failed",
-				videoId,
-				error: failure.error,
-				reason: failure.reason,
-				retriable: failure.retriable,
-			} satisfies MediaEvent,
-			webhookData,
-		);
+		const failed: MediaEvent = {
+			event: "captions.failed",
+			videoId,
+			error: failure.error,
+			reason: failure.reason,
+			retriable: failure.retriable,
+		};
+		await forwardToClientWebhook(failed, webhookData);
+		await emitProcessingEvent(context, failed);
 		const conflict = captionConflictResponse(context, err);
 		return conflict ?? context.json({ error: failure.error, code: failure.code }, failure.status);
 	}

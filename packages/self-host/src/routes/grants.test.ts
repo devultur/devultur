@@ -1,3 +1,4 @@
+import type { WebhookEvent } from "@devultur/core";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { exportsWorker } from "../exports-test-harness";
@@ -35,6 +36,7 @@ const noHooks: PluginHooks = {
 	authorizeGrant: [],
 	authorizeLockChange: [],
 	onLockAudit: [],
+	onMediaEvent: [],
 };
 
 async function uploadAsset(worker: Worker, body: Record<string, unknown>): Promise<string> {
@@ -274,6 +276,34 @@ describe("the grant's bearer", () => {
 			revokedGrant: { publicId: deleter.id, by: "bearer" },
 		});
 		expect((await headFile(worker, readOnly.grant)).status).toBe(410);
+	});
+
+	it("emits media.deleted for the file it deleted, like any other delete; a refused delete emits nothing", async () => {
+		const events: WebhookEvent[] = [];
+		const pluginHooks: PluginHooks = { ...noHooks, onMediaEvent: [(_context, event) => void events.push(event)] };
+		const worker = exportsWorker({ pluginHooks });
+		const key = await uploadAsset(worker, { path: "exports/emitted.zip" });
+		const held = await uploadAsset(worker, { path: "exports/emitted-held.zip", hold: true });
+		const readOnly = (await issueGrant(worker, { key })).issued;
+		const deleter = (await issueGrant(worker, { key, canDelete: true })).issued;
+		const heldDeleter = (await issueGrant(worker, { key: held, canDelete: true })).issued;
+		await worker.settle();
+		events.length = 0;
+
+		await worker.send("/v1/grant/file", { method: "DELETE", headers: bearer(readOnly.grant) });
+		await worker.send("/v1/grant/file", { method: "DELETE", headers: bearer(heldDeleter.grant) });
+		await worker.settle();
+		expect(events).toEqual([]);
+
+		const removed = await worker.send("/v1/grant/file", { method: "DELETE", headers: bearer(deleter.grant) });
+		await worker.settle();
+		expect(removed.status).toBe(204);
+		expect(events.map(({ type, data }) => ({ type, data }))).toEqual([
+			{
+				type: "media.deleted",
+				data: { key, mediaId: key, kind: "asset", visibility: "private", reason: "api" },
+			},
+		]);
 	});
 
 	it("can't delete a held file", async () => {
