@@ -4,6 +4,7 @@
 import type { CacheRule, ObjectLock, SecurityPolicy, TranscodeSettings, WebhookEventType } from "@devultur/core";
 import type { Context } from "hono";
 import type { UploadGrant } from "./export-types";
+import { assertWebhookScope } from "./media-events/target";
 import type { MaxResolution, RawStorageClass, UploadRules } from "./types";
 
 /** Any JSON value. */
@@ -44,8 +45,10 @@ export interface TranscodeConfig {
 export interface WebhookConfig {
 	/**
 	 * Names this webhook in queued events and transcode jobs, which keep only the scope: its URL and secrets are
-	 * resolved again at delivery (`resolveWebhookTarget` of a plugin; `staticConfig` resolves its own). Default
-	 * `config`. `env` is the `MEDIA_WEBHOOK_*` vars.
+	 * resolved again at delivery (`resolveWebhookTarget` of a plugin; `staticConfig` resolves its own). Required, and
+	 * unique to this webhook, when a plugin sets it per request: `updateRequestState` throws without one. Only
+	 * `defaultPlugins(config)` / `staticConfig(config)` may omit it (they use `config`). `env` is the `MEDIA_WEBHOOK_*`
+	 * vars.
 	 */
 	scope?: string;
 	/** An `https` URL on a public host. */
@@ -184,6 +187,8 @@ function mergeRecord<T extends object>(current: T | undefined, patch: T | undefi
  * `context` merge field by field.
  */
 export function updateRequestState(context: AnyContext, patch: RequestStatePatch): RequestState {
+	// A webhook without its scope would be resolved, when queued, to whatever answers for the default one.
+	assertWebhookScope(patch.config?.webhooks);
 	const current = getRequestState(context);
 	const config = mergeConfig(current.config, patch.config);
 	const access = mergeRecord(current.access, patch.access);

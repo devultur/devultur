@@ -11,7 +11,7 @@ import {
 } from "./delivery";
 import { MAX_DIRECT_DELIVERIES, sendMediaEvents } from "./emit";
 import { rememberJobTarget } from "./job-target";
-import { toWebhookTarget, unsafeUrlReason, webhookTargetOf } from "./target";
+import { toWebhookTarget, unsafeUrlReason, WebhookScopeMissingError, webhookTargetOf } from "./target";
 
 const URL = "https://hooks.example.com/media";
 const SECRET = "delivery-test-secret";
@@ -272,6 +272,12 @@ describe("sendMediaEvents", () => {
 
 		expect(fetch).toHaveBeenCalledTimes(MAX_DIRECT_DELIVERIES);
 		expect(console.error).toHaveBeenCalledWith(expect.stringContaining("5 events"));
+		const records = await Promise.all(events.map((each) => readDeliveryRecord(env.MEDIA_KV, each.id)));
+		expect(records.map((record) => record?.status)).toEqual([
+			...Array(MAX_DIRECT_DELIVERIES).fill("delivered"),
+			...Array(5).fill("dropped"),
+		]);
+		expect(records.at(-1)).toMatchObject({ attempts: 0, scope: "env", url: URL });
 	});
 
 	it("never sends to an unsafe URL", async () => {
@@ -312,10 +318,13 @@ describe("webhookTargetOf", () => {
 	});
 
 	it("lets the scope's config override the vars", () => {
-		const target = webhookTargetOf({ webhooks: { url: "https://scope.example.com/h", secret: "s" } }, env);
+		const target = webhookTargetOf(
+			{ webhooks: { scope: "app:1", url: "https://scope.example.com/h", secret: "s" } },
+			env,
+		);
 
 		expect(target).toEqual({
-			scope: "config",
+			scope: "app:1",
 			url: "https://scope.example.com/h",
 			secrets: ["s"],
 			events: ["media.deleted", "media.changed"],
@@ -324,7 +333,7 @@ describe("webhookTargetOf", () => {
 	});
 
 	it("is none without a secret", () => {
-		expect(toWebhookTarget({ url: URL, secret: [] })).toBeNull();
+		expect(toWebhookTarget({ scope: "app:1", url: URL, secret: [] })).toBeNull();
 		expect(webhookTargetOf(undefined, { MEDIA_WEBHOOK_URL: URL })).toBeNull();
 	});
 });
@@ -385,5 +394,35 @@ describe("unsafeUrlReason (SSRF guard)", () => {
 	it("allows http and private hosts only with the opt-out", () => {
 		expect(unsafeUrlReason("http://127.0.0.1:8787/hooks", true)).toBeNull();
 		expect(unsafeUrlReason("file:///etc/passwd", true)).toBe("not http(s)");
+	});
+});
+
+describe("a per-request webhook", () => {
+	const STATIC_URL = "https://static.example.com/h";
+	const APP_URL = "https://app-one.example.com/h";
+	const staticPlugin = staticConfig({ webhooks: { url: STATIC_URL, secret: SECRET } });
+
+	it("is refused without a scope, before any event can be misrouted", () => {
+		expect(() => toWebhookTarget({ url: APP_URL, secret: NEW_SECRET })).toThrow(WebhookScopeMissingError);
+	});
+
+	it("never resolves to the static config's webhook when queued", async () => {
+		const queue = { sendBatch: vi.fn(async (_messages: { body: WebhookMessage }[]) => {}) };
+		const { env } = envWith({ WEBHOOK_QUEUE: queue as unknown as Queue<WebhookMessage> });
+		await sendMediaEvents(env, [event], { webhooks: { scope: "app:1", url: APP_URL, secret: NEW_SECRET } });
+		const [queued] = queue.sendBatch.mock.calls[0][0];
+
+		// A consumer that knows only the static config: the per-request scope isn't its to resolve.
+		await createWebhookConsumer({ plugins: [staticPlugin] })(batchOf(queueMessage(1, queued.body)), env);
+		expect(fetch).not.toHaveBeenCalled();
+
+		// With the plugin that set it: the same URL direct delivery uses.
+		const appPlugin = {
+			name: "apps",
+			resolveWebhookTarget: (_env: WorkerEnv, scope: string) =>
+				scope === "app:1" ? { url: APP_URL, secret: NEW_SECRET } : null,
+		};
+		await createWebhookConsumer({ plugins: [staticPlugin, appPlugin] })(batchOf(queueMessage(1, queued.body)), env);
+		expect(vi.mocked(fetch).mock.calls.map(([url]) => url)).toEqual([APP_URL]);
 	});
 });

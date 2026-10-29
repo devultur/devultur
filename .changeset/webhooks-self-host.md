@@ -16,7 +16,8 @@ Send signed media lifecycle webhooks.
   once, after the route. Each attempt is logged in `MEDIA_KV` at `webhook-delivery:{id}` for 7 days.
 - Queued events and transcode jobs store only the webhook's `scope`; each attempt resolves its URL and current secrets
   (from the variables, `staticConfig`, or a plugin's `resolveWebhookTarget`), so no secret is stored and a rotation
-  applies to queued events.
+  applies to queued events. A `config.webhooks` set per request needs its own `scope` (`updateRequestState` throws
+  without one); only `staticConfig` defaults it to `config`.
 - `onMediaEvent` plugin hook: when a plugin provides it, it gets the events and the built-in delivery is skipped.
 - `deletePrefixRespectingLocks` takes `onDeleted`; `mediaDeletedEvents` and `sendMediaEvents` turn its report into
   one `media.deleted` per media and send them.

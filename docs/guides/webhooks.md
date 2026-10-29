@@ -183,8 +183,9 @@ even though the runner's callbacks carry no scope.
 Queued events and transcode jobs keep only the target's `scope`. Each delivery attempt resolves the scope again, to
 its URL and the secrets in force then: a rotated or revoked secret takes effect for events already queued, and no
 secret is written to a queue, KV or a log. `env` resolves from the variables; `staticConfig` (from `defaultPlugins`)
-resolves its own `webhooks`; a plugin that sets `config.webhooks` per request gives each one a `scope` and resolves
-it with `resolveWebhookTarget`:
+resolves its own `webhooks`; a plugin that sets `config.webhooks` per request must give each one a `scope` of its own
+and resolve it with `resolveWebhookTarget`. Without a `scope`, `updateRequestState` (and `sendMediaEvents`) throws:
+a queued event would otherwise resolve to another webhook than the one direct delivery uses.
 
 ```typescript
 const appWebhooks: WorkerPlugin = {
@@ -243,7 +244,7 @@ retry still passes the receiver's timestamp check.
 ### Delivery log
 
 Each event's last attempt is recorded in `MEDIA_KV` at `webhook-delivery:{eventId}` for 7 days: `status`
-(`delivered`, `retrying`, `failed`, `dead-lettered` or `undeliverable`), its `scope` and `url`, `attempts`, the
+(`delivered`, `retrying`, `failed`, `dead-lettered`, `undeliverable`, or `dropped` past the direct-delivery cap), its `scope` and `url`, `attempts`, the
 last `responseStatus` and `error`.
 `readDeliveryRecord(env.MEDIA_KV, eventId)` reads it.
 

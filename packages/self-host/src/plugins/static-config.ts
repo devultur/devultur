@@ -10,12 +10,14 @@ import { updateRequestState, type WorkerConfig } from "../request-state";
  * `webhooks` by scope at delivery time (queued events, transcode jobs).
  */
 export function staticConfig(config: WorkerConfig): WorkerPlugin {
+	// Its webhook gets the `config` scope unless it names one: the only webhook that may omit it.
+	const webhooks = config.webhooks && { ...config.webhooks, scope: config.webhooks.scope ?? CONFIG_WEBHOOK_SCOPE };
+	const scopedConfig: WorkerConfig = webhooks ? { ...config, webhooks } : config;
 	const applyConfig: MiddlewareHandler = async (context, next) => {
-		updateRequestState(context, { config });
+		updateRequestState(context, { config: scopedConfig });
 		await next();
 	};
-	const { webhooks } = config;
-	const webhookScope = webhooks?.scope ?? CONFIG_WEBHOOK_SCOPE;
+	const webhookScope = webhooks?.scope;
 	return {
 		name: "static-config",
 		middleware: { beforeAuth: [applyConfig] },
