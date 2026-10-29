@@ -185,6 +185,40 @@ describe("media events of the routes", () => {
 		]);
 	});
 
+	it("a hold or lock change on a video's output is no event: only originals are media", async () => {
+		const fixture = fixtureWith();
+		const segment = "private/video/vid2/hls/playlist.m3u8";
+
+		const hold = await fixture.send("/v1/lock/hold", {
+			method: "POST",
+			body: JSON.stringify({ hold: true, keys: [segment, FREE_RAW_KEY] }),
+		});
+		const lock = await fixture.send(`/v1/lock/${segment}`, {
+			method: "PUT",
+			body: JSON.stringify({ mode: "governance", until: "2999-06-01T00:00:00Z" }),
+		});
+		await fixture.settle();
+
+		expect([hold.status, lock.status]).toEqual([200, 200]);
+		expect(eventsOf().map(({ data }) => (data as { key: string }).key)).toEqual([FREE_RAW_KEY]);
+	});
+
+	it("hands a request's events to the queue in one batch", async () => {
+		const fixture = fixtureWith();
+		const queue = { sendBatch: vi.fn(async (_messages: unknown[]) => {}) };
+		Object.assign(fixture.env, { WEBHOOK_QUEUE: queue });
+		const keys = ["public/image/q1/a.jpg", "public/image/q2/a.jpg", "public/image/q3/a.jpg"];
+		for (const key of keys) fixture.put(key);
+
+		await fixture.send("/v1/lock/hold", { method: "POST", body: JSON.stringify({ hold: true, keys }) });
+		await fixture.settle();
+
+		expect(queue.sendBatch).toHaveBeenCalledTimes(1);
+		expect(queue.sendBatch.mock.calls[0][0]).toHaveLength(3);
+		expect(JSON.stringify(queue.sendBatch.mock.calls)).not.toContain(SECRET);
+		expect(received).toEqual([]);
+	});
+
 	it("an overwrite is a media.changed with replaced and the new etag; a first write is none", async () => {
 		const fixture = fixtureWith();
 		const write = (key: string) =>
@@ -206,17 +240,20 @@ describe("media events of the routes", () => {
 	});
 
 	it("deleting the original after a transcode is original-deleted, sent to the webhook of the launching scope", async () => {
-		const fixture = fixtureWith();
-		const etag = (await fixture.mediaBucket.head(FREE_RAW_KEY))?.etag;
 		const launchUrl = "https://launcher.example.com/hooks";
+		// The launch stored only the scope: a plugin resolves it to its URL and current secret when the callback comes.
+		const resolver: WorkerPlugin = {
+			name: "launcher-scopes",
+			resolveWebhookTarget: (_env, scope) =>
+				scope === "launcher" ? { url: launchUrl, secret: SECRET, events: ["media.changed"] } : null,
+		};
+		const fixture = fixtureWith({ plugins: [resolver] });
+		const etag = (await fixture.mediaBucket.head(FREE_RAW_KEY))?.etag;
 		fixture.kv.set(
 			`${KvPrefix.TRANSCODE_RAW}:vid2`,
 			JSON.stringify({ storageKey: FREE_RAW_KEY, deleteOnComplete: true }),
 		);
-		fixture.kv.set(
-			"webhook-target:vid2",
-			JSON.stringify({ url: launchUrl, secrets: [SECRET], events: ["media.changed"], allowUnsafeUrl: false }),
-		);
+		fixture.kv.set("webhook-target:vid2", JSON.stringify({ scope: "launcher" }));
 		const urls: string[] = [];
 		const fetchMock = vi.fn(async (url: string) => {
 			urls.push(url);

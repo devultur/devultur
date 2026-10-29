@@ -10,9 +10,13 @@ Send signed media lifecycle webhooks.
 - Configured with `config.webhooks` (`url`, `secret`, `events`), per scope through the request state, or the
   `MEDIA_WEBHOOK_URL` / `MEDIA_WEBHOOK_SECRET` variables. Signed with Standard Webhooks headers; several secrets
   during a rotation. Only `https` URLs on public hosts, unless `allowUnsafeUrl` is set for local development.
-- With a `WEBHOOK_QUEUE` binding and the exported `deliverWebhooks` consumer, failures are retried after 30 s, 2 min,
-  10 min, 1 h and then 6 h, up to 8 attempts, then sent to the dead-letter queue. Without one, a single attempt after
-  the response. Each attempt is logged in `MEDIA_KV` at `webhook-delivery:{id}` for 7 days.
+- With a `WEBHOOK_QUEUE` binding and the `createWebhookConsumer({ plugins })` (or `deliverWebhooks`) consumer,
+  failures are retried after 30 s, 2 min, 10 min, 1 h and then 6 h, up to 8 attempts, then sent to the dead-letter
+  queue. Without one, a single attempt after the response, at most 10 per request. A request's events are handed off
+  once, after the route. Each attempt is logged in `MEDIA_KV` at `webhook-delivery:{id}` for 7 days.
+- Queued events and transcode jobs store only the webhook's `scope`; each attempt resolves its URL and current secrets
+  (from the variables, `staticConfig`, or a plugin's `resolveWebhookTarget`), so no secret is stored and a rotation
+  applies to queued events.
 - `onMediaEvent` plugin hook: when a plugin provides it, it gets the events and the built-in delivery is skipped.
 - `deletePrefixRespectingLocks` takes `onDeleted`; `mediaDeletedEvents` and `sendMediaEvents` turn its report into
   one `media.deleted` per media and send them.

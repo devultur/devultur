@@ -11,7 +11,7 @@ import type { Context } from "hono";
 import { storageKey } from "../helpers";
 import { isVariantKey } from "../image/transform-plan";
 import { emitMediaChanged } from "../media-events/emit";
-import { mediaOfKey } from "../media-events/media-key";
+import { isMediaOriginal, mediaOfKey } from "../media-events/media-key";
 import { decideLockChange } from "../plugin-hooks";
 import { getRequestState } from "../request-state";
 import type { WorkerApp } from "../types";
@@ -117,7 +117,8 @@ async function applyHold(context: HoldContext, key: string, hold: boolean, now: 
 		return { updated: false, reason: "lock_conflict" };
 	}
 	await recordLockAudit(context, { action, keys: [key], before, after, outcome: "applied" });
-	const media = mediaOfKey(key);
+	// Only an original is a media of its own: a video's outputs (HLS segments, captions) follow it.
+	const media = isMediaOriginal(key) ? mediaOfKey(key) : null;
 	if (media) {
 		await emitMediaChanged(context, { key, mediaId: media.mediaId, changes: ["hold"], lock: after, etag: object.etag });
 	}

@@ -2,6 +2,7 @@
 // the hooks of every plugin in order and hands the composed result to the routes through a context variable.
 import type { ObjectLock, WebhookEvent } from "@devultur/core";
 import type { Context } from "hono";
+import type { WebhookTargetResolver } from "./media-events/target";
 import type { LockAuditRecord } from "./object-lock/audit";
 import type { Json } from "./request-state";
 import type { DownloadLinkInfo } from "./route-result";
@@ -87,6 +88,7 @@ export interface PluginHooks {
 	authorizeLockChange: AuthorizeLockChangeHook[];
 	onLockAudit: OnLockAuditHook[];
 	onMediaEvent: OnMediaEventHook[];
+	resolveWebhookTarget: WebhookTargetResolver[];
 }
 
 /** Context variable that carries the hooks to the routes. Internal. */
@@ -98,6 +100,7 @@ const NO_HOOKS: PluginHooks = {
 	authorizeLockChange: [],
 	onLockAudit: [],
 	onMediaEvent: [],
+	resolveWebhookTarget: [],
 };
 
 export function getPluginHooks(context: AnyContext): PluginHooks {

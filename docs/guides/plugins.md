@@ -45,6 +45,7 @@ interface WorkerPlugin {
   authorizeLockChange?: (context: Context, request: LockChangeRequest) => LockChangeDecision | Promise<LockChangeDecision>;
   onLockAudit?: (context: Context, record: LockAuditRecord) => void | Promise<void>;
   onMediaEvent?: (context: Context, event: WebhookEvent) => void | Promise<void>;
+  resolveWebhookTarget?: (env: WorkerEnv, scope: string) => WebhookConfig | null | Promise<WebhookConfig | null>;
 }
 ```
 
@@ -174,6 +175,10 @@ const auditToD1: WorkerPlugin = {
 **`onMediaEvent`** gets every media event (`media.deleted`, `media.changed`) after the response. While any plugin has
 one, the Worker's own signed webhook isn't sent: deliver them your own way (a queue, a database, a webhook of
 your own). See [Media webhooks](webhooks.md#delivering-events-your-own-way).
+
+**`resolveWebhookTarget`** resolves a `config.webhooks.scope` your plugin sets to its URL and current secrets, when a
+queued event or a transcode's callback is delivered: only the scope is ever stored. See
+[Secrets are never stored](webhooks.md#secrets-are-never-stored).
 
 ## After the route
 

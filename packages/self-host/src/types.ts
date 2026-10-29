@@ -1,6 +1,7 @@
 import type { MediaType, ObjectLock, ResolvedLock, SecurityPolicy, TranscodeSpec, Visibility } from "@devultur/core";
 import type { UploadGrant } from "./export-types";
 import type { WebhookMessage } from "./media-events/delivery";
+import type { PendingMediaEvent } from "./media-events/emit";
 import type { PluginHooks } from "./plugin-hooks";
 import type { ContentSniffingMode, PluginContext, RequestState } from "./request-state";
 import type { RouteResult } from "./route-result";
@@ -131,6 +132,8 @@ export interface WorkerVariables {
 	pluginHooks?: PluginHooks;
 	/** What the route did (route-result.ts). */
 	routeResult?: RouteResult;
+	/** Media events of the request, handed off after the route (media-events/emit.ts). */
+	mediaEvents?: PendingMediaEvent[];
 }
 
 export type WorkerApp = {

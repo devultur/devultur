@@ -1,15 +1,20 @@
 // Delivering a media event: one signed POST per attempt, and a record of how it went in KV
 // (`webhook-delivery:{eventId}`, 7 days). With a `WEBHOOK_QUEUE` the attempts are retried with backoff by the
-// `deliverWebhooks` consumer; without one there's a single attempt after the response.
+// consumer (`deliverWebhooks`, or `createWebhookConsumer({ plugins })`); without one there's a single attempt after the
+// response.
 //
-// The message carries the target's secrets: a retry hours later is signed again (receivers refuse a stale timestamp),
-// and the scope that set the target isn't known to the consumer.
+// A message names its target by scope only. Each attempt resolves the scope again and signs with the secrets in force
+// then: a rotated or revoked secret takes effect for what's already queued, and no secret is ever written to a queue,
+// KV or a log.
 import { signWebhook, type WebhookEvent } from "@devultur/core";
+import type { WorkerPlugin } from "../plugin";
 import type { WorkerEnv } from "../types";
+import { unsafeUrlReason, type WebhookTarget, type WebhookTargetResolver, webhookTargetOfScope } from "./target";
 
 export interface WebhookMessage {
 	event: WebhookEvent;
-	target: { url: string; secrets: string[] };
+	/** The target's scope (`env`, `config`, or one a plugin resolves). */
+	scope: string;
 }
 
 export const WEBHOOK_DELIVERY_PREFIX = "webhook-delivery:";
@@ -20,13 +25,16 @@ export const WEBHOOK_RETRY_DELAYS_SECONDS = [30, 120, 600, 3600, 21600];
 /** Tries per event, the first one included. After the last, it goes to the dead-letter queue. */
 export const MAX_WEBHOOK_ATTEMPTS = 8;
 
-export type DeliveryStatus = "delivered" | "retrying" | "failed" | "dead-lettered";
+/** `undeliverable`: no webhook resolves for its scope any more (or its URL is unsafe), so it's dropped. */
+export type DeliveryStatus = "delivered" | "retrying" | "failed" | "dead-lettered" | "undeliverable";
 
 /** What the delivery log keeps of an event. */
 export interface DeliveryRecord {
 	eventId: string;
 	type: string;
-	url: string;
+	scope: string;
+	/** The URL of the last attempt (none when the scope didn't resolve). */
+	url?: string;
 	status: DeliveryStatus;
 	attempts: number;
 	/** HTTP status of the last attempt, when it got a response. */
@@ -39,11 +47,11 @@ type AttemptResult = { ok: true; responseStatus: number } | { ok: false; respons
 
 type DeliveryEnv = Pick<WorkerEnv, "MEDIA_KV" | "WEBHOOK_DLQ">;
 
-async function postSigned(message: WebhookMessage): Promise<AttemptResult> {
-	const body = JSON.stringify(message.event);
-	const signature = await signWebhook({ id: message.event.id, payload: body, secret: message.target.secrets });
+async function postSigned(event: WebhookEvent, target: WebhookTarget): Promise<AttemptResult> {
+	const body = JSON.stringify(event);
+	const signature = await signWebhook({ id: event.id, payload: body, secret: target.secrets });
 	try {
-		const response = await fetch(message.target.url, {
+		const response = await fetch(target.url, {
 			method: "POST",
 			headers: { "Content-Type": "application/json", ...signature },
 			body,
@@ -59,19 +67,22 @@ async function postSigned(message: WebhookMessage): Promise<AttemptResult> {
 	}
 }
 
-async function logDelivery(
-	env: DeliveryEnv,
-	message: WebhookMessage,
-	attempts: number,
-	status: DeliveryStatus,
-	result: AttemptResult,
-): Promise<void> {
+interface LogEntry {
+	attempts: number;
+	status: DeliveryStatus;
+	result: AttemptResult;
+	url?: string;
+}
+
+async function logDelivery(env: DeliveryEnv, message: WebhookMessage, entry: LogEntry): Promise<void> {
+	const { result } = entry;
 	const record: DeliveryRecord = {
 		eventId: message.event.id,
 		type: message.event.type,
-		url: message.target.url,
-		status,
-		attempts,
+		scope: message.scope,
+		...(entry.url ? { url: entry.url } : {}),
+		status: entry.status,
+		attempts: entry.attempts,
 		...(result.responseStatus !== undefined ? { responseStatus: result.responseStatus } : {}),
 		...(result.ok ? {} : { error: result.error }),
 		updatedAt: new Date().toISOString(),
@@ -90,11 +101,15 @@ export async function readDeliveryRecord(kv: KVNamespace, eventId: string): Prom
 	return kv.get<DeliveryRecord>(`${WEBHOOK_DELIVERY_PREFIX}${eventId}`, "json");
 }
 
-/** One attempt, without retries (no queue): logged as `delivered` or `failed`. */
-export async function deliverOnce(env: DeliveryEnv, message: WebhookMessage): Promise<boolean> {
-	const result = await postSigned(message);
-	if (!result.ok) console.error(`[media-webhook] ${message.event.id} to ${message.target.url} failed: ${result.error}`);
-	await logDelivery(env, message, 1, result.ok ? "delivered" : "failed", result);
+/** One attempt to an already resolved target, without retries (no queue): logged as `delivered` or `failed`. */
+export async function deliverOnce(env: DeliveryEnv, event: WebhookEvent, target: WebhookTarget): Promise<boolean> {
+	const result = await postSigned(event, target);
+	if (!result.ok) console.error(`[media-webhook] ${event.id} to ${target.url} failed: ${result.error}`);
+	await logDelivery(
+		env,
+		{ event, scope: target.scope },
+		{ attempts: 1, status: result.ok ? "delivered" : "failed", result, url: target.url },
+	);
 	return result.ok;
 }
 
@@ -104,21 +119,38 @@ export function retryDelaySeconds(attempt: number): number {
 	return WEBHOOK_RETRY_DELAYS_SECONDS[index];
 }
 
-async function handleMessage(env: DeliveryEnv, message: Message<WebhookMessage>): Promise<void> {
+type ScopeLookup = (scope: string) => Promise<WebhookTarget | null>;
+
+async function handleMessage(env: DeliveryEnv, message: Message<WebhookMessage>, lookup: ScopeLookup): Promise<void> {
 	const attempt = message.attempts;
-	const result = await postSigned(message.body);
+	const { event, scope } = message.body;
+	const target = await lookup(scope);
+	const unsafe = target ? unsafeUrlReason(target.url, target.allowUnsafeUrl) : "no webhook for its scope";
+	if (!target || unsafe) {
+		console.error(`[media-webhook] ${event.id} (scope ${scope}) dropped: ${unsafe}`);
+		await logDelivery(env, message.body, {
+			attempts: attempt,
+			status: "undeliverable",
+			result: { ok: false, error: unsafe ?? "" },
+		});
+		message.ack();
+		return;
+	}
+	const result = await postSigned(event, target);
+	const logged = (status: DeliveryStatus) =>
+		logDelivery(env, message.body, { attempts: attempt, status, result, url: target.url });
 	if (result.ok) {
-		await logDelivery(env, message.body, attempt, "delivered", result);
+		await logged("delivered");
 		message.ack();
 		return;
 	}
 	if (attempt < MAX_WEBHOOK_ATTEMPTS) {
-		await logDelivery(env, message.body, attempt, "retrying", result);
+		await logged("retrying");
 		message.retry({ delaySeconds: retryDelaySeconds(attempt) });
 		return;
 	}
-	console.error(`[media-webhook] ${message.body.event.id} gave up after ${attempt} attempts: ${result.error}`);
-	await logDelivery(env, message.body, attempt, "dead-lettered", result);
+	console.error(`[media-webhook] ${event.id} gave up after ${attempt} attempts: ${result.error}`);
+	await logged("dead-lettered");
 	if (!env.WEBHOOK_DLQ) {
 		// The queue's own `dead_letter_queue` takes it (with `max_retries = 7`, this retry is past the limit).
 		message.retry();
@@ -128,11 +160,32 @@ async function handleMessage(env: DeliveryEnv, message: Message<WebhookMessage>)
 	message.ack();
 }
 
-/**
- * Queue consumer of `WEBHOOK_QUEUE`: export it as the Worker's `queue` handler. Each message is one event; a failed
- * attempt is retried after 30 s, 2 min, 10 min, 1 h, then every 6 h, and after the 8th it goes to `WEBHOOK_DLQ` (or the
- * queue's own dead-letter queue).
- */
-export async function deliverWebhooks(batch: MessageBatch<WebhookMessage>, env: WorkerEnv): Promise<void> {
-	await Promise.all(batch.messages.map((message) => handleMessage(env, message)));
+export interface WebhookConsumerOptions {
+	/** The Worker's plugins: their `resolveWebhookTarget` (and `staticConfig`'s) resolve the scopes of the messages. */
+	plugins?: readonly WorkerPlugin[];
 }
+
+/**
+ * The queue consumer of `WEBHOOK_QUEUE`: export it as the Worker's `queue` handler, created with the same plugins as
+ * the Worker so it resolves the same scopes. Each message is one event; a failed attempt is retried after 30 s, 2 min,
+ * 10 min, 1 h, then every 6 h, and after the 8th it goes to `WEBHOOK_DLQ` (or the queue's own dead-letter queue). A
+ * message whose scope no longer resolves is dropped (`undeliverable` in the delivery log).
+ */
+export function createWebhookConsumer(options: WebhookConsumerOptions = {}) {
+	const resolvers: WebhookTargetResolver[] = (options.plugins ?? []).flatMap((plugin) =>
+		plugin.resolveWebhookTarget ? [plugin.resolveWebhookTarget] : [],
+	);
+	return async (batch: MessageBatch<WebhookMessage>, env: WorkerEnv): Promise<void> => {
+		// Resolved once per batch and scope: every message of the batch signs with the secrets in force now.
+		const targets = new Map<string, Promise<WebhookTarget | null>>();
+		const lookup: ScopeLookup = (scope) => {
+			const cached = targets.get(scope) ?? webhookTargetOfScope(env, scope, resolvers);
+			targets.set(scope, cached);
+			return cached;
+		};
+		await Promise.all(batch.messages.map((message) => handleMessage(env, message, lookup)));
+	};
+}
+
+/** The consumer for the `MEDIA_WEBHOOK_*` vars alone. With `config.webhooks`, use `createWebhookConsumer({ plugins })`. */
+export const deliverWebhooks = createWebhookConsumer();

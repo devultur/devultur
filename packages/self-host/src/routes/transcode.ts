@@ -25,7 +25,7 @@ import {
 } from "../helpers";
 import { isKeysBucketMissing, keysBucketMissing } from "../keys-bucket";
 import { rememberJobTarget } from "../media-events/job-target";
-import { resolveWebhookTarget } from "../media-events/target";
+import { webhookTargetOf } from "../media-events/target";
 import { assertRetranscodable } from "../object-lock/overwrite";
 import { cappedExpiry, decideCredential, withPluginClaims } from "../plugin-hooks";
 import { getRequestState } from "../request-state";
@@ -254,7 +254,7 @@ transcode.post("/", async (context) => {
 		writeQueuedStatus(context.env.MEDIA_KV, videoId, { jobRef: jobId, runner: runner.name }),
 		// Webhook URLs from `outputBaseUrl` (or the request's origin), fixed when the job is queued.
 		saveOutputBaseUrl(context.env.MEDIA_KV, videoId, transcodeConfig?.outputBaseUrl ?? workerBaseUrl),
-		rememberJobTarget(context.env.MEDIA_KV, videoId, resolveWebhookTarget(scope.config, context.env)),
+		rememberJobTarget(context.env.MEDIA_KV, videoId, webhookTargetOf(scope.config, context.env)),
 		rememberRawDisposal(context.env.MEDIA_KV, videoId, {
 			storageKey: fullKey,
 			deleteOnComplete: transcodeConfig?.deleteOriginalOnSuccess === true,

@@ -1,6 +1,7 @@
-// Emitting media events from a route: to the plugins' `onMediaEvent` hooks when there are any (they replace the
-// built-in delivery), else signed to the scope's webhook, through `WEBHOOK_QUEUE` when bound. Everything runs after the
-// response; a failure is logged, never surfaced to the caller.
+// Emitting media events from a route. A request's events are collected and handed off once, after the route (one
+// `waitUntil`, one `sendBatch` per 100): to the plugins' `onMediaEvent` hooks when there are any (they replace the
+// built-in delivery), else signed to their webhook, through `WEBHOOK_QUEUE` when bound. A failure is logged, never
+// surfaced to the caller.
 import {
 	createWebhookEvent,
 	type MediaChangedData,
@@ -8,75 +9,120 @@ import {
 	type MediaEvent,
 	type WebhookEvent,
 } from "@devultur/core";
-import type { Context } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import { inBackground } from "../background";
 import { getPluginHooks } from "../plugin-hooks";
 import { getRequestState, type WebhookConfig } from "../request-state";
 import type { WorkerApp, WorkerEnv } from "../types";
 import { deliverOnce, type WebhookMessage } from "./delivery";
-import { resolveWebhookTarget, toWebhookTarget, unsafeUrlReason, type WebhookTarget } from "./target";
+import { toWebhookTarget, unsafeUrlReason, type WebhookTarget, webhookTargetOf } from "./target";
 
 type EmitContext = Context<WorkerApp>;
+type DeliveryEnv = Pick<WorkerEnv, "MEDIA_KV" | "WEBHOOK_QUEUE" | "WEBHOOK_DLQ">;
 
 /** Messages per `sendBatch` (the Queues limit). */
 const QUEUE_BATCH_LIMIT = 100;
+/**
+ * Events delivered directly (no queue) per request or `sendMediaEvents` call: each costs a fetch and a KV write, and a
+ * Worker invocation has a subrequest limit. The rest are logged as dropped: bind `WEBHOOK_QUEUE` for bulk changes.
+ */
+export const MAX_DIRECT_DELIVERIES = 10;
+
+/** Context variable collecting the request's events until the route is done. Internal. */
+export const MEDIA_EVENTS_VARIABLE = "mediaEvents";
+
+export interface PendingMediaEvent {
+	event: WebhookEvent;
+	target: WebhookTarget | null;
+}
 
 const chunk = <T>(items: T[], size: number): T[][] =>
 	Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size));
 
 const isLifecycle = (event: WebhookEvent) => event.type === "media.deleted" || event.type === "media.changed";
 
-/** Hands `events` to `target`: queued when the Worker has `WEBHOOK_QUEUE`, otherwise one attempt each, now. */
+/** How many direct deliveries are left to spend. */
+interface DirectBudget {
+	remaining: number;
+}
+
+/** Hands `events` to `target`: queued (by scope) with `WEBHOOK_QUEUE`, otherwise one attempt each, within `budget`. */
 export async function sendToTarget(
-	env: Pick<WorkerEnv, "MEDIA_KV" | "WEBHOOK_QUEUE" | "WEBHOOK_DLQ">,
+	env: DeliveryEnv,
 	target: WebhookTarget,
 	events: WebhookEvent[],
+	budget: DirectBudget = { remaining: MAX_DIRECT_DELIVERIES },
 ): Promise<void> {
 	const unsafe = unsafeUrlReason(target.url, target.allowUnsafeUrl);
 	if (unsafe) {
 		console.error(`[media-webhook] not sent to ${target.url}: ${unsafe}`);
 		return;
 	}
-	const messages: WebhookMessage[] = events
-		.filter((event) => target.events.includes(event.type))
-		.map((event) => ({ event, target: { url: target.url, secrets: target.secrets } }));
-	if (messages.length === 0) return;
+	const wanted = events.filter((event) => target.events.includes(event.type));
+	if (wanted.length === 0) return;
 	const queue = env.WEBHOOK_QUEUE;
 	if (queue) {
-		const batches = chunk(messages, QUEUE_BATCH_LIMIT);
-		await Promise.all(batches.map((batch) => queue.sendBatch(batch.map((body) => ({ body })))));
+		const messages: WebhookMessage[] = wanted.map((event) => ({ event, scope: target.scope }));
+		for (const batch of chunk(messages, QUEUE_BATCH_LIMIT)) await queue.sendBatch(batch.map((body) => ({ body })));
 		return;
 	}
-	await Promise.all(messages.map((message) => deliverOnce(env, message)));
+	const now = wanted.slice(0, budget.remaining);
+	budget.remaining -= now.length;
+	const dropped = wanted.length - now.length;
+	if (dropped > 0) {
+		console.error(`[media-webhook] ${dropped} events to ${target.url} dropped: bind WEBHOOK_QUEUE for bulk changes`);
+	}
+	await Promise.all(now.map((event) => deliverOnce(env, event, target)));
 }
 
-async function runHooks(context: EmitContext, events: WebhookEvent[]): Promise<void> {
+async function runHooks(context: EmitContext, pending: PendingMediaEvent[]): Promise<void> {
 	const hooks = getPluginHooks(context).onMediaEvent;
-	const runs = events.flatMap((event) => hooks.map((hook) => Promise.resolve().then(() => hook(context, event))));
+	const wanted = pending.filter(({ event, target }) => isLifecycle(event) || target?.events.includes(event.type));
+	const runs = wanted.flatMap(({ event }) => hooks.map((hook) => Promise.resolve().then(() => hook(context, event))));
 	for (const result of await Promise.allSettled(runs)) {
 		if (result.status === "rejected") console.error("[media-webhook] onMediaEvent hook failed:", result.reason);
 	}
 }
 
-async function deliver(context: EmitContext, events: WebhookEvent[], target: WebhookTarget | null): Promise<void> {
+/** The events of each target, in order: one batch per scope. */
+function byTarget(pending: PendingMediaEvent[]): Array<{ target: WebhookTarget; events: WebhookEvent[] }> {
+	const groups = new Map<string, { target: WebhookTarget; events: WebhookEvent[] }>();
+	for (const { event, target } of pending) {
+		if (!target) continue;
+		const group = groups.get(target.scope) ?? { target, events: [] };
+		group.events.push(event);
+		groups.set(target.scope, group);
+	}
+	return [...groups.values()];
+}
+
+async function deliver(context: EmitContext, pending: PendingMediaEvent[]): Promise<void> {
 	try {
 		if (getPluginHooks(context).onMediaEvent.length > 0) {
-			const wanted = events.filter((event) => isLifecycle(event) || target?.events.includes(event.type));
-			await runHooks(context, wanted);
+			await runHooks(context, pending);
 			return;
 		}
-		if (target) await sendToTarget(context.env, target, events);
+		const budget = { remaining: MAX_DIRECT_DELIVERIES };
+		for (const { target, events } of byTarget(pending)) await sendToTarget(context.env, target, events, budget);
 	} catch (error) {
 		console.error("[media-webhook] delivery failed:", error);
 	}
 }
+
+/** Middleware of `createWorker()`: collects the request's events and hands them off once, after the route. */
+export const collectMediaEvents: MiddlewareHandler<WorkerApp> = async (context, next) => {
+	const pending: PendingMediaEvent[] = [];
+	context.set(MEDIA_EVENTS_VARIABLE, pending);
+	await next();
+	if (pending.length > 0) await inBackground(context, deliver(context, pending.splice(0)));
+};
 
 export interface EmitOptions {
 	/** Where to send them. Default: the request's scope (`config.webhooks`, else the `MEDIA_WEBHOOK_*` vars). */
 	target?: WebhookTarget | null;
 }
 
-/** Emits `events` after the response. */
+/** Emits `events`: collected until the route is done (outside `createWorker()`, handed off right away). */
 export async function emitMediaEvents(
 	context: EmitContext,
 	events: WebhookEvent[],
@@ -84,8 +130,14 @@ export async function emitMediaEvents(
 ): Promise<void> {
 	if (events.length === 0) return;
 	const target =
-		options.target !== undefined ? options.target : resolveWebhookTarget(getRequestState(context).config, context.env);
-	await inBackground(context, deliver(context, events, target));
+		options.target !== undefined ? options.target : webhookTargetOf(getRequestState(context).config, context.env);
+	const pending = events.map((event) => ({ event, target }));
+	const collected = context.get(MEDIA_EVENTS_VARIABLE) as PendingMediaEvent[] | undefined;
+	if (collected) {
+		collected.push(...pending);
+		return;
+	}
+	await inBackground(context, deliver(context, pending));
 }
 
 export function emitMediaDeleted(context: EmitContext, data: MediaDeletedData, options?: EmitOptions): Promise<void> {
@@ -103,15 +155,15 @@ export function emitProcessingEvent(context: EmitContext, event: MediaEvent, opt
 
 /**
  * Sends events from the Worker's own code, outside a request (the `onDeleted` of `deletePrefixRespectingLocks`, a
- * sweeper): to `webhooks`, else the `MEDIA_WEBHOOK_*` vars. Plugin hooks don't run here: call your own instead. Await
- * it, or hand it to `ctx.waitUntil`.
+ * sweeper): to `webhooks`, else the `MEDIA_WEBHOOK_*` vars. Plugin hooks don't run here: call your own instead. Without
+ * `WEBHOOK_QUEUE`, at most `MAX_DIRECT_DELIVERIES` per call are delivered. Await it, or hand it to `ctx.waitUntil`.
  */
 export async function sendMediaEvents(
 	env: WorkerEnv,
 	events: WebhookEvent[],
 	options: { webhooks?: WebhookConfig } = {},
 ): Promise<void> {
-	const target = options.webhooks ? toWebhookTarget(options.webhooks) : resolveWebhookTarget(undefined, env);
+	const target = options.webhooks ? toWebhookTarget(options.webhooks) : webhookTargetOf(undefined, env);
 	if (!target || events.length === 0) return;
 	await sendToTarget(env, target, events);
 }
