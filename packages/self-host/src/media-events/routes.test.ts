@@ -3,8 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { KvPrefix } from "../helpers";
 import { lockedFixture, RAW_KEY } from "../object-lock/worker-fixture";
 import type { WorkerPlugin } from "../plugin";
+import { defaultPlugins } from "../plugins";
 import type { WorkerConfig } from "../request-state";
+import { updateRequestState } from "../request-state";
 import { sniffableBytes } from "../test-fixtures";
+import { createWebhookConsumer, type WebhookMessage } from "./delivery";
+
+const queueMessage = (body: WebhookMessage) => ({ body, attempts: 1, ack: vi.fn(), retry: vi.fn() });
 
 // Every route that deletes or changes stored media emits its event once, signed to the configured webhook.
 const WEBHOOK_URL = "https://hooks.example.com/media";
@@ -296,6 +301,58 @@ describe("media events of the routes", () => {
 		await fixture.settle();
 
 		expect(received).toEqual([]);
+	});
+});
+
+describe("a per-request webhook in the routes", () => {
+	const APP_URL = "https://app-one.example.com/hooks";
+	const perRequest = (webhooks: WorkerConfig["webhooks"]): WorkerPlugin => ({
+		name: "per-request-webhook",
+		middleware: {
+			afterAuth: [
+				async (context, next) => {
+					updateRequestState(context, { config: { webhooks } });
+					await next();
+				},
+			],
+		},
+		resolveWebhookTarget: (_env, scope) => (scope === webhooks?.scope ? (webhooks ?? null) : null),
+	});
+
+	it("without a scope fails the request instead of falling back to the static config's", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		const fixture = fixtureWith({ plugins: [perRequest({ url: APP_URL, secret: SECRET })] });
+
+		const response = await fixture.send(`/v1/media/${IMAGE_KEY}`, { method: "DELETE" });
+		await fixture.settle();
+
+		expect(response.status).toBe(500);
+		expect(received).toEqual([]);
+	});
+
+	it("goes to the same URL queued as direct, never the static config's", async () => {
+		const plugin = perRequest({ scope: "app:1", url: APP_URL, secret: SECRET });
+		const urls: string[] = [];
+		vi.stubGlobal("fetch", async (url: string) => {
+			urls.push(url);
+			return new Response(null, { status: 204 });
+		});
+
+		const direct = fixtureWith({ plugins: [plugin] });
+		await direct.send(`/v1/media/${IMAGE_KEY}`, { method: "DELETE" });
+		await direct.settle();
+
+		const queued = fixtureWith({ plugins: [plugin] });
+		const queue = { sendBatch: vi.fn(async (_messages: { body: WebhookMessage }[]) => {}) };
+		Object.assign(queued.env, { WEBHOOK_QUEUE: queue });
+		await queued.send(`/v1/media/${IMAGE_KEY}`, { method: "DELETE" });
+		await queued.settle();
+		const messages = queue.sendBatch.mock.calls[0][0].map(({ body }) => queueMessage(body));
+		const consumer = createWebhookConsumer({ plugins: [...defaultPlugins(config), plugin] });
+		await consumer({ queue: "q", messages } as unknown as MessageBatch<WebhookMessage>, queued.env as never);
+
+		expect(urls).toEqual([APP_URL, APP_URL]);
+		expect(urls).not.toContain(WEBHOOK_URL);
 	});
 });
 

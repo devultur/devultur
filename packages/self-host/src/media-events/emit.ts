@@ -14,7 +14,7 @@ import { inBackground } from "../background";
 import { getPluginHooks } from "../plugin-hooks";
 import { getRequestState, type WebhookConfig } from "../request-state";
 import type { WorkerApp, WorkerEnv } from "../types";
-import { deliverOnce, type WebhookMessage } from "./delivery";
+import { deliverOnce, logDropped, type WebhookMessage } from "./delivery";
 import { toWebhookTarget, unsafeUrlReason, type WebhookTarget, webhookTargetOf } from "./target";
 
 type EmitContext = Context<WorkerApp>;
@@ -68,11 +68,16 @@ export async function sendToTarget(
 	}
 	const now = wanted.slice(0, budget.remaining);
 	budget.remaining -= now.length;
-	const dropped = wanted.length - now.length;
-	if (dropped > 0) {
-		console.error(`[media-webhook] ${dropped} events to ${target.url} dropped: bind WEBHOOK_QUEUE for bulk changes`);
+	const dropped = wanted.slice(now.length);
+	if (dropped.length > 0) {
+		console.error(
+			`[media-webhook] ${dropped.length} events to ${target.url} dropped: bind WEBHOOK_QUEUE for bulk changes`,
+		);
 	}
-	await Promise.all(now.map((event) => deliverOnce(env, event, target)));
+	await Promise.all([
+		...now.map((event) => deliverOnce(env, event, target)),
+		...dropped.map((event) => logDropped(env, event, target)),
+	]);
 }
 
 async function runHooks(context: EmitContext, pending: PendingMediaEvent[]): Promise<void> {
@@ -155,7 +160,7 @@ export function emitProcessingEvent(context: EmitContext, event: MediaEvent, opt
 
 /**
  * Sends events from the Worker's own code, outside a request (the `onDeleted` of `deletePrefixRespectingLocks`, a
- * sweeper): to `webhooks`, else the `MEDIA_WEBHOOK_*` vars. Plugin hooks don't run here: call your own instead. Without
+ * sweeper): to `webhooks` (with its `scope`: it throws without one), else the `MEDIA_WEBHOOK_*` vars. Plugin hooks don't run here: call your own instead. Without
  * `WEBHOOK_QUEUE`, at most `MAX_DIRECT_DELIVERIES` per call are delivered. Await it, or hand it to `ctx.waitUntil`.
  */
 export async function sendMediaEvents(

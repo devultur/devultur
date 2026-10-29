@@ -25,8 +25,11 @@ export const WEBHOOK_RETRY_DELAYS_SECONDS = [30, 120, 600, 3600, 21600];
 /** Tries per event, the first one included. After the last, it goes to the dead-letter queue. */
 export const MAX_WEBHOOK_ATTEMPTS = 8;
 
-/** `undeliverable`: no webhook resolves for its scope any more (or its URL is unsafe), so it's dropped. */
-export type DeliveryStatus = "delivered" | "retrying" | "failed" | "dead-lettered" | "undeliverable";
+/**
+ * `undeliverable`: no webhook resolves for its scope any more (or its URL is unsafe), so it's dropped. `dropped`: past
+ * the direct-delivery cap of a request without a queue, never attempted.
+ */
+export type DeliveryStatus = "delivered" | "retrying" | "failed" | "dead-lettered" | "undeliverable" | "dropped";
 
 /** What the delivery log keeps of an event. */
 export interface DeliveryRecord {
@@ -111,6 +114,12 @@ export async function deliverOnce(env: DeliveryEnv, event: WebhookEvent, target:
 		{ attempts: 1, status: result.ok ? "delivered" : "failed", result, url: target.url },
 	);
 	return result.ok;
+}
+
+/** An event past the direct-delivery cap: never attempted, recorded as `dropped`. */
+export async function logDropped(env: DeliveryEnv, event: WebhookEvent, target: WebhookTarget): Promise<void> {
+	const result: AttemptResult = { ok: false, error: "over the direct-delivery cap: bind WEBHOOK_QUEUE" };
+	await logDelivery(env, { event, scope: target.scope }, { attempts: 0, status: "dropped", result, url: target.url });
 }
 
 /** Seconds before the retry that follows attempt number `attempt` (1-based). */

@@ -56,13 +56,32 @@ function fromEnv(env: WebhookEnv): WebhookConfig | null {
 	};
 }
 
-/** The target of a webhook config, or null when it has no URL or secret. */
+/**
+ * Thrown for a `webhooks` config without a `scope`: queued and transcode events would name no target, or another one.
+ * Only `staticConfig` fills one in (`config`); anything else that sets `webhooks` names its own.
+ */
+export class WebhookScopeMissingError extends Error {
+	constructor() {
+		super(
+			"config.webhooks needs a `scope` (unique to this webhook, resolved by your plugin's resolveWebhookTarget): only defaultPlugins()/staticConfig() fill one in",
+		);
+		this.name = "WebhookScopeMissingError";
+	}
+}
+
+/** Throws a `WebhookScopeMissingError` for a `webhooks` config without its `scope`. */
+export function assertWebhookScope(config: WebhookConfig | null | undefined): void {
+	if (config && !config.scope) throw new WebhookScopeMissingError();
+}
+
+/** The target of a webhook config, or null when it has no URL or secret. Its `scope` is required. */
 export function toWebhookTarget(config: WebhookConfig | null | undefined): WebhookTarget | null {
-	if (!config?.url) return null;
+	assertWebhookScope(config);
+	if (!config?.url || !config.scope) return null;
 	const secrets = (typeof config.secret === "string" ? [config.secret] : (config.secret ?? [])).filter(Boolean);
 	if (secrets.length === 0) return null;
 	return {
-		scope: config.scope ?? CONFIG_WEBHOOK_SCOPE,
+		scope: config.scope,
 		url: config.url,
 		secrets,
 		events: config.events ?? DEFAULT_WEBHOOK_EVENTS,
