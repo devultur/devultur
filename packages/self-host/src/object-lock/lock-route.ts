@@ -4,6 +4,8 @@
 import { canChange, effectiveUntil, type ObjectLock } from "@devultur/core";
 import { type Context, Hono } from "hono";
 import { storageKey } from "../helpers";
+import { emitMediaChanged } from "../media-events/emit";
+import { isMediaOriginal, mediaOfKey } from "../media-events/media-key";
 import { decideLockChange } from "../plugin-hooks";
 import { getRequestState, isAuthenticated } from "../request-state";
 import type { WorkerApp } from "../types";
@@ -101,6 +103,17 @@ lockRoute.put("/:key{.+}", async (context) => {
 		return context.json({ error: `The lock of ${key} changed meanwhile; retry`, code: "lock_conflict", key }, 409);
 	}
 	await recordLockAudit(context, { ...audit, outcome: "applied", ...(change.bypass ? { bypass: true } : {}) });
+	// Only an original is a media of its own: a video's outputs (HLS segments, captions) follow it.
+	const media = isMediaOriginal(key) ? mediaOfKey(key) : null;
+	if (media) {
+		await emitMediaChanged(context, {
+			key,
+			mediaId: media.mediaId,
+			changes: ["lock"],
+			lock: next.lock,
+			etag: object.etag,
+		});
+	}
 	const state: LockState = { ...(effective.state ?? {}), lock: next.lock };
 	return context.json(lockView(key, { state, source: "sidecar", stored: { sidecar, etag: "" } }));
 });

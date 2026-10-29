@@ -14,6 +14,7 @@ package's source.
 - [Video player](guides/video-player.md)
 - [Progress tracking](guides/progress-tracking.md)
 - [Security](guides/security.md)
+- [Media webhooks](guides/webhooks.md): signed events when media is deleted, replaced or its lock changes
 - [Retention and holds](guides/object-lock.md): compliance and governance retention, holds, audit, and the
   caveats
 - [Framework examples](guides/framework-examples.md)

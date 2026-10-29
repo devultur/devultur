@@ -8,6 +8,7 @@ import {
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+import { collectMediaEvents } from "./media-events/emit";
 import { rejectReservedLockPaths } from "./object-lock/guard";
 import { lockRoute } from "./object-lock/lock-route";
 import { composePlugins, type WorkerPlugin } from "./plugin";
@@ -28,12 +29,34 @@ export { imageOriginAuthorization, isImageOriginRequest, readImageOriginScope } 
 export { type ImageTransformParams, parseTransformParams } from "./image/params";
 export { isVariantKey, variantPrefix } from "./image/transform-plan";
 export { ENCRYPTION_KEY_MISSING_CODE, KEYS_BUCKET_MISSING_CODE } from "./keys-bucket";
+export { type MediaDeletedEventsOptions, mediaDeletedEvents } from "./media-events/deleted-events";
+export {
+	createWebhookConsumer,
+	type DeliveryRecord,
+	type DeliveryStatus,
+	deliverWebhooks,
+	MAX_WEBHOOK_ATTEMPTS,
+	readDeliveryRecord,
+	WEBHOOK_DELIVERY_PREFIX,
+	WEBHOOK_RETRY_DELAYS_SECONDS,
+	type WebhookConsumerOptions,
+	type WebhookMessage,
+} from "./media-events/delivery";
+export { MAX_DIRECT_DELIVERIES, sendMediaEvents } from "./media-events/emit";
+export {
+	CONFIG_WEBHOOK_SCOPE,
+	DEFAULT_WEBHOOK_EVENTS,
+	ENV_WEBHOOK_SCOPE,
+	unsafeUrlReason,
+	type WebhookTargetResolver,
+} from "./media-events/target";
 export { LOCK_AUDIT_PREFIX, type LockAuditAction, type LockAuditRecord } from "./object-lock/audit";
 export { LOCK_HOLD_HEADER, LOCK_UNTIL_HEADER } from "./object-lock/delivery";
 export { RESERVED_LOCK_PREFIXES } from "./object-lock/guard";
 export { HOLD_PAGE_SIZE, type HoldSkip } from "./object-lock/hold";
 export { type LockLookupOptions, readObjectLock, type StoredObjectLock } from "./object-lock/lock-status";
 export {
+	type DeletedObject,
 	deletePrefixRespectingLocks,
 	type PrefixDeleteOptions,
 	type PrefixDeleteResult,
@@ -56,6 +79,7 @@ export type {
 	LockChangeDecision,
 	LockChangeRequest,
 	OnLockAuditHook,
+	OnMediaEventHook,
 } from "./plugin-hooks";
 export {
 	type CredentialPolicyOptions,
@@ -79,6 +103,7 @@ export {
 	type RequestStatePatch,
 	type TranscodeConfig,
 	updateRequestState,
+	type WebhookConfig,
 	type WorkerConfig,
 } from "./request-state";
 export { type DownloadLinkInfo, getRouteResult, type RouteResult, type TranscodeJob } from "./route-result";
@@ -137,6 +162,7 @@ export function createWorker(options?: CreateWorkerOptions) {
 		context.set(PLUGIN_HOOKS_VARIABLE, hooks);
 		await next();
 	});
+	app.use("*", collectMediaEvents);
 	app.use("/v1/*", rejectReservedLockPaths);
 	for (const handler of middleware) app.use("*", handler);
 

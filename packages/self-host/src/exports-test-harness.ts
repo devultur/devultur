@@ -107,13 +107,14 @@ export function memoryBucket({ now }: MemoryBucketOptions = {}) {
 			const session = sessions.get(uploadId);
 			const chunks = parts.map((part) => session?.parts.get(part.partNumber) ?? new Uint8Array());
 			const bytes = new Uint8Array(await new Blob(chunks as BlobPart[]).arrayBuffer());
+			const written = stamp(multipartEtag(chunks));
 			objects.set(key, {
 				bytes,
 				httpMetadata: session?.options.httpMetadata ?? {},
 				customMetadata: session?.options.customMetadata ?? {},
-				...stamp(multipartEtag(chunks)),
+				...written,
 			});
-			return { size: bytes.byteLength };
+			return { size: bytes.byteLength, etag: written.etag };
 		},
 		abort: async () => void sessions.delete(uploadId),
 	});
@@ -122,13 +123,14 @@ export function memoryBucket({ now }: MemoryBucketOptions = {}) {
 		put: async (key: string, value: ArrayBuffer | Uint8Array | string, options: PutOptions = {}) => {
 			if (failsCondition(options.onlyIf, objects.get(key))) return null;
 			const bytes = toBytes(value);
+			const written = stamp(md5(bytes));
 			objects.set(key, {
 				bytes,
 				httpMetadata: options.httpMetadata ?? {},
 				customMetadata: options.customMetadata ?? {},
-				...stamp(md5(bytes)),
+				...written,
 			});
-			return { key };
+			return { key, etag: written.etag, version: written.version };
 		},
 		get: async (key: string, options?: { range?: { offset: number; length: number } }) => {
 			const stored = objects.get(key);

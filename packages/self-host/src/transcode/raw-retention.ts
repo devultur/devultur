@@ -4,6 +4,8 @@
 import { isVideoRawKey } from "@devultur/core";
 import type { Context } from "hono";
 import { deletePrefix, KV_JOB_TTL_SECONDS, KvPrefix } from "../helpers";
+import { type EmitOptions, emitMediaChanged } from "../media-events/emit";
+import { mediaOfKey } from "../media-events/media-key";
 import { recordLockAudit } from "../object-lock/audit";
 import { effectiveLock, splitVideoStorageKey } from "../object-lock/sidecar";
 import { isStateLocked } from "../object-lock/state";
@@ -34,10 +36,12 @@ export type RawDisposalOutcome = "deleted" | "retained" | "kept";
  * After an authenticated `transcode.complete`: deletes the raw (and its L4 key at `${storageKey}/{keyId}` in the
  * keys bucket) if requested. A locked raw wins over `deleteOriginalOnSuccess` (decision 6 of #3): it stays, the skip
  * is logged and the webhook still succeeds. Idempotent: a retried webhook deletes nothing again and returns `deleted`.
+ * Deleting it is a `media.changed` with `original-deleted`, sent to `events.target` (the launching scope's webhook).
  */
 export async function disposeRawAfterTranscode(
 	context: Context<WorkerApp>,
 	videoId: string,
+	events: EmitOptions = {},
 ): Promise<RawDisposalOutcome> {
 	const { env } = context;
 	const disposal = await readRawDisposal(env.MEDIA_KV, videoId);
@@ -60,6 +64,11 @@ export async function disposeRawAfterTranscode(
 
 	await env.MEDIA_BUCKET.delete(disposal.storageKey);
 	if (env.KEYS_BUCKET) await deletePrefix(env.KEYS_BUCKET, `${disposal.storageKey}/`);
+	const media = location ? mediaOfKey(location.key) : null;
+	if (raw && location && media) {
+		const data = { key: location.key, mediaId: media.mediaId, etag: raw.etag };
+		await emitMediaChanged(context, { ...data, changes: ["original-deleted"] }, events);
+	}
 	return "deleted";
 }
 

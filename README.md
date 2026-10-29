@@ -122,7 +122,8 @@ The guides in [`docs/`](docs) cover the Worker and the SDKs:
 - [Uploads](docs/guides/uploads.md) · [Media references & delivery](docs/guides/media-references.md)
 - [Video processing](docs/guides/video-processing.md) · [Video player](docs/guides/video-player.md)
 - [Progress tracking](docs/guides/progress-tracking.md) · [Security](docs/guides/security.md)
-- [Retention and holds](docs/guides/object-lock.md) · [Framework examples](docs/guides/framework-examples.md)
+- [Retention and holds](docs/guides/object-lock.md) · [Media webhooks](docs/guides/webhooks.md)
+- [Framework examples](docs/guides/framework-examples.md)
 - [React components and hooks](docs/react)
 
 ## Development

@@ -1,6 +1,10 @@
+import { type MediaEvent, MediaEventName } from "@devultur/core";
 import { type Context, Hono } from "hono";
 import { isTranscodeWebhookAuthorized, KV_JOB_TTL_SECONDS, KvPrefix } from "../helpers";
+import { emitProcessingEvent } from "../media-events/emit";
+import { readJobTarget } from "../media-events/job-target";
 import { markTranscodeCompleted } from "../object-lock/transcode-marker";
+import { getPluginHooks } from "../plugin-hooks";
 import type { RequestState } from "../request-state";
 import { addRouteResult } from "../route-result";
 import { JOB_TICKET_HEADER, verifyJobLocation, verifyJobTicket } from "../transcode/job-ticket";
@@ -30,11 +34,16 @@ webhooks.post("/transcode", async (context) => {
 	const body = await context.req.json();
 
 	await publishTranscodeJob(context, body);
+	// The launching scope's webhook (the callback has no scope of its own). None stored: this request's.
+	const resolvers = getPluginHooks(context).resolveWebhookTarget;
+	const jobTarget =
+		typeof body.videoId === "string" ? await readJobTarget(context.env, body.videoId, resolvers) : undefined;
+	const eventTarget = jobTarget === undefined ? {} : { target: jobTarget };
 
 	if (body.event === "transcode.complete" && body.videoId) {
 		// The raw is retained unless the config asked to delete it on completion (`deleteOriginalOnSuccess`): only
 		// after a successful transcode; a `transcode.failed` never touches it.
-		const disposal = await disposeRawAfterTranscode(context, body.videoId);
+		const disposal = await disposeRawAfterTranscode(context, body.videoId, eventTarget);
 		if (disposal === "deleted") addRouteResult(context, { originalDeleted: true });
 		if (disposal === "retained") addRouteResult(context, { originalRetained: true });
 		const ticket = context.req.header(JOB_TICKET_HEADER);
@@ -61,9 +70,19 @@ webhooks.post("/transcode", async (context) => {
 	const clientEvent = withClientStoryboard(withoutOperatorFields(withOutputUrls(body, outputBaseUrl)));
 
 	await forwardToClientWebhook(clientEvent, webhookData);
+	// Also to the media webhook, when it opted in to the event's type.
+	if (isMediaEvent(clientEvent)) await emitProcessingEvent(context, clientEvent, eventTarget);
 
 	return context.json({ received: true });
 });
+
+const PROCESSING_EVENTS = new Set<string>(Object.values(MediaEventName));
+
+const isMediaEvent = (event: unknown): event is MediaEvent =>
+	typeof event === "object" &&
+	event !== null &&
+	PROCESSING_EVENTS.has((event as { event?: unknown }).event as string) &&
+	typeof (event as { videoId?: unknown }).videoId === "string";
 
 /**
  * The job of a completion callback, from its signed ticket, for the middlewares that run after the route. A runner

@@ -1,9 +1,11 @@
 // Deletes of media, behind the lock guard: a locked object (or a video with a locked raw) loses nothing, and the
 // encryption keys of what's deleted go through the same check (deleting them destroys the object too).
-import { videoBasePath } from "@devultur/core";
+import { isVideoRawKey, type Visibility, videoBasePath } from "@devultur/core";
 import type { Context } from "hono";
 import { storageKey } from "../helpers";
 import { isVariantKey, variantPrefix } from "../image/transform-plan";
+import { emitMediaChanged, emitMediaDeleted } from "../media-events/emit";
+import { mediaOfKey } from "../media-events/media-key";
 import {
 	assertWritable,
 	deleteFolderKeys,
@@ -44,6 +46,10 @@ export async function handleVideoDelete(context: Context<WorkerApp>): Promise<Re
 		const deleted = await guardedDeletePrefix(context, `${folder}/`);
 		if ("blocked" in deleted) return deleted.blocked;
 		deletedCount += deleted.deletedCount;
+		if (deleted.deletedCount > 0) {
+			const visibility = folder.split("/")[0] as Visibility;
+			await emitMediaDeleted(context, { key: folder, mediaId: videoId, kind: "video", visibility, reason: "api" });
+		}
 		// The video's outputs are gone, so a new transcode of the folder is a first one again.
 		if (deleted.deletedCount > 0) {
 			await forgetTranscodeCompleted(context.env.MEDIA_BUCKET, getRequestState(context).storagePrefix, folder);
@@ -77,6 +83,7 @@ export async function handleKeyDelete(context: Context<WorkerApp>): Promise<Resp
 	if (blocked) return blocked;
 
 	await context.env.MEDIA_BUCKET.delete(fullKey);
+	await emitKeyDeleted(context, key, exists.etag);
 	// Variants and the mezzanine live under `{key}/__variants/`. Always swept (even with the kill switch on
 	// `cloudflare`, some may be left over from before). In MEDIA_BUCKET, only that sub-prefix: a bare `{key}/`
 	// could touch another object whose name starts the same way.
@@ -89,4 +96,20 @@ export async function handleKeyDelete(context: Context<WorkerApp>): Promise<Resp
 	// Its lock record stays, inert: it's bound to the deleted version, so a file uploaded later at this key starts from
 	// its own upload lock. Deleting it here could delete a record a lock change just wrote for that new file.
 	return new Response(null, { status: 204 });
+}
+
+/**
+ * The event of a key delete: `media.deleted` for an image, a file or an asset; for a video, only deleting its original
+ * is an event (`original-deleted`: the outputs stay), and a single output of it is none.
+ */
+async function emitKeyDeleted(context: Context<WorkerApp>, key: string, etag: string): Promise<void> {
+	const media = mediaOfKey(key);
+	if (!media) return;
+	if (media.kind !== "video") {
+		const { mediaId, kind, visibility } = media;
+		await emitMediaDeleted(context, { key, mediaId, kind, visibility, reason: "api" });
+		return;
+	}
+	if (!isVideoRawKey(key)) return;
+	await emitMediaChanged(context, { key, mediaId: media.mediaId, changes: ["original-deleted"], etag });
 }

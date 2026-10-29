@@ -1,5 +1,7 @@
 import type { MediaType, ObjectLock, ResolvedLock, SecurityPolicy, TranscodeSpec, Visibility } from "@devultur/core";
 import type { UploadGrant } from "./export-types";
+import type { WebhookMessage } from "./media-events/delivery";
+import type { PendingMediaEvent } from "./media-events/emit";
 import type { PluginHooks } from "./plugin-hooks";
 import type { ContentSniffingMode, PluginContext, RequestState } from "./request-state";
 import type { RouteResult } from "./route-result";
@@ -78,6 +80,18 @@ export interface WorkerEnv {
 	IMAGE_TRANSFORMS?: string;
 	// Megapixel cap the Worker decodes (default 4, image/transform-plan.ts). Above it → mezzanine.
 	IMAGE_TRANSFORMS_MAX_MEGAPIXELS?: string;
+	// Media event webhook (docs/guides/webhooks.md): the endpoint and its signing secret (several, space-separated,
+	// during a rotation). `config.webhooks` overrides both for its scope. `MEDIA_WEBHOOK_EVENTS`: comma-separated types
+	// (default `media.deleted,media.changed`). `MEDIA_WEBHOOK_ALLOW_UNSAFE_URL=true` allows `http` and private hosts
+	// (local development only).
+	MEDIA_WEBHOOK_URL?: string;
+	MEDIA_WEBHOOK_SECRET?: string;
+	MEDIA_WEBHOOK_EVENTS?: string;
+	MEDIA_WEBHOOK_ALLOW_UNSAFE_URL?: string;
+	// Queue the webhooks are delivered through, with retries (consumer: `deliverWebhooks`). Without it, one attempt
+	// after the response. `WEBHOOK_DLQ`: where a webhook goes after its last attempt (else the queue's own DLQ).
+	WEBHOOK_QUEUE?: Queue<WebhookMessage>;
+	WEBHOOK_DLQ?: Queue<WebhookMessage>;
 }
 
 // Cap of the adaptive HLS ladder: up to what resolution the transcode engine generates renditions.
@@ -118,6 +132,8 @@ export interface WorkerVariables {
 	pluginHooks?: PluginHooks;
 	/** What the route did (route-result.ts). */
 	routeResult?: RouteResult;
+	/** Media events of the request, handed off after the route (media-events/emit.ts). */
+	mediaEvents?: PendingMediaEvent[];
 }
 
 export type WorkerApp = {
