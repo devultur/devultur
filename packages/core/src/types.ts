@@ -1,6 +1,8 @@
+import type { WebhookEvent } from "./lifecycle-events";
 import type { ObjectLock } from "./lock";
 import type { DevulturMedia, Visibility } from "./media";
 import type { MediaUrlOptions, PosterUrls } from "./media-url";
+import type { WebhookSecret } from "./webhook-signature";
 import type {
 	CaptionsJobResult,
 	CaptionsStatusResult,
@@ -124,12 +126,24 @@ export interface SignOptions {
 	expiresIn?: number;
 }
 
-/** How {@link MediaRouter.handleWebhook} authenticates a webhook from the media Worker. */
+/**
+ * How {@link MediaRouter.handleWebhook} authenticates a webhook from the media Worker: a signed one (`webhook-*`
+ * headers, verified with `signingSecret`) or one with `Authorization: Bearer <secret>`.
+ */
 export interface WebhookVerifyOptions {
-	/** The request's `Authorization` header. The Worker sends `Bearer <secret>`. */
-	authorization: string | null | undefined;
-	/** The secret the Worker sends: the one your backend uses as the Worker credential. */
-	secret: string;
+	/** The request's `Authorization` header. The Worker sends `Bearer <secret>` to a job's `callbackUrl`. */
+	authorization?: string | null;
+	/** The secret the Worker sends as a bearer: the one your backend uses as the Worker credential. */
+	secret?: string;
+	/**
+	 * The Worker's webhook signing secret (`webhooks.secret` / `MEDIA_WEBHOOK_SECRET`); several during a rotation. A
+	 * request carrying a `webhook-signature` is then verified with it, and the payload must be the raw body (a string).
+	 */
+	signingSecret?: WebhookSecret;
+	/** The request's headers: the `webhook-*` ones are read from them. */
+	headers?: Headers | Record<string, string | null | undefined>;
+	/** How far, in seconds, the `webhook-timestamp` may be from now. Default 300. */
+	toleranceSeconds?: number;
 }
 
 export const MediaStatus = {
@@ -220,8 +234,12 @@ export interface MediaRouter {
 	createUploadUrl(options: CreateUploadUrlOptions): Promise<UploadUrlResult>;
 	sign(url: string, options?: SignOptions): Promise<string>;
 	verify(signedUrl: string): Promise<boolean>;
-	/** Authenticates a webhook from the media Worker and returns its event. Throws when it isn't authorized. */
-	handleWebhook(payload: unknown, options: WebhookVerifyOptions): Promise<MediaEvent>;
+	/**
+	 * Authenticates a webhook from the media Worker and returns its event. Throws when it isn't authorized. With a
+	 * `signingSecret`, a signed request returns its envelope ({@link WebhookEvent}); a bearer one, the bare event.
+	 */
+	handleWebhook(payload: unknown, options: WebhookVerifyOptions & { signingSecret?: undefined }): Promise<MediaEvent>;
+	handleWebhook(payload: unknown, options: WebhookVerifyOptions): Promise<MediaEvent | WebhookEvent>;
 	/** Delivery URL from a typed reference. Token-transparent (public omits the token). */
 	getMediaUrl(media: DevulturMedia, options?: MediaUrlOptions): string;
 	/** Stable public URL — only accepts public media (compile-time guard against leaking private). */
