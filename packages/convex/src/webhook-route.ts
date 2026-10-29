@@ -4,6 +4,7 @@ import { isMediaLifecycleEvent, verifyWebhookSignature, type WebhookSecret } fro
 import { type FunctionReference, type HttpRouter, httpActionGeneric } from "convex/server";
 import type { ComponentApi } from "./component/_generated/component.js";
 import {
+	type LifecycleEventArgs,
 	lifecycleEventArgs,
 	type MediaChangedEventArgs,
 	type MediaDeletedEventArgs,
@@ -26,8 +27,9 @@ const secretsFromEnv = () => (process.env.DEVULTUR_WEBHOOK_SECRET ?? "").split(/
 
 /**
  * Registers `POST {path}` on your HTTP router. Each signed event is applied to the component once (deduplicated by
- * id, ordered by `occurredAt`), then passed as `{ event }` to `onMediaDeleted` or `onMediaChanged`, which run once per
- * event id: if yours throws, the route answers `500` and the Worker's retry runs it again. Order your own changes by
+ * id, ordered by `occurredAt`), then passed as `{ event }` to `onMediaDeleted` or `onMediaChanged`. An event counts as
+ * handled only once yours returns: if it throws (or the action dies first), the route answers `500` and the Worker's
+ * retry runs it again, so keep it idempotent. Order your own changes by
  * `event.occurredAt` (`isNewerEvent` from `@devultur/core`): events arrive unordered. Other event types get `204`.
  * Fails closed: without a signing secret every request gets `401`.
  */
@@ -53,21 +55,21 @@ export function registerDevulturWebhook(http: HttpRouter, component: ComponentAp
 			if (!isMediaLifecycleEvent(payload)) return new Response(null, { status: 204 });
 
 			const event = lifecycleEventArgs(payload);
-			const result = await ctx.runMutation(component.lifecycle.applyLifecycleEvent, { event });
-			if (result.isDuplicate) return new Response("OK", { status: 200 });
+			const handler = event.type === "media.deleted" ? options.onMediaDeleted : options.onMediaChanged;
+			// With a handler, the id stays `received` until it's done: a redelivery after a failure (or a crash between
+			// the two steps) runs it again, and the component's part, already applied, changes nothing the second time.
+			const result = await ctx.runMutation(component.lifecycle.applyLifecycleEvent, {
+				event,
+				awaitsHandler: handler !== undefined,
+			});
+			if (result.isDuplicate || !handler) return new Response("OK", { status: 200 });
 			try {
-				if (event.type === "media.deleted" && options.onMediaDeleted) {
-					await ctx.runMutation(options.onMediaDeleted, { event });
-				}
-				if (event.type === "media.changed" && options.onMediaChanged) {
-					await ctx.runMutation(options.onMediaChanged, { event });
-				}
+				await ctx.runMutation(handler as EventHandler<LifecycleEventArgs>, { event });
 			} catch (error) {
-				// Forgotten, so the Worker's retry runs your handler again (the component's part is already done).
-				await ctx.runMutation(component.lifecycle.forgetLifecycleEvent, { eventId: event.id });
 				console.error(`[devultur] webhook handler for ${event.id} failed:`, error);
 				return new Response("Handler failed", { status: 500 });
 			}
+			await ctx.runMutation(component.lifecycle.markLifecycleEventHandled, { eventId: event.id });
 			return new Response("OK", { status: 200 });
 		}),
 	});

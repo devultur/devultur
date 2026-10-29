@@ -13,7 +13,7 @@ const SECRET = "whsec_YXBwLXdlYmhvb2stc2VjcmV0LWZvci10ZXN0cw==";
 type Handler = (ctx: unknown, request: Request) => Promise<Response>;
 
 const component = {
-	lifecycle: { applyLifecycleEvent: "component.applyLifecycleEvent", forgetLifecycleEvent: "component.forget" },
+	lifecycle: { applyLifecycleEvent: "component.applyLifecycleEvent", markLifecycleEventHandled: "component.handled" },
 } as unknown as ComponentApi;
 
 const deleted = createWebhookEvent("media.deleted", {
@@ -39,25 +39,30 @@ function setup(options: { signingSecret?: string; failingHandler?: boolean } = {
 		onMediaDeleted: "app.onMediaDeleted" as never,
 		onMediaChanged: "app.onMediaChanged" as never,
 	});
-	const processed = new Set<string>();
+	// The component's ids, as `applyLifecycleEvent` keeps them: `received` until handled.
+	const processed = new Map<string, "received" | "handled">();
+	let isHandlerFailing = options.failingHandler === true;
 	const runMutation = vi.fn(async (reference: string, args: Record<string, unknown>) => {
 		if (reference === "component.applyLifecycleEvent") {
 			const { id } = args.event as { id: string };
-			const isDuplicate = processed.has(id);
-			processed.add(id);
+			const isDuplicate = processed.get(id) === "handled";
+			if (!isDuplicate) processed.set(id, args.awaitsHandler ? "received" : "handled");
 			return { isDuplicate, isApplied: !isDuplicate };
 		}
-		if (reference === "component.forget") processed.delete(args.eventId as string);
-		if (reference.startsWith("app.") && options.failingHandler) throw new Error("app handler failed");
+		if (reference === "component.handled") processed.set(args.eventId as string, "handled");
+		if (reference.startsWith("app.") && isHandlerFailing) throw new Error("app handler failed");
 		return null;
 	});
+	const recover = () => {
+		isHandlerFailing = false;
+	};
 	const post = async (payload: { id: string }, secret = SECRET) => {
 		const body = JSON.stringify(payload);
 		const headers = await signWebhook({ id: payload.id, payload: body, secret });
 		const request = new Request("https://app.test/media-webhooks", { method: "POST", headers, body });
 		return routes[0].handler({ runMutation }, request);
 	};
-	return { routes, runMutation, post, processed };
+	return { routes, runMutation, post, processed, recover };
 }
 
 afterEach(() => {
@@ -72,7 +77,7 @@ describe("registerDevulturWebhook", () => {
 		expect(routes.map(({ path, method }) => ({ path, method }))).toEqual([{ path: "/media-webhooks", method: "POST" }]);
 	});
 
-	it("runs the component's mutation, then the app's handler for the event's type", async () => {
+	it("runs the component's mutation, then the app's handler, then marks the event handled", async () => {
 		const { runMutation, post } = setup();
 
 		expect((await post(deleted)).status).toBe(200);
@@ -81,9 +86,12 @@ describe("registerDevulturWebhook", () => {
 		expect(runMutation.mock.calls.map(([reference]) => reference)).toEqual([
 			"component.applyLifecycleEvent",
 			"app.onMediaDeleted",
+			"component.handled",
 			"component.applyLifecycleEvent",
 			"app.onMediaChanged",
+			"component.handled",
 		]);
+		expect(runMutation).toHaveBeenCalledWith("component.applyLifecycleEvent", { event: deleted, awaitsHandler: true });
 		expect(runMutation).toHaveBeenCalledWith("app.onMediaDeleted", { event: deleted });
 	});
 
@@ -97,14 +105,29 @@ describe("registerDevulturWebhook", () => {
 		expect(runMutation.mock.calls.filter(([reference]) => reference === "app.onMediaDeleted")).toHaveLength(1);
 	});
 
-	it("answers 500 and forgets the event when the app's handler fails, so a retry runs it again", async () => {
+	it("answers 500 when the app's handler fails, and the retry runs it again", async () => {
 		vi.spyOn(console, "error").mockImplementation(() => {});
-		const { post, processed } = setup({ failingHandler: true });
+		const { post, processed, recover, runMutation } = setup({ failingHandler: true });
 
-		const response = await post(deleted);
+		const failed = await post(deleted);
+		expect(failed.status).toBe(500);
+		expect(processed.get(deleted.id)).toBe("received");
 
-		expect(response.status).toBe(500);
-		expect(processed.has(deleted.id)).toBe(false);
+		recover();
+		const retried = await post(deleted);
+
+		expect(retried.status).toBe(200);
+		expect(processed.get(deleted.id)).toBe("handled");
+		expect(runMutation.mock.calls.filter(([reference]) => reference === "app.onMediaDeleted")).toHaveLength(2);
+	});
+
+	it("runs the app's handler on the retry of an event whose first delivery died before it", async () => {
+		const { post, processed, runMutation } = setup();
+		// The component recorded the id, and the action died before the handler ran.
+		processed.set(deleted.id, "received");
+
+		expect((await post(deleted)).status).toBe(200);
+		expect(runMutation).toHaveBeenCalledWith("app.onMediaDeleted", { event: deleted });
 	});
 
 	it("refuses an unsigned or wrongly signed request", async () => {

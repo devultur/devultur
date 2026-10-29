@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as crons from "../crons.js";
 import type * as http from "../http.js";
 import type * as library from "../library.js";
 import type * as lifecycle from "../lifecycle.js";
@@ -31,6 +32,7 @@ import type {
 import { anyApi, componentsGeneric } from "convex/server";
 
 const fullApi: ApiFromModules<{
+  crons: typeof crons;
   http: typeof http;
   library: typeof library;
   lifecycle: typeof lifecycle;

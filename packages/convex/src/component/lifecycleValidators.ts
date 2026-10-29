@@ -19,13 +19,7 @@ export const mediaDeletedEventValidator = v.object({
 		mediaId: v.string(),
 		kind: v.union(v.literal("image"), v.literal("video"), v.literal("file"), v.literal("asset")),
 		visibility: v.union(v.literal("public"), v.literal("private")),
-		reason: v.union(
-			v.literal("api"),
-			v.literal("prefix"),
-			v.literal("purge"),
-			v.literal("expired"),
-			v.literal("raw-retention"),
-		),
+		reason: v.union(v.literal("api"), v.literal("prefix"), v.literal("purge"), v.literal("expired")),
 		retainedCount: v.optional(v.number()),
 	}),
 });
