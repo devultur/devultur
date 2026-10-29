@@ -9,6 +9,7 @@
 // handler again. Applying an event to the records twice changes nothing.
 import { isNewerEvent } from "@devultur/core";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { internalMutation, mutation, query } from "./_generated/server";
@@ -18,6 +19,8 @@ import { deleteMediaRecords } from "./mediaRecords";
 export const PROCESSED_EVENT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** Expired ids deleted per run of the prune (crons.ts runs it hourly). */
 export const PRUNE_BATCH = 500;
+/** Runs one hourly prune may chain when each finds a full batch: at most 50,000 ids, then the next hour goes on. */
+export const MAX_PRUNE_RUNS = 100;
 /** Keys per `missingKeys` call: one index read each. */
 export const MAX_MISSING_KEYS = 500;
 
@@ -104,15 +107,21 @@ export const markLifecycleEventHandled = mutation({
 	},
 });
 
-/** Deletes processed ids older than 7 days, `PRUNE_BATCH` at a time (crons.ts runs it hourly). */
+/**
+ * Deletes processed ids older than 7 days, `PRUNE_BATCH` at a time (crons.ts runs it hourly). A full batch means more
+ * may be left: it schedules the next run right away, up to `MAX_PRUNE_RUNS` in a chain.
+ */
 export const pruneProcessedEvents = internalMutation({
-	args: {},
-	handler: async (ctx): Promise<number> => {
+	args: { run: v.optional(v.number()) },
+	handler: async (ctx, { run = 1 }): Promise<number> => {
 		const expired = await ctx.db
 			.query("processedEvents")
 			.withIndex("by_processed_at", (q) => q.lt("processedAt", Date.now() - PROCESSED_EVENT_TTL_MS))
 			.take(PRUNE_BATCH);
 		await Promise.all(expired.map((row) => ctx.db.delete(row._id)));
+		if (expired.length === PRUNE_BATCH && run < MAX_PRUNE_RUNS) {
+			await ctx.scheduler.runAfter(0, internal.lifecycle.pruneProcessedEvents, { run: run + 1 });
+		}
 		return expired.length;
 	},
 });

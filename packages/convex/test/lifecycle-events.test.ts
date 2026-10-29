@@ -4,6 +4,9 @@ import { lifecycleEventArgs } from "../src/component/lifecycleValidators";
 import { memoryDb } from "./memory-db";
 
 // `applyLifecycleEvent`, its pruning and `missingKeys` for real, against an in-memory database.
+vi.mock("../src/component/_generated/api", () => ({
+	internal: { lifecycle: { pruneProcessedEvents: "lifecycle.pruneProcessedEvents" } },
+}));
 vi.mock("../src/component/_generated/server", () => {
 	const definition = (fn: unknown) => fn;
 	return { env: {}, mutation: definition, query: definition, internalMutation: definition };
@@ -12,6 +15,8 @@ vi.mock("../src/component/_generated/server", () => {
 type Handler = (ctx: unknown, args: unknown) => Promise<unknown>;
 const lifecycle = (await import("../src/component/lifecycle")) as unknown as Record<string, { handler: Handler }> & {
 	PROCESSED_EVENT_TTL_MS: number;
+	PRUNE_BATCH: number;
+	MAX_PRUNE_RUNS: number;
 };
 
 const VIDEO = {
@@ -155,10 +160,44 @@ describe("applyLifecycleEvent", () => {
 		await apply(changed("2030-01-01T00:00:00Z"));
 		expect(db.tables.get("processedEvents")).toHaveLength(2);
 
-		const pruned = await lifecycle.pruneProcessedEvents.handler({ db }, {});
+		const scheduler = { runAfter: vi.fn(async () => {}) };
+		const pruned = await lifecycle.pruneProcessedEvents.handler({ db, scheduler }, {});
 
 		expect(pruned).toBe(1);
 		expect(db.tables.get("processedEvents")?.map((row) => row.eventId)).not.toContain("evt_old");
+	});
+
+	it("chains another prune right away after a full batch, up to its bound", async () => {
+		const db = memoryDb();
+		const old = Date.now() - lifecycle.PROCESSED_EVENT_TTL_MS - 1;
+		const insertExpired = async (count: number) => {
+			for (let index = 0; index < count; index++) {
+				await db.insert("processedEvents", {
+					eventId: `evt_${index}`,
+					status: "handled",
+					type: "media.deleted",
+					mediaId: "m",
+					occurredAt: new Date(old).toISOString(),
+					processedAt: old,
+				});
+			}
+		};
+		await insertExpired(lifecycle.PRUNE_BATCH + 3);
+		const scheduler = { runAfter: vi.fn(async (_delay: number, _ref: string, _args: { run: number }) => {}) };
+
+		expect(await lifecycle.pruneProcessedEvents.handler({ db, scheduler }, {})).toBe(lifecycle.PRUNE_BATCH);
+		expect(scheduler.runAfter).toHaveBeenCalledWith(0, "lifecycle.pruneProcessedEvents", { run: 2 });
+
+		const [, , args] = scheduler.runAfter.mock.calls[0];
+		expect(await lifecycle.pruneProcessedEvents.handler({ db, scheduler }, args)).toBe(3);
+		expect(scheduler.runAfter).toHaveBeenCalledTimes(1);
+		expect(db.tables.get("processedEvents")).toEqual([]);
+
+		// The last run of a chain stops even with a full batch: the next hourly run goes on.
+		await insertExpired(lifecycle.PRUNE_BATCH + 1);
+		await lifecycle.pruneProcessedEvents.handler({ db, scheduler }, { run: lifecycle.MAX_PRUNE_RUNS });
+		expect(scheduler.runAfter).toHaveBeenCalledTimes(1);
+		expect(db.tables.get("processedEvents")).toHaveLength(1);
 	});
 
 	it("keeps an id awaiting the app's handler open: a redelivery isn't a duplicate until it's handled", async () => {

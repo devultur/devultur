@@ -114,7 +114,7 @@ export default defineSchema({
 		.index("by_media_locale", ["mediaKey", "locale"]),
 
 	// Lifecycle events already applied, by id: the Worker delivers at least once. `received`: applied to the component,
-	// the app's handler not done yet (a redelivery runs it again); `handled`: done. Kept 7 days (a daily cron prunes).
+	// the app's handler not done yet (a redelivery runs it again); `handled`: done. Kept 7 days (an hourly cron prunes).
 	processedEvents: defineTable({
 		eventId: v.string(),
 		status: v.union(v.literal("received"), v.literal("handled")),
