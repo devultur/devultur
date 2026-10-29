@@ -153,7 +153,9 @@ wrangler secret put TRANSCODE_WEBHOOK_SECRET    # openssl rand -base64 32
   Without it, the Worker answers `503` to every callback, so no transcode ever completes: the first video upload
   would stay in progress for good. Set it even if you don't plan to transcode.
 
-For captions, also set `GROQ_API_KEY` (transcription) and `MISTRAL_API_KEY` (translation) as secrets. Secrets are
+For captions, also set `GROQ_API_KEY` (transcription) and `MISTRAL_API_KEY` (translation) as secrets. To tell your
+backend when media is deleted or changed, set `MEDIA_WEBHOOK_SECRET` and `MEDIA_WEBHOOK_URL`, and optionally bind a
+`WEBHOOK_QUEUE` for retries (see [Media webhooks](webhooks.md)). Secrets are
 per environment: with [environments](#per-environment-config), add `--env <name>` to each `wrangler secret put`.
 
 #### 6. Deploy
@@ -363,6 +365,7 @@ export default createWorker({
 | `transcode.maxResolution` | Highest rung of the HLS ladder (`720p`, `1080p`, `4k`) |
 | `transcode.deleteOriginalOnSuccess` | Delete the original once a transcode completes. It's never deleted after a failure, nor while it's [locked](object-lock.md#transcoding-a-locked-video). |
 | `transcode.outputBaseUrl` | Base of the output URLs in your webhook. Unset: the origin of the transcode request. |
+| `webhooks` | Where media events (deleted, lock or hold changed, replaced, original deleted) go, signed: `url`, `secret`, `events`. Unset: `MEDIA_WEBHOOK_URL` and `MEDIA_WEBHOOK_SECRET`, or none. See [Media webhooks](webhooks.md). |
 
 A plugin can narrow these rules per request, for example to give each of your apps its own storage prefix,
 upload rules and credentials. [Plugins](plugins.md) covers the request state, the hooks before a credential is

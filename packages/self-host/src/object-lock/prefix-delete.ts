@@ -38,6 +38,23 @@ import { forgetTranscodeCompleted } from "./transcode-marker";
 export interface PrefixDeleteOptions extends Omit<PrefixWalkOptions, "now"> {
 	/** The Worker's `KEYS_BUCKET`, when it has one: the encryption keys of what's deleted go too. */
 	keysBucket?: R2Bucket;
+	/**
+	 * Called once per call with what it deleted (not called when it deleted nothing), also when the call throws
+	 * midway. Turn them into one `media.deleted` per media with `mediaDeletedEvents` and send them with
+	 * `sendMediaEvents`. A failure in it is logged; the delete's result stands.
+	 */
+	onDeleted?: (objects: DeletedObject[]) => void | Promise<void>;
+}
+
+/** An object a prefix delete removed. */
+export interface DeletedObject {
+	/** Its storage key. */
+	storageKey: string;
+	/** The storage prefix it lives under, and its virtual key there (`{visibility}/…`). */
+	root: string;
+	key: string;
+	size: number;
+	etag: string;
 }
 
 /** An object kept because it's locked (or its original is, or its key isn't laid out like the Worker's). */
@@ -99,6 +116,7 @@ export async function deletePrefixRespectingLocks(options: PrefixDeleteOptions):
 		skippedCount: 0,
 		subrequests: 0,
 	};
+	const deleted: DeletedObject[] = [];
 	let openFolder: OpenFolder | null = start.folder ? { ...start.folder, hasDeleted: true, hasRetained: false } : null;
 	let hasClosed = false;
 
@@ -155,19 +173,25 @@ export async function deletePrefixRespectingLocks(options: PrefixDeleteOptions):
 		const keys = keysBucket ? await objectKeysToDelete(keysBucket, listed.key, object) : [];
 		if (!budget.canAfford(1 + deleteCallsFor(keys))) throw new BudgetExhausted();
 		await mediaBucket.delete(listed.key);
+		deleted.push({ storageKey: listed.key, root: place.root, key: place.key, size: object.size, etag: object.etag });
 		result.deletedCount += 1;
 		result.deletedBytes += object.size;
 		if (folder) folder.hasDeleted = true;
 		if (keysBucket) result.deletedKeyCount += await deleteKeys(keysBucket, keys);
 	};
 
-	const walk = await walkPrefix(options, mediaBucket, start, visit);
-	if (walk.isDone) {
-		try {
-			await closeFolder();
-		} catch (error) {
-			if (!(error instanceof BudgetExhausted)) throw error;
+	let walk: Awaited<ReturnType<typeof walkPrefix>>;
+	try {
+		walk = await walkPrefix(options, mediaBucket, start, visit);
+		if (walk.isDone) {
+			try {
+				await closeFolder();
+			} catch (error) {
+				if (!(error instanceof BudgetExhausted)) throw error;
+			}
 		}
+	} finally {
+		await reportDeleted(options, deleted);
 	}
 	const pendingFolder = isPending(openFolder) ? { root: openFolder.root, folder: openFolder.folder } : undefined;
 	const isFinished = walk.isDone && !pendingFolder;
@@ -176,4 +200,13 @@ export async function deletePrefixRespectingLocks(options: PrefixDeleteOptions):
 		? undefined
 		: encodeCursor(options.prefix, { ...walk.position, ...(pendingFolder ? { folder: pendingFolder } : {}) });
 	return { ...result, ...(cursor ? { cursor } : {}), subrequests: budget.used };
+}
+
+async function reportDeleted(options: PrefixDeleteOptions, deleted: DeletedObject[]): Promise<void> {
+	if (!options.onDeleted || deleted.length === 0) return;
+	try {
+		await options.onDeleted(deleted);
+	} catch (error) {
+		console.error("deletePrefixRespectingLocks: onDeleted failed:", error);
+	}
 }

@@ -28,12 +28,26 @@ export { imageOriginAuthorization, isImageOriginRequest, readImageOriginScope } 
 export { type ImageTransformParams, parseTransformParams } from "./image/params";
 export { isVariantKey, variantPrefix } from "./image/transform-plan";
 export { ENCRYPTION_KEY_MISSING_CODE, KEYS_BUCKET_MISSING_CODE } from "./keys-bucket";
+export { type MediaDeletedEventsOptions, mediaDeletedEvents } from "./media-events/deleted-events";
+export {
+	type DeliveryRecord,
+	type DeliveryStatus,
+	deliverWebhooks,
+	MAX_WEBHOOK_ATTEMPTS,
+	readDeliveryRecord,
+	WEBHOOK_DELIVERY_PREFIX,
+	WEBHOOK_RETRY_DELAYS_SECONDS,
+	type WebhookMessage,
+} from "./media-events/delivery";
+export { sendMediaEvents } from "./media-events/emit";
+export { DEFAULT_WEBHOOK_EVENTS, unsafeUrlReason } from "./media-events/target";
 export { LOCK_AUDIT_PREFIX, type LockAuditAction, type LockAuditRecord } from "./object-lock/audit";
 export { LOCK_HOLD_HEADER, LOCK_UNTIL_HEADER } from "./object-lock/delivery";
 export { RESERVED_LOCK_PREFIXES } from "./object-lock/guard";
 export { HOLD_PAGE_SIZE, type HoldSkip } from "./object-lock/hold";
 export { type LockLookupOptions, readObjectLock, type StoredObjectLock } from "./object-lock/lock-status";
 export {
+	type DeletedObject,
 	deletePrefixRespectingLocks,
 	type PrefixDeleteOptions,
 	type PrefixDeleteResult,
@@ -56,6 +70,7 @@ export type {
 	LockChangeDecision,
 	LockChangeRequest,
 	OnLockAuditHook,
+	OnMediaEventHook,
 } from "./plugin-hooks";
 export {
 	type CredentialPolicyOptions,
@@ -79,6 +94,7 @@ export {
 	type RequestStatePatch,
 	type TranscodeConfig,
 	updateRequestState,
+	type WebhookConfig,
 	type WorkerConfig,
 } from "./request-state";
 export { type DownloadLinkInfo, getRouteResult, type RouteResult, type TranscodeJob } from "./route-result";

@@ -282,6 +282,7 @@ describe("single-use download links", () => {
 			issueCredential: [],
 			authorizeLockChange: [],
 			onLockAudit: [],
+			onMediaEvent: [],
 			beforeLinkRedeem: [
 				async (_context, link) => {
 					seen.push(link);

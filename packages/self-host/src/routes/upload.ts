@@ -293,7 +293,7 @@ upload.put("/:key{.+}", async (context) => {
 
 	if (stored === null) return failedWrite(context, key, pending, customMetadata.enc);
 	if (resolved) await context.env.MEDIA_KV.delete(resolved.kvKey);
-	await afterUploadWrite(context, key, pending, write, customMetadata.enc);
+	await afterUploadWrite(context, key, pending, write, { enc: customMetadata.enc, etag: stored.etag });
 
 	return context.json({ key, size: body.byteLength, sha256: digest.sha256, sha256Verified: true });
 });

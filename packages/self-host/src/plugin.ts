@@ -6,6 +6,7 @@ import type {
 	BeforeLinkRedeemHook,
 	IssueCredentialHook,
 	OnLockAuditHook,
+	OnMediaEventHook,
 	PluginHooks,
 } from "./plugin-hooks";
 
@@ -46,6 +47,8 @@ export interface WorkerPlugin {
 	authorizeLockChange?: AuthorizeLockChangeHook;
 	/** After every lock event, with its audit record. Runs after the response. */
 	onLockAudit?: OnLockAuditHook;
+	/** After every media event (deleted, changed), to deliver it your own way: the built-in webhook is then skipped. */
+	onMediaEvent?: OnMediaEventHook;
 }
 
 export interface ComposedPlugins {
@@ -81,6 +84,7 @@ export function composePlugins(plugins: readonly WorkerPlugin[]): ComposedPlugin
 				plugin.authorizeLockChange ? [plugin.authorizeLockChange] : [],
 			),
 			onLockAudit: plugins.flatMap((plugin) => (plugin.onLockAudit ? [plugin.onLockAudit] : [])),
+			onMediaEvent: plugins.flatMap((plugin) => (plugin.onMediaEvent ? [plugin.onMediaEvent] : [])),
 		},
 	};
 }

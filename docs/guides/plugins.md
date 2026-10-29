@@ -44,6 +44,7 @@ interface WorkerPlugin {
   beforeLinkRedeem?: (context: Context, link: DownloadLinkInfo) => Response | null | Promise<Response | null>;
   authorizeLockChange?: (context: Context, request: LockChangeRequest) => LockChangeDecision | Promise<LockChangeDecision>;
   onLockAudit?: (context: Context, record: LockAuditRecord) => void | Promise<void>;
+  onMediaEvent?: (context: Context, event: WebhookEvent) => void | Promise<void>;
 }
 ```
 
@@ -170,6 +171,10 @@ const auditToD1: WorkerPlugin = {
 };
 ```
 
+**`onMediaEvent`** gets every media event (`media.deleted`, `media.changed`) after the response. While any plugin has
+one, the Worker's own signed webhook isn't sent: deliver them your own way (a queue, a database, a webhook per
+tenant). See [Media webhooks](webhooks.md#delivering-events-your-own-way).
+
 ## After the route
 
 - `getRouteResult(context)` tells a middleware that runs after `await next()` what the route did: `redeemedLink`
@@ -188,7 +193,8 @@ A plugin route (or a scheduled handler next to the Worker) that deletes from `ME
 routes' lock checks. Delete a prefix with `deletePrefixRespectingLocks` instead, and read one object's lock with
 `readObjectLock`: they keep retained files, their keys and their lock records, and stay within a subrequest bound
 (see [Deleting a prefix from your own code](object-lock.md#deleting-a-prefix-from-your-own-code)). The storage
-prefix of the request is `getRequestState(context).storagePrefix`.
+prefix of the request is `getRequestState(context).storagePrefix`. Its `onDeleted` option reports what it deleted, to
+send `media.deleted` events (see [Media webhooks](webhooks.md#deleting-a-prefix-from-your-own-code)).
 
 ## Example plugins
 
