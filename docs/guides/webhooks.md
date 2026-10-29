@@ -115,8 +115,7 @@ export async function POST(request: Request) {
 
 `verifyWebhookSignature` refuses a timestamp more than five minutes from the receiver's clock (`toleranceSeconds`
 changes it) and compares signatures in constant time. With `@devultur/server`, `router.verifyWebhook(body, {
-signingSecret, headers })` does the same and returns the event (`router.handleWebhook` stays bearer-only, as in 1.5). The Convex component verifies them on its
-`/webhook` route (see its README).
+signingSecret, headers })` does the same and returns the event (`router.handleWebhook` stays bearer-only, as in 1.5).
 
 The secret is either `whsec_` followed by base64 (the Standard Webhooks format; the key is the decoded bytes) or any
 other string (the key is its UTF-8 bytes). Generate one with:
@@ -131,6 +130,14 @@ echo "whsec_$(openssl rand -base64 32)"
 2. Give the Worker both (`MEDIA_WEBHOOK_SECRET="<old> <new>"`, or `secret: [old, new]` in `config.webhooks`): each
    request is signed with both.
 3. Remove the old secret from the Worker, then from the receiver.
+
+### With the Convex component
+
+The component's `/webhook` route takes them with `DEVULTUR_WEBHOOK_SECRET` set: it removes the record of deleted
+media and patches the lock of changed media, applying each event once and in order. `registerDevulturWebhook` puts
+the same on a route of your app and then runs your own mutations, to clean up the references your tables keep; and
+`devultur.missingKeys(ctx, ids)` finds the ones already dangling. See
+[Media lifecycle webhooks](../../packages/convex/README.md#media-lifecycle-webhooks).
 
 ## Configuring the Worker
 

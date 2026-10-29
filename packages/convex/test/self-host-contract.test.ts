@@ -1,4 +1,4 @@
-import { MediaEventName, sha256Hex } from "@devultur/core";
+import { MediaEventName, sha256Hex, signWebhook } from "@devultur/core";
 import { ConvexError } from "convex/values";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { memoryBucket, SIGN_SECRET } from "../../self-host/src/exports-test-harness";
@@ -29,8 +29,10 @@ interface FunctionDefinition {
 }
 
 const { componentEnv } = vi.hoisted(() => ({
-	componentEnv: {} as { DEVULTUR_SECRET?: string; DEVULTUR_API_URL?: string },
+	componentEnv: {} as { DEVULTUR_SECRET?: string; DEVULTUR_API_URL?: string; DEVULTUR_WEBHOOK_SECRET?: string },
 }));
+// The Worker's media webhook secret (MEDIA_WEBHOOK_SECRET), set on the component as DEVULTUR_WEBHOOK_SECRET.
+const MEDIA_WEBHOOK_SECRET = "whsec_bWVkaWEtd2ViaG9vay1jb250cmFjdC1zZWNyZXQ=";
 
 vi.mock("../src/component/_generated/server", () => {
 	const definition = (fn: FunctionDefinition) => fn;
@@ -53,11 +55,12 @@ vi.mock("../src/component/_generated/api", () => {
 	return { api: modules, internal: modules };
 });
 
-// The component's modules (public.ts, lock.ts, uploads.ts), by function name: no name repeats across them.
+// The component's modules (public.ts, lock.ts, uploads.ts, lifecycle.ts), by function name: no name repeats across them.
 const component = {
 	...(await import("../src/component/public")),
 	...(await import("../src/component/lock")),
 	...(await import("../src/component/uploads")),
+	...(await import("../src/component/lifecycle")),
 } as unknown as Record<string, FunctionDefinition>;
 const { default: http } = await import("../src/component/http");
 
@@ -98,6 +101,7 @@ interface WorkerCall {
 interface WebhookDelivery {
 	url: string;
 	authorization: string | null;
+	signature: string | null;
 	body: Record<string, unknown>;
 	status: number;
 }
@@ -107,7 +111,7 @@ interface WebhookDelivery {
  * goes to the in-memory app, `fetch` to the Convex site goes to the component's HTTP router (the Worker forwarding a
  * webhook), and anything else fails.
  */
-function setup() {
+function setup(options: { mediaWebhooks?: boolean } = {}) {
 	const mediaBucket = memoryBucket();
 	const container = fakeTranscodeContainer();
 	const env = {
@@ -119,6 +123,10 @@ function setup() {
 		TRANSCODE_RUNNER: "cloudflare",
 		TRANSCODE_CONTAINER: container.namespace,
 		GROQ_API_KEY: "transcription-key",
+		// The Worker's media lifecycle webhooks, to the component's route.
+		...(options.mediaWebhooks
+			? { MEDIA_WEBHOOK_URL: `${CONVEX_SITE_URL}/webhook`, MEDIA_WEBHOOK_SECRET: MEDIA_WEBHOOK_SECRET }
+			: {}),
 	};
 	// The transcription provider the captions route calls. Off by default: the network refuses it. When available,
 	// it answers once `pending` settles, and resolves `requested` when the Worker calls it.
@@ -128,7 +136,15 @@ function setup() {
 		requested: Promise.withResolvers<void>(),
 	};
 	const app = createWorker();
-	const executionCtx = { waitUntil() {}, passThroughOnException() {} } as never;
+	// Work the Worker runs after the response (its media webhooks): `settle()` waits for it.
+	const pending: Promise<unknown>[] = [];
+	const executionCtx = {
+		waitUntil: (task: Promise<unknown>) => void pending.push(task),
+		passThroughOnException() {},
+	} as never;
+	const settle = async () => {
+		while (pending.length > 0) await Promise.all(pending.splice(0));
+	};
 	const workerCalls: WorkerCall[] = [];
 	const webhookDeliveries: WebhookDelivery[] = [];
 	const db = memoryDb();
@@ -163,6 +179,7 @@ function setup() {
 			webhookDeliveries.push({
 				url: request.url,
 				authorization: request.headers.get("Authorization"),
+				signature: request.headers.get("webhook-signature"),
 				body,
 				status: response.status,
 			});
@@ -217,6 +234,7 @@ function setup() {
 		scheduled,
 		db,
 		transcription,
+		settle,
 	};
 }
 
@@ -273,6 +291,7 @@ async function completeTranscode(contract: Contract) {
 beforeEach(() => {
 	componentEnv.DEVULTUR_API_URL = WORKER_URL;
 	componentEnv.DEVULTUR_SECRET = WORKER_AUTH_SECRET;
+	componentEnv.DEVULTUR_WEBHOOK_SECRET = MEDIA_WEBHOOK_SECRET;
 	vi.stubEnv("CONVEX_SITE_URL", CONVEX_SITE_URL);
 	vi.spyOn(console, "log").mockImplementation(() => {});
 });
@@ -711,5 +730,73 @@ describe("media metadata recorded at upload", () => {
 		await completeTranscode(contract);
 
 		expect(await contract.mediaRecord(key.split("/")[2] ?? "")).toMatchObject({ duration: 12 });
+	});
+});
+
+describe("@devultur/convex receiving the Worker's media lifecycle webhooks", () => {
+	const workerAuth = { Authorization: `Bearer ${WORKER_AUTH_SECRET}` };
+
+	it("removes the record of a file deleted on the Worker, through a signed media.deleted", async () => {
+		const contract = setup({ mediaWebhooks: true });
+		const file = await uploadThroughComponent(contract, { filename: "doc.pdf", contentType: "application/pdf" });
+		await contract.run("confirmUpload", { key: file.key, filename: "doc.pdf" });
+		const mediaId = file.key.split("/")[2] ?? "";
+
+		// Deleted by another caller of the Worker (not the component): only the webhook tells the component.
+		const response = await contract.send(`/v1/media/${file.key}`, { method: "DELETE", headers: workerAuth });
+		await contract.settle();
+
+		expect(response.status).toBe(204);
+		const [delivery] = contract.webhookDeliveries;
+		expect(delivery).toMatchObject({ url: `${CONVEX_SITE_URL}/webhook`, authorization: null, status: 200 });
+		expect(delivery?.signature).toMatch(/^v1,/);
+		expect(delivery?.body).toMatchObject({ type: "media.deleted", data: { mediaId, kind: "file", reason: "api" } });
+		expect(await contract.mediaRecord(mediaId)).toBeNull();
+		expect(await contract.query("missingKeys", { keys: [mediaId] })).toEqual([mediaId]);
+	});
+
+	it("patches the record's lock from the Worker's media.changed of a hold", async () => {
+		const contract = setup({ mediaWebhooks: true });
+		const file = await uploadThroughComponent(contract, { filename: "doc.pdf", contentType: "application/pdf" });
+		await contract.run("confirmUpload", { key: file.key, filename: "doc.pdf" });
+		const mediaId = file.key.split("/")[2] ?? "";
+
+		await contract.run("setHold", { keys: [file.key] });
+		await contract.settle();
+
+		expect(await contract.mediaRecord(mediaId)).toMatchObject({ lock: { hold: true }, etag: expect.any(String) });
+	});
+
+	it("applies a redelivered event once", async () => {
+		const contract = setup({ mediaWebhooks: true });
+		const file = await uploadThroughComponent(contract, { filename: "doc.pdf", contentType: "application/pdf" });
+		await contract.run("confirmUpload", { key: file.key, filename: "doc.pdf" });
+		await contract.send(`/v1/media/${file.key}`, { method: "DELETE", headers: workerAuth });
+		await contract.settle();
+		const [delivery] = contract.webhookDeliveries;
+
+		// The same event again, as a retry sends it: signed anew, same id.
+		const body = JSON.stringify(delivery?.body);
+		const headers = await signWebhook({ id: String(delivery?.body.id), payload: body, secret: MEDIA_WEBHOOK_SECRET });
+		const retry = await contract.deliverToComponent(
+			new Request(`${CONVEX_SITE_URL}/webhook`, { method: "POST", headers, body }),
+		);
+
+		expect(retry.status).toBe(200);
+		expect(contract.db.tables.get("processedEvents")).toHaveLength(1);
+	});
+
+	it("refuses a lifecycle event signed with another secret", async () => {
+		const contract = setup({ mediaWebhooks: true });
+		componentEnv.DEVULTUR_WEBHOOK_SECRET = "whsec_b3RoZXI=";
+		const file = await uploadThroughComponent(contract, { filename: "doc.pdf", contentType: "application/pdf" });
+		await contract.run("confirmUpload", { key: file.key, filename: "doc.pdf" });
+
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		await contract.send(`/v1/media/${file.key}`, { method: "DELETE", headers: workerAuth });
+		await contract.settle();
+
+		expect(contract.webhookDeliveries.map((delivery) => delivery.status)).toEqual([401]);
+		expect(await contract.mediaRecord(file.key.split("/")[2] ?? "")).not.toBeNull();
 	});
 });

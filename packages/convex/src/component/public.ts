@@ -9,6 +9,7 @@ import { listNewestFirst } from "./library";
 import { objectLockValidator } from "./lockValidators";
 import { getMediaClient } from "./mediaClient";
 import { missingSearchText, searchTextOf } from "./mediaMeta";
+import { deleteMediaRecords } from "./mediaRecords";
 import { transcodeOutputFields } from "./schema";
 import { UPLOAD_CONFIRM_BACKSTOP_MS } from "./uploads";
 import { workerAction } from "./workerErrors";
@@ -98,19 +99,7 @@ export const deleteVideo = workerAction({
 // is left orphaned but harmless — cascading it would require a `by_video` index.
 export const cleanupVideoRecords = internalMutation({
 	args: { videoId: v.string() },
-	handler: async (ctx, args) => {
-		const record = await ctx.db
-			.query("media")
-			.withIndex("by_key", (q) => q.eq("key", args.videoId))
-			.first();
-		if (record) await ctx.db.delete(record._id);
-
-		const captions = await ctx.db
-			.query("captions")
-			.withIndex("by_media", (q) => q.eq("mediaKey", args.videoId))
-			.collect();
-		await Promise.all(captions.map((caption) => ctx.db.delete(caption._id)));
-	},
+	handler: async (ctx, args) => deleteMediaRecords(ctx, args.videoId),
 });
 
 export const processVideo = workerAction({

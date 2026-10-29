@@ -116,6 +116,14 @@ export class Devultur {
 		return ctx.runAction(this.component.lock.setHold, { keys });
 	}
 
+	/**
+	 * The keys (media ids) of `keys` with no record in the component, each once: references your tables keep to media
+	 * that's gone. At most 500 per call; check a large table in pages, for example from a cron.
+	 */
+	async missingKeys(ctx: QueryCtx, keys: string[]): Promise<string[]> {
+		return ctx.runQuery(this.component.lifecycle.missingKeys, { keys });
+	}
+
 	/** Releases `keys`' holds: a retention `period` starts now; without a retention they're free. */
 	async releaseHold(ctx: ActionCtx, keys: string[]): Promise<Pick<HoldPage, "updated" | "skipped">> {
 		return ctx.runAction(this.component.lock.releaseHold, { keys });
