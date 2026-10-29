@@ -22,11 +22,11 @@ export const MediaLifecycleEventName = {
 export type MediaLifecycleEventType = (typeof MediaLifecycleEventName)[keyof typeof MediaLifecycleEventName];
 
 /**
- * Why the media was deleted: `api` (`DELETE /v1/media/…`), `prefix` (a prefix delete from the Worker's code), `purge`
- * (a teardown of a whole storage prefix), `expired` (its lifetime ran out), `raw-retention` (a video's original,
- * deleted after its transcode).
+ * Why the media was deleted: `api` (`DELETE /v1/media/…`). From the Worker's own code, the reason its prefix delete
+ * passes: `prefix` (the default), `purge` (a teardown of a whole storage prefix), `expired` (a sweeper of files whose
+ * lifetime ran out). A video's original deleted after its transcode is a `media.changed` (`original-deleted`).
  */
-export type MediaDeleteReason = "api" | "prefix" | "purge" | "expired" | "raw-retention";
+export type MediaDeleteReason = "api" | "prefix" | "purge" | "expired";
 
 /**
  * What changed: `lock` (its retention), `hold` (a hold set or released), `replaced` (new bytes at the same key),
@@ -116,8 +116,24 @@ export function isMediaLifecycleEvent(value: unknown): value is MediaLifecycleEv
 	return isWebhookEvent(value) && (value.type === "media.deleted" || value.type === "media.changed");
 }
 
-/** Whether `event` happened after `lastAppliedAt` (ISO time). Nothing applied yet: true. */
-export function isNewerEvent(event: Pick<WebhookEvent, "occurredAt">, lastAppliedAt: string | undefined): boolean {
-	if (!lastAppliedAt) return true;
-	return Date.parse(event.occurredAt) > Date.parse(lastAppliedAt);
+/** The last event applied to a record: its `occurredAt`, and its `id` to break a tie between equal times. */
+export interface AppliedEvent {
+	occurredAt: string;
+	id?: string;
+}
+
+/**
+ * Whether `event` comes after the last one applied (`lastApplied`, or its `occurredAt` alone). Nothing applied yet:
+ * true. Two events at the same time are ordered by `id`, so every receiver settles on the same one; the same event
+ * again is not newer. Without the last one's id, an event at the same time counts as newer.
+ */
+export function isNewerEvent(
+	event: Pick<WebhookEvent, "occurredAt" | "id">,
+	lastApplied: AppliedEvent | string | undefined,
+): boolean {
+	if (!lastApplied) return true;
+	const last = typeof lastApplied === "string" ? { occurredAt: lastApplied } : lastApplied;
+	const difference = Date.parse(event.occurredAt) - Date.parse(last.occurredAt);
+	if (difference !== 0) return difference > 0;
+	return last.id === undefined || event.id > last.id;
 }
