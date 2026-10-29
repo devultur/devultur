@@ -10,10 +10,13 @@
 
 import type * as http from "../http.js";
 import type * as library from "../library.js";
+import type * as lifecycle from "../lifecycle.js";
+import type * as lifecycleValidators from "../lifecycleValidators.js";
 import type * as lock from "../lock.js";
 import type * as lockValidators from "../lockValidators.js";
 import type * as mediaClient from "../mediaClient.js";
 import type * as mediaMeta from "../mediaMeta.js";
+import type * as mediaRecords from "../mediaRecords.js";
 import type * as metadata from "../metadata.js";
 import type * as public_ from "../public.js";
 import type * as uploadKeys from "../uploadKeys.js";
@@ -30,10 +33,13 @@ import { anyApi, componentsGeneric } from "convex/server";
 const fullApi: ApiFromModules<{
   http: typeof http;
   library: typeof library;
+  lifecycle: typeof lifecycle;
+  lifecycleValidators: typeof lifecycleValidators;
   lock: typeof lock;
   lockValidators: typeof lockValidators;
   mediaClient: typeof mediaClient;
   mediaMeta: typeof mediaMeta;
+  mediaRecords: typeof mediaRecords;
   metadata: typeof metadata;
   public: typeof public_;
   uploadKeys: typeof uploadKeys;

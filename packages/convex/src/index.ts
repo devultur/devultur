@@ -17,6 +17,7 @@ export {
 	TranslationProvider,
 } from "@devultur/core";
 export { Devultur } from "./client";
+export type { MediaChangedEventArgs, MediaDeletedEventArgs } from "./component/lifecycleValidators";
 export { DEVULTUR_ERROR_CODES, type DevulturErrorCode, isDevulturErrorCode } from "./error-codes";
 export {
 	type DevulturErrorDetails,
@@ -44,4 +45,5 @@ export {
 } from "./guarded-functions";
 export { mediaFromRecord } from "./media-record";
 export type { DevulturComponentConfig, DevulturUploadConfig, MediaRecord, ProgressRecord } from "./types";
-export { dv } from "./validators";
+export { dv, mediaChangedEventValidator, mediaDeletedEventValidator } from "./validators";
+export { type DevulturWebhookOptions, registerDevulturWebhook } from "./webhook-route";

@@ -36,6 +36,7 @@ import type { DataModel } from "./dataModel.js";
 type Env = {
   readonly DEVULTUR_API_URL: string;
   readonly DEVULTUR_SECRET: string;
+  readonly DEVULTUR_WEBHOOK_SECRET: string | undefined;
 };
 
 /**

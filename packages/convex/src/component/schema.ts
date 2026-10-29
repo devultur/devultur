@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { objectLockValidator } from "./lockValidators";
 
 // Outputs of a preset transcode (carried by `transcode.complete`): each MP4/ladder with its stable URL, the
 // poster (JPG + AVIF per transform), and whether the video ended up with audio.
@@ -85,6 +86,13 @@ export default defineSchema({
 		captionsPending: v.optional(v.boolean()),
 		// A video's duration in seconds, from the transcode's webhook.
 		duration: v.optional(v.number()),
+		// From the Worker's lifecycle events (`media.changed`): the lock in force after the last lock or hold change, the
+		// stored object's etag, and whether a video's original was deleted (its outputs stay). `lifecycleEventAt` is the
+		// `occurredAt` of the last event applied: events arrive unordered, and an older one is ignored.
+		lock: v.optional(objectLockValidator),
+		etag: v.optional(v.string()),
+		originalDeleted: v.optional(v.boolean()),
+		lifecycleEventAt: v.optional(v.string()),
 		createdAt: v.number(),
 	})
 		.index("by_key", ["key"])
@@ -102,6 +110,17 @@ export default defineSchema({
 	})
 		.index("by_media", ["mediaKey"])
 		.index("by_media_locale", ["mediaKey", "locale"]),
+
+	// Lifecycle events already applied, by id: the Worker delivers at least once. Kept 7 days (pruned as events arrive).
+	processedEvents: defineTable({
+		eventId: v.string(),
+		type: v.string(),
+		mediaId: v.string(),
+		occurredAt: v.string(),
+		processedAt: v.number(),
+	})
+		.index("by_event_id", ["eventId"])
+		.index("by_processed_at", ["processedAt"]),
 
 	progress: defineTable({
 		userId: v.string(),
