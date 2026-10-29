@@ -88,11 +88,13 @@ export default defineSchema({
 		duration: v.optional(v.number()),
 		// From the Worker's lifecycle events (`media.changed`): the lock in force after the last lock or hold change, the
 		// stored object's etag, and whether a video's original was deleted (its outputs stay). `lifecycleEventAt` is the
-		// `occurredAt` of the last event applied: events arrive unordered, and an older one is ignored.
+		// `occurredAt` (and `lifecycleEventId`, the tiebreak) of the last event applied: events arrive unordered, and an older
+		// one is ignored.
 		lock: v.optional(objectLockValidator),
 		etag: v.optional(v.string()),
 		originalDeleted: v.optional(v.boolean()),
 		lifecycleEventAt: v.optional(v.string()),
+		lifecycleEventId: v.optional(v.string()),
 		createdAt: v.number(),
 	})
 		.index("by_key", ["key"])
@@ -111,9 +113,11 @@ export default defineSchema({
 		.index("by_media", ["mediaKey"])
 		.index("by_media_locale", ["mediaKey", "locale"]),
 
-	// Lifecycle events already applied, by id: the Worker delivers at least once. Kept 7 days (pruned as events arrive).
+	// Lifecycle events already applied, by id: the Worker delivers at least once. `received`: applied to the component,
+	// the app's handler not done yet (a redelivery runs it again); `handled`: done. Kept 7 days (a daily cron prunes).
 	processedEvents: defineTable({
 		eventId: v.string(),
+		status: v.union(v.literal("received"), v.literal("handled")),
 		type: v.string(),
 		mediaId: v.string(),
 		occurredAt: v.string(),

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { lifecycleEventArgs } from "../src/component/lifecycleValidators";
 import { memoryDb } from "./memory-db";
 
-// `applyLifecycleEvent` and `missingKeys` for real, against an in-memory database.
+// `applyLifecycleEvent`, its pruning and `missingKeys` for real, against an in-memory database.
 vi.mock("../src/component/_generated/server", () => {
 	const definition = (fn: unknown) => fn;
 	return { env: {}, mutation: definition, query: definition, internalMutation: definition };
@@ -141,31 +141,67 @@ describe("applyLifecycleEvent", () => {
 		expect(await record()).toMatchObject({ lock: { hold: true } });
 	});
 
-	it("prunes processed ids older than 7 days", async () => {
+	it("prunes processed ids older than 7 days in its own scheduled run", async () => {
 		const { db, apply } = await withVideo();
 		const old = Date.now() - lifecycle.PROCESSED_EVENT_TTL_MS - 1;
 		await db.insert("processedEvents", {
 			eventId: "evt_old",
+			status: "handled",
 			type: "media.changed",
 			mediaId: "vid1",
 			occurredAt: new Date(old).toISOString(),
 			processedAt: old,
 		});
-
 		await apply(changed("2030-01-01T00:00:00Z"));
+		expect(db.tables.get("processedEvents")).toHaveLength(2);
 
+		const pruned = await lifecycle.pruneProcessedEvents.handler({ db }, {});
+
+		expect(pruned).toBe(1);
 		expect(db.tables.get("processedEvents")?.map((row) => row.eventId)).not.toContain("evt_old");
-		expect(db.tables.get("processedEvents")).toHaveLength(1);
 	});
 
-	it("forgets an event so its redelivery runs again", async () => {
-		const { db, apply } = await withVideo();
-		const event = changed("2030-01-01T00:00:00Z");
-		await apply(event);
+	it("keeps an id awaiting the app's handler open: a redelivery isn't a duplicate until it's handled", async () => {
+		const { db, record } = await withVideo();
+		const event = lifecycleEventArgs(changed("2030-01-01T00:00:00Z"));
+		const apply = (awaitsHandler?: boolean) =>
+			lifecycle.applyLifecycleEvent.handler({ db }, { event, awaitsHandler }) as Promise<{ isDuplicate: boolean }>;
 
-		await lifecycle.forgetLifecycleEvent.handler({ db }, { eventId: event.id });
+		expect((await apply(true)).isDuplicate).toBe(false);
+		// The action died before the handler finished: the Worker redelivers.
+		expect((await apply(true)).isDuplicate).toBe(false);
+		await lifecycle.markLifecycleEventHandled.handler({ db }, { eventId: event.id });
 
-		expect((await apply(event)).isDuplicate).toBe(false);
+		expect((await apply(true)).isDuplicate).toBe(true);
+		expect(await record()).toMatchObject({ lock: { hold: true } });
+	});
+
+	it("ignores an event from before the record was created (an earlier upload at the same key)", async () => {
+		const db = memoryDb();
+		await db.insert("media", { ...VIDEO, createdAt: Date.parse("2030-01-01T00:00:05Z") });
+
+		const stale = await lifecycle.applyLifecycleEvent.handler(
+			{ db },
+			{ event: lifecycleEventArgs(deleted("2030-01-01T00:00:01Z")) },
+		);
+
+		expect(stale).toEqual({ isDuplicate: false, isApplied: false });
+		expect(db.tables.get("media")).toHaveLength(1);
+	});
+
+	it("settles two events at the same time by id, in either arrival order", async () => {
+		const at = "2030-01-01T00:00:01Z";
+		const hold = { ...changed(at), id: "evt_1" };
+		const release = { ...changed(at, { lock: { hold: false } }), id: "evt_2" };
+
+		for (const order of [
+			[hold, release],
+			[release, hold],
+		]) {
+			const { apply, record } = await withVideo();
+			for (const event of order) await apply(event);
+			expect(await record()).toMatchObject({ lock: { hold: false }, lifecycleEventId: "evt_2" });
+		}
 	});
 });
 

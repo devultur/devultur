@@ -55,6 +55,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "mutation",
         "internal",
         {
+          awaitsHandler?: boolean;
           event:
             | {
                 apiVersion: 1;
@@ -62,12 +63,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                   key: string;
                   kind: "image" | "video" | "file" | "asset";
                   mediaId: string;
-                  reason:
-                    | "api"
-                    | "prefix"
-                    | "purge"
-                    | "expired"
-                    | "raw-retention";
+                  reason: "api" | "prefix" | "purge" | "expired";
                   retainedCount?: number;
                   visibility: "public" | "private";
                 };
@@ -102,7 +98,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         any,
         Name
       >;
-      forgetLifecycleEvent: FunctionReference<
+      markLifecycleEventHandled: FunctionReference<
         "mutation",
         "internal",
         { eventId: string },

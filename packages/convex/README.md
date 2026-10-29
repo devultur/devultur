@@ -834,8 +834,8 @@ The Worker can tell the component when media changes outside its own calls: a fi
 or hold changed, a file replaced, a video's original deleted after its transcode (see
 [Media webhooks](https://github.com/devultur/devultur/blob/main/docs/guides/webhooks.md)). The component applies each
 event to its records: `media.deleted` removes the record and its captions, `media.changed` sets its `lock`, `etag` and
-`originalDeleted`. Each event is applied once (by id, remembered 7 days) and only when it's newer than the last one
-applied to the record, since events arrive unordered.
+`originalDeleted`. Each event is applied once (by id, remembered 7 days by an hourly cron) and only when it's newer than
+the last one applied to the record (and than the record itself), since events arrive unordered.
 
 Point the Worker's webhook at the component's route and give both the same signing secret:
 
@@ -910,8 +910,9 @@ export const onMediaDeleted = internalMutation({
 });
 ```
 
-The signing secret is `signingSecret`, or your app's `DEVULTUR_WEBHOOK_SECRET` env var (fails closed without one). If
-your handler throws, the route answers `500` and the Worker's retry runs it again. Order your own changes by
+The signing secret is `signingSecret`, or your app's `DEVULTUR_WEBHOOK_SECRET` env var (fails closed without one). An
+event counts as handled only once your handler returns: if it throws (or the action dies before it's done), the route
+answers `500` and the Worker's retry runs it again, so keep it idempotent. Order your own changes by
 `event.occurredAt` (`isNewerEvent` from `@devultur/core`). Other event types get `204`: transcode events keep going to
 the component's own route.
 
