@@ -50,6 +50,69 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         Name
       >;
     };
+    lifecycle: {
+      applyLifecycleEvent: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          awaitsHandler?: boolean;
+          event:
+            | {
+                apiVersion: 1;
+                data: {
+                  key: string;
+                  kind: "image" | "video" | "file" | "asset";
+                  mediaId: string;
+                  reason: "api" | "prefix" | "purge" | "expired";
+                  retainedCount?: number;
+                  visibility: "public" | "private";
+                };
+                id: string;
+                occurredAt: string;
+                type: "media.deleted";
+              }
+            | {
+                apiVersion: 1;
+                data: {
+                  changes: Array<
+                    "lock" | "hold" | "replaced" | "original-deleted"
+                  >;
+                  etag: string;
+                  key: string;
+                  lock?: {
+                    hold?: boolean;
+                    retention?: {
+                      derivatives?: "inherit" | "original-only";
+                      mode: "governance" | "compliance";
+                      period?: number;
+                      until?: string;
+                    };
+                  };
+                  mediaId: string;
+                };
+                id: string;
+                occurredAt: string;
+                type: "media.changed";
+              };
+        },
+        any,
+        Name
+      >;
+      markLifecycleEventHandled: FunctionReference<
+        "mutation",
+        "internal",
+        { eventId: string },
+        any,
+        Name
+      >;
+      missingKeys: FunctionReference<
+        "query",
+        "internal",
+        { keys: Array<string> },
+        any,
+        Name
+      >;
+    };
     lock: {
       getLock: FunctionReference<
         "action",
