@@ -75,6 +75,31 @@ export {
 	sha256Hex,
 } from "./integrity";
 export type {
+	AppliedEvent,
+	MediaChange,
+	MediaChangedData,
+	MediaChangedEvent,
+	MediaDeletedData,
+	MediaDeletedEvent,
+	MediaDeleteReason,
+	MediaEventKind,
+	MediaLifecycleEvent,
+	MediaLifecycleEventType,
+	ProcessingWebhookEvent,
+	WebhookEnvelope,
+	WebhookEvent,
+	WebhookEventOf,
+	WebhookEventType,
+} from "./lifecycle-events";
+export {
+	createWebhookEvent,
+	isMediaLifecycleEvent,
+	isNewerEvent,
+	isWebhookEvent,
+	MediaLifecycleEventName,
+	WEBHOOK_API_VERSION,
+} from "./lifecycle-events";
+export type {
 	LockResolution,
 	LockValidation,
 	ObjectLock,
@@ -220,6 +245,7 @@ export type {
 	MediaRouterConfig,
 	MediaStatusValue,
 	ProcessingPhase,
+	SignedWebhookVerifyOptions,
 	SignOptions,
 	StorageClient,
 	StorageConfig,
@@ -230,7 +256,30 @@ export type {
 	WorkerConfig,
 } from "./types";
 export { MediaEventName, MediaStatus } from "./types";
-export { createHTTPWebhookHandler, handleWebhook } from "./webhook";
+export {
+	authenticateWebhook,
+	createHTTPWebhookHandler,
+	handleWebhook,
+	LIFECYCLE_EVENT_AT_FIELD,
+	LIFECYCLE_EVENT_ID_FIELD,
+	WebhookAuthError,
+} from "./webhook";
+export type {
+	SignWebhookOptions,
+	VerifyWebhookOptions,
+	WebhookHeaders,
+	WebhookSecret,
+	WebhookVerification,
+	WebhookVerificationFailure,
+} from "./webhook-signature";
+export {
+	DEFAULT_WEBHOOK_TOLERANCE_SECONDS,
+	signWebhook,
+	verifyWebhookSignature,
+	WEBHOOK_ID_HEADER,
+	WEBHOOK_SIGNATURE_HEADER,
+	WEBHOOK_TIMESTAMP_HEADER,
+} from "./webhook-signature";
 export type { AssetEntry, AssetListing, AssetsClient, ListAssetsOptions } from "./worker-assets";
 export type {
 	CaptionsJobResult,
