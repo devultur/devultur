@@ -4,6 +4,7 @@ import { isTranscodeWebhookAuthorized, KV_JOB_TTL_SECONDS, KvPrefix } from "../h
 import { emitProcessingEvent } from "../media-events/emit";
 import { readJobTarget } from "../media-events/job-target";
 import { markTranscodeCompleted } from "../object-lock/transcode-marker";
+import { getPluginHooks } from "../plugin-hooks";
 import type { RequestState } from "../request-state";
 import { addRouteResult } from "../route-result";
 import { JOB_TICKET_HEADER, verifyJobLocation, verifyJobTicket } from "../transcode/job-ticket";
@@ -34,9 +35,10 @@ webhooks.post("/transcode", async (context) => {
 
 	await publishTranscodeJob(context, body);
 	// The launching scope's webhook (the callback has no scope of its own). None stored: this request's.
+	const resolvers = getPluginHooks(context).resolveWebhookTarget;
 	const jobTarget =
-		typeof body.videoId === "string" ? await readJobTarget(context.env.MEDIA_KV, body.videoId) : undefined;
-	const eventTarget = jobTarget ? { target: jobTarget } : {};
+		typeof body.videoId === "string" ? await readJobTarget(context.env, body.videoId, resolvers) : undefined;
+	const eventTarget = jobTarget === undefined ? {} : { target: jobTarget };
 
 	if (body.event === "transcode.complete" && body.videoId) {
 		// The raw is retained unless the config asked to delete it on completion (`deleteOriginalOnSuccess`): only

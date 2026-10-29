@@ -38,7 +38,7 @@ Every event has the same envelope:
 | `key` | What was deleted: the object's key, or a video's folder (`{visibility}/video/{id}`). A whole video is one event. |
 | `mediaId` | The media id (`DevulturMedia.id`). For a file under `asset/`, its key. |
 | `kind` | `image`, `video`, `file` or `asset`. |
-| `reason` | `api` (`DELETE /v1/media/…`). From your Worker's own code (a prefix delete), the reason it passes: `prefix`, `purge`, `expired` or `raw-retention`. |
+| `reason` | `api` (`DELETE /v1/media/…`). From your Worker's own code (a prefix delete), the reason it passes: `prefix` (the default), `purge` (a teardown) or `expired` (a sweeper of expired files). |
 | `retainedCount` | Present when part of the media was kept because it's locked. |
 
 A delete that a lock refuses, or that found nothing, sends nothing. Deleting one output of a video (a playlist, a
@@ -114,8 +114,8 @@ export async function POST(request: Request) {
 ```
 
 `verifyWebhookSignature` refuses a timestamp more than five minutes from the receiver's clock (`toleranceSeconds`
-changes it) and compares signatures in constant time. With `@devultur/server`, `router.handleWebhook(body, {
-signingSecret, headers })` does the same and returns the event. The Convex component verifies them on its
+changes it) and compares signatures in constant time. With `@devultur/server`, `router.verifyWebhook(body, {
+signingSecret, headers })` does the same and returns the event (`router.handleWebhook` stays bearer-only, as in 1.5). The Convex component verifies them on its
 `/webhook` route (see its README).
 
 The secret is either `whsec_` followed by base64 (the Standard Webhooks format; the key is the decoded bytes) or any
@@ -165,17 +165,51 @@ export default createWorker({
 
 | `webhooks` field | What it does |
 | --- | --- |
-| `url` | Where events go. It must be `https` on a public host: `http`, `localhost`, private, link-local and loopback addresses are refused (the event is logged and dropped), and redirects aren't followed. |
+| `scope` | Names this webhook in queued events and transcode jobs, which store only the scope (default `config`; `env` is the variables). See [Secrets are never stored](#secrets-are-never-stored). |
+| `url` | Where events go. It must be `https` on a public host: `http`, `localhost`, private, link-local, loopback and other special-purpose addresses (IPv4 and IPv6, including NAT64, 6to4 and IPv4-mapped forms) are refused, as are hostnames that spell a dotted IPv4 (`10.0.0.1.nip.io`). The event is logged and dropped. Redirects aren't followed. |
 | `secret` | Signing secret, or several during a rotation. |
 | `events` | Types sent. Default `media.deleted` and `media.changed`. |
 | `allowUnsafeUrl` | Allows `http` and private hosts, for local development only (`MEDIA_WEBHOOK_ALLOW_UNSAFE_URL=true` with the variables). |
 
+The URL check reads the URL as written: the Workers runtime has no DNS lookup, so a hostname that **resolves** to a
+private address (your own DNS, a wildcard service spelled with dashes) isn't caught. Which hostnames a scope may use is
+the operator's to decide; don't let untrusted users set `url` without your own allowlist.
+
 A transcode keeps the webhook of the scope that launched it: its `original-deleted` and `transcode.*` events go there,
 even though the runner's callbacks carry no scope.
 
+### Secrets are never stored
+
+Queued events and transcode jobs keep only the target's `scope`. Each delivery attempt resolves the scope again, to
+its URL and the secrets in force then: a rotated or revoked secret takes effect for events already queued, and no
+secret is written to a queue, KV or a log. `env` resolves from the variables; `staticConfig` (from `defaultPlugins`)
+resolves its own `webhooks`; a plugin that sets `config.webhooks` per request gives each one a `scope` and resolves
+it with `resolveWebhookTarget`:
+
+```typescript
+const appWebhooks: WorkerPlugin = {
+  name: "app-webhooks",
+  middleware: {
+    afterAuth: [
+      async (context, next) => {
+        const appId = getRequestState(context).context?.appId as string;
+        updateRequestState(context, { config: { webhooks: { scope: `app:${appId}`, ...(await webhookOf(appId)) } } });
+        await next();
+      },
+    ],
+  },
+  resolveWebhookTarget: (env, scope) => (scope.startsWith("app:") ? webhookOf(scope.slice(4)) : null),
+};
+```
+
+A scope that no longer resolves when its event is delivered drops the event (`undeliverable` in the delivery log).
+
 ### Retries with a queue
 
-Without a queue, each event gets one attempt after the response. Bind a queue to retry failures:
+Without a queue, each event gets one attempt after the response, and at most 10 per request
+(`MAX_DIRECT_DELIVERIES`; the rest are logged as dropped), since each costs subrequests. Bind a queue to retry
+failures and for bulk changes (a hold on a prefix, a prefix delete). A request's events go to the queue in one
+`sendBatch` per 100.
 
 ```toml
 [[queues.producers]]
@@ -189,22 +223,28 @@ dead_letter_queue = "media-webhooks-dlq"
 ```
 
 ```typescript
-import { createWorker, deliverWebhooks } from "@devultur/self-host";
+import { createWebhookConsumer, createWorker, defaultPlugins } from "@devultur/self-host";
 
-const app = createWorker();
-export default { fetch: app.fetch, queue: deliverWebhooks };
+const plugins = defaultPlugins({ webhooks: { url: "https://api.example.com/media-webhooks", secret: "whsec_…" } });
+export default {
+  fetch: createWorker({ plugins }).fetch,
+  // The same plugins: the consumer resolves each message's scope through them.
+  queue: createWebhookConsumer({ plugins }),
+};
 ```
+
+With only the `MEDIA_WEBHOOK_*` variables, `deliverWebhooks` is that consumer with no plugins.
 
 A failed attempt is retried after 30 seconds, 2 minutes, 10 minutes, 1 hour, then every 6 hours: 8 attempts in all,
 over about 19 hours. After the last one the event goes to the dead-letter queue: the queue's own `dead_letter_queue` (keep
 `max_retries = 7`), or a `WEBHOOK_DLQ` producer binding when you bind one. Each attempt is signed again, so a late
-retry still passes the receiver's timestamp check. Queue messages carry the target's URL and secrets, since a retry
-needs them to sign.
+retry still passes the receiver's timestamp check.
 
 ### Delivery log
 
 Each event's last attempt is recorded in `MEDIA_KV` at `webhook-delivery:{eventId}` for 7 days: `status`
-(`delivered`, `retrying`, `failed` or `dead-lettered`), `attempts`, the last `responseStatus` and `error`.
+(`delivered`, `retrying`, `failed`, `dead-lettered` or `undeliverable`), its `scope` and `url`, `attempts`, the
+last `responseStatus` and `error`.
 `readDeliveryRecord(env.MEDIA_KV, eventId)` reads it.
 
 ## Delivering events your own way
@@ -242,5 +282,6 @@ const result = await deletePrefixRespectingLocks({
 ```
 
 A media whose files were all kept gets no event, nor does a video whose outputs were deleted while its locked
-original stayed. A media gets its event from the call that deletes its original. To fill `retainedCount`, build the
+original stayed. A media gets its event from the call that deletes its original. Without a queue, at most 10 events per call are
+delivered. To fill `retainedCount`, build the
 events after the call instead, from everything `onDeleted` collected and `retained: result.retained`.

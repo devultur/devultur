@@ -37,6 +37,7 @@ const noHooks: PluginHooks = {
 	authorizeLockChange: [],
 	onLockAudit: [],
 	onMediaEvent: [],
+	resolveWebhookTarget: [],
 };
 
 async function uploadAsset(worker: Worker, body: Record<string, unknown>): Promise<string> {

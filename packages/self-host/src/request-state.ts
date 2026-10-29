@@ -42,6 +42,12 @@ export interface TranscodeConfig {
  * `MEDIA_WEBHOOK_SECRET` for the request's scope.
  */
 export interface WebhookConfig {
+	/**
+	 * Names this webhook in queued events and transcode jobs, which keep only the scope: its URL and secrets are
+	 * resolved again at delivery (`resolveWebhookTarget` of a plugin; `staticConfig` resolves its own). Default
+	 * `config`. `env` is the `MEDIA_WEBHOOK_*` vars.
+	 */
+	scope?: string;
 	/** An `https` URL on a public host. */
 	url: string;
 	/** Signing secret (`whsec_<base64>` or any string). Several during a rotation: each one signs. */
