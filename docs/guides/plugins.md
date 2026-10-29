@@ -172,8 +172,8 @@ const auditToD1: WorkerPlugin = {
 ```
 
 **`onMediaEvent`** gets every media event (`media.deleted`, `media.changed`) after the response. While any plugin has
-one, the Worker's own signed webhook isn't sent: deliver them your own way (a queue, a database, a webhook per
-tenant). See [Media webhooks](webhooks.md#delivering-events-your-own-way).
+one, the Worker's own signed webhook isn't sent: deliver them your own way (a queue, a database, a webhook of
+your own). See [Media webhooks](webhooks.md#delivering-events-your-own-way).
 
 ## After the route
 
