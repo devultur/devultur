@@ -1,3 +1,4 @@
+import { isBearerOf } from "./bearer";
 import { DEFAULT_PRESIGN_EXPIRY_SECONDS } from "./constants";
 import { contentDispositionInline, sanitizeFilename } from "./filenames";
 import { type DevulturMedia, mediaUrl, publicUrl, resolveVisibility } from "./media";
@@ -13,6 +14,7 @@ import type {
 	CreateUploadUrlOptions,
 	DirectStorageConfig,
 	IssueTokenOptions,
+	MediaEvent,
 	MediaRouter,
 	MediaRouterConfig,
 	SignOptions,
@@ -22,6 +24,7 @@ import type {
 	TranscodeOptions,
 	TranscodeStatusResult,
 	UploadUrlResult,
+	WebhookVerifyOptions,
 	WorkerConfig,
 } from "./types";
 import { authenticateWebhook } from "./webhook";
@@ -153,7 +156,16 @@ export function createMediaRouter(config: MediaRouterConfig): MediaRouter {
 			return verifySignedUrl(signedUrl, deliveryConfig.signSecret);
 		},
 
-		handleWebhook: authenticateWebhook as MediaRouter["handleWebhook"],
+		async handleWebhook(payload: unknown, options: WebhookVerifyOptions): Promise<MediaEvent> {
+			// The Worker authenticates its webhooks with `Authorization: Bearer <secret>` (fails closed without a secret).
+			if (!isBearerOf(options.authorization ?? null, options.secret)) {
+				throw new Error("Unauthorized webhook.");
+			}
+			const event = typeof payload === "string" ? JSON.parse(payload) : payload;
+			return event as MediaEvent;
+		},
+
+		verifyWebhook: authenticateWebhook,
 
 		getMediaUrl(media: DevulturMedia, options?: MediaUrlOptions): string {
 			if (worker) return worker.getMediaUrl(media, options);

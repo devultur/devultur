@@ -75,6 +75,7 @@ export {
 	sha256Hex,
 } from "./integrity";
 export type {
+	AppliedEvent,
 	MediaChange,
 	MediaChangedData,
 	MediaChangedEvent,
@@ -244,6 +245,7 @@ export type {
 	MediaRouterConfig,
 	MediaStatusValue,
 	ProcessingPhase,
+	SignedWebhookVerifyOptions,
 	SignOptions,
 	StorageClient,
 	StorageConfig,
@@ -259,6 +261,7 @@ export {
 	createHTTPWebhookHandler,
 	handleWebhook,
 	LIFECYCLE_EVENT_AT_FIELD,
+	LIFECYCLE_EVENT_ID_FIELD,
 	WebhookAuthError,
 } from "./webhook";
 export type {

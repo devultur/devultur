@@ -6,7 +6,7 @@ import {
 	type MediaLifecycleEvent,
 	type WebhookEvent,
 } from "./lifecycle-events";
-import { type MediaEvent, MediaEventName, MediaStatus, type WebhookVerifyOptions } from "./types";
+import { type MediaEvent, MediaEventName, MediaStatus, type SignedWebhookVerifyOptions } from "./types";
 import { verifyWebhookSignature, WEBHOOK_SIGNATURE_HEADER } from "./webhook-signature";
 
 type PatchFn = (id: string, fields: Record<string, unknown>) => Promise<void>;
@@ -23,8 +23,9 @@ interface HandleWebhookOptions {
 	remove?: RemoveFn;
 }
 
-/** Record field holding the `occurredAt` of the last lifecycle event applied to it (events arrive unordered). */
+/** Record fields holding the `occurredAt` and `id` of the last lifecycle event applied to it (events arrive unordered). */
 export const LIFECYCLE_EVENT_AT_FIELD = "lifecycleEventAt";
+export const LIFECYCLE_EVENT_ID_FIELD = "lifecycleEventId";
 
 /**
  * Applies a media Worker event to your media record through `read` / `patch` (and `remove`).
@@ -33,7 +34,7 @@ export const LIFECYCLE_EVENT_AT_FIELD = "lifecycleEventAt";
  * request captions); otherwise the video goes straight to "ready". `captions.complete` clears `captionsPending`.
  *
  * Lifecycle events: `media.deleted` removes the record; `media.changed` patches its `lock` and `etag`. One older than
- * the last one applied (the record's `lifecycleEventAt`) is ignored. Deduplicating by the event's `id` is the caller's.
+ * the last one applied (the record's `lifecycleEventAt`, ties broken by `lifecycleEventId`) is ignored. Deduplicating by the event's `id` is the caller's.
  */
 export async function handleWebhook(options: HandleWebhookOptions): Promise<void> {
 	const { event } = options;
@@ -46,8 +47,13 @@ async function applyLifecycleEvent(event: MediaLifecycleEvent, options: HandleWe
 	const { recordId, patch, read, remove } = options;
 	const record = await read(recordId);
 	if (!record) return;
-	const lastAppliedAt = record[LIFECYCLE_EVENT_AT_FIELD];
-	if (!isNewerEvent(event, typeof lastAppliedAt === "string" ? lastAppliedAt : undefined)) return;
+	const lastAt = record[LIFECYCLE_EVENT_AT_FIELD];
+	const lastId = record[LIFECYCLE_EVENT_ID_FIELD];
+	const lastApplied =
+		typeof lastAt === "string"
+			? { occurredAt: lastAt, ...(typeof lastId === "string" ? { id: lastId } : {}) }
+			: undefined;
+	if (!isNewerEvent(event, lastApplied)) return;
 	if (event.type === "media.deleted") {
 		await remove?.(recordId);
 		return;
@@ -58,6 +64,7 @@ async function applyLifecycleEvent(event: MediaLifecycleEvent, options: HandleWe
 		...(isLockChange ? { lock } : {}),
 		etag,
 		[LIFECYCLE_EVENT_AT_FIELD]: event.occurredAt,
+		[LIFECYCLE_EVENT_ID_FIELD]: event.id,
 	});
 }
 
@@ -134,7 +141,7 @@ export class WebhookAuthError extends Error {
  */
 export async function authenticateWebhook(
 	payload: unknown,
-	options: WebhookVerifyOptions,
+	options: SignedWebhookVerifyOptions,
 ): Promise<MediaEvent | WebhookEvent> {
 	const signature = headerOf(options.headers, WEBHOOK_SIGNATURE_HEADER);
 	if (signature && options.signingSecret) {
@@ -158,31 +165,20 @@ export async function authenticateWebhook(
 	return event as MediaEvent;
 }
 
-function headerOf(headers: WebhookVerifyOptions["headers"], name: string): string | undefined {
+function headerOf(headers: SignedWebhookVerifyOptions["headers"], name: string): string | undefined {
 	if (!headers) return undefined;
 	if (headers instanceof Headers) return headers.get(name) ?? undefined;
 	return Object.entries(headers).find(([key]) => key.toLowerCase() === name)?.[1] ?? undefined;
 }
 
-export function createHTTPWebhookHandler(options: {
-	secret: string;
-	signingSecret?: WebhookVerifyOptions["signingSecret"];
-}) {
+export function createHTTPWebhookHandler(options: { secret: string }) {
 	return {
 		handler: async (_ctx: unknown, request: Request) => {
-			const body = await request.text();
-			try {
-				const event = await authenticateWebhook(body, {
-					authorization: request.headers.get("Authorization"),
-					secret: options.secret,
-					signingSecret: options.signingSecret,
-					headers: request.headers,
-				});
-				return { event };
-			} catch (error) {
-				if (error instanceof WebhookAuthError) return new Response("Unauthorized", { status: 401 });
-				throw error;
+			if (!isBearerOf(request.headers.get("Authorization"), options.secret)) {
+				return new Response("Unauthorized", { status: 401 });
 			}
+			const event = (await request.json()) as MediaEvent;
+			return { event };
 		},
 	};
 }
