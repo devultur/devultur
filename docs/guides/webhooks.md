@@ -38,7 +38,7 @@ Every event has the same envelope:
 | `key` | What was deleted: the object's key, or a video's folder (`{visibility}/video/{id}`). A whole video is one event. |
 | `mediaId` | The media id (`DevulturMedia.id`). For a file under `asset/`, its key. |
 | `kind` | `image`, `video`, `file` or `asset`. |
-| `reason` | `api` (`DELETE /v1/media/…`). From your Worker's own code (a prefix delete), the reason it passes: `prefix` (the default), `purge` (a teardown) or `expired` (a sweeper of expired files). |
+| `reason` | `api` (`DELETE /v1/media/…`, or a download grant's `DELETE /v1/grant/file`). From your Worker's own code (a prefix delete), the reason it passes: `prefix` (the default), `purge` (a teardown) or `expired` (a sweeper of expired files). |
 | `retainedCount` | Present when part of the media was kept because it's locked. |
 
 A delete that a lock refuses, or that found nothing, sends nothing. Deleting one output of a video (a playlist, a
@@ -115,7 +115,7 @@ export async function POST(request: Request) {
 
 `verifyWebhookSignature` refuses a timestamp more than five minutes from the receiver's clock (`toleranceSeconds`
 changes it) and compares signatures in constant time. With `@devultur/server`, `router.verifyWebhook(body, {
-signingSecret, headers })` does the same and returns the event (`router.handleWebhook` stays bearer-only, as in 1.5). The Convex component verifies them on its
+signingSecret, headers })` does the same and returns the event (`router.handleWebhook` stays bearer-only, as before). The Convex component verifies them on its
 `/webhook` route (see its README).
 
 The secret is either `whsec_` followed by base64 (the Standard Webhooks format; the key is the decoded bytes) or any

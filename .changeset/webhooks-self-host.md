@@ -4,9 +4,10 @@
 
 Send signed media lifecycle webhooks.
 
-- `media.deleted` from `DELETE /v1/media/videos/:id` and `DELETE /v1/media/:key` when something was deleted (none
-  when a lock refuses it), and `media.changed` for lock and hold changes, overwritten originals (`replaced`) and
-  originals deleted after a transcode or by key (`original-deleted`).
+- `media.deleted` from `DELETE /v1/media/videos/:id`, `DELETE /v1/media/:key` and a download grant's
+  `DELETE /v1/grant/file` when something was deleted (none when a lock refuses it), and `media.changed` for lock and
+  hold changes, overwritten originals (`replaced`) and originals deleted after a transcode or by key
+  (`original-deleted`).
 - Configured with `config.webhooks` (`url`, `secret`, `events`), per scope through the request state, or the
   `MEDIA_WEBHOOK_URL` / `MEDIA_WEBHOOK_SECRET` variables. Signed with Standard Webhooks headers; several secrets
   during a rotation. Only `https` URLs on public hosts, unless `allowUnsafeUrl` is set for local development.
