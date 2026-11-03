@@ -5,6 +5,7 @@ import type { CredentialRequest, GrantAccessRequest, PluginHooks } from "../plug
 import { getRouteResult, type RouteResult } from "../route-result";
 import { withSignature } from "../test-fixtures";
 import type { WorkerApp } from "../types";
+import { identifyDownloadGrant } from "./grant-bearer";
 
 // Download grants end to end over the in-memory Worker: the owner issues, lists and revokes; the bearer reads the head,
 // issues links within the caps, deletes the file when allowed and revokes itself. Never through a URL.
@@ -283,6 +284,24 @@ describe("the grant's bearer", () => {
 		expect(blocked.status).toBe(409);
 		expect(worker.mediaBucket.objects.has(`prefix-a/${key}`)).toBe(true);
 		expect((await headFile(worker, issued.grant)).status).toBe(200);
+	});
+
+	it("is identified by its secret, live or not, for a platform to resolve its tenant", async () => {
+		const worker = exportsWorker();
+		const key = await uploadAsset(worker, { path: "exports/identify.zip" });
+		const { issued } = await issueGrant(worker, { key });
+		await worker.send(`/v1/token/grant/${issued.id}`, { method: "DELETE" });
+
+		const probe = new Hono<WorkerApp>().get("/", async (context) => {
+			const identified = await identifyDownloadGrant(context);
+			return identified instanceof Response ? identified : context.json(identified);
+		});
+		const identify = (grant: string) => probe.request("http://worker/", { headers: bearer(grant) }, worker.env);
+		const identified = (await (await identify(issued.grant)).json()) as { grant: Record<string, unknown> };
+		expect(identified).toMatchObject({ publicId: issued.id, grant: { key, storagePrefix: "prefix-a/" } });
+		expect(identified.grant.revokedAt).toEqual(expect.any(Number));
+		expect(identified.grant).not.toHaveProperty("secretHash");
+		expect((await identify("dvg_nope")).status).toBe(401);
 	});
 
 	it("revokes itself, idempotently", async () => {

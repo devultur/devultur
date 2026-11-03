@@ -14,7 +14,7 @@ import {
 	GRANT_METADATA_HEADER,
 	TokenScope,
 } from "@devultur/core";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { type DownloadGrantInfo, DownloadGrantPath } from "../download-grants";
 import { formatGrantPublicId, hashGrantSecret, type ParsedGrantSecret, parseGrantSecret } from "../grant-credential";
 import { cappedExpiry, decideCredential, type GrantAction, gateGrantAccess } from "../plugin-hooks";
@@ -67,6 +67,32 @@ async function readBearer(context: WorkerContext, grants: DurableObjectNamespace
 		secretHash: await hashGrantSecret(parsed.secret),
 		publicId: formatGrantPublicId(parsed),
 	};
+}
+
+/** A grant as its bearer presented it: its public id and record (no secret). */
+export interface IdentifiedGrant {
+	publicId: string;
+	grant: DownloadGrantInfo;
+}
+
+/**
+ * The grant in the request's `Authorization: Bearer`, live or not, or the response refusing it (`401 invalid_grant`,
+ * `grant_in_query`, `501`). For a platform that resolves the grant's tenant before authorizing the request: the
+ * routes still check it's live, belongs to the request's storage prefix, and run the hooks.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: any app that mounts the Worker (its own bindings and variables)
+export async function identifyDownloadGrant(anyContext: Context<any>): Promise<IdentifiedGrant | Response> {
+	const context = anyContext as WorkerContext;
+	const namespaces = grantNamespaces(context);
+	if (!namespaces) return notConfigured(context);
+	const bearer = await readBearer(context, namespaces.grants);
+	if (bearer instanceof Response) return bearer;
+	const identified = await callGrants(bearer.stub, DownloadGrantPath.IDENTIFY, {
+		id: bearer.parsed.grantId,
+		secretHash: bearer.secretHash,
+	});
+	if (!identified.ok) return relayGrantFailure(identified);
+	return { publicId: bearer.publicId, grant: (await identified.json()) as DownloadGrantInfo };
 }
 
 /** The file of a live grant, or 410 if it's gone, expired or was overwritten (a missing file revokes its grants). */

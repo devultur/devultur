@@ -104,6 +104,7 @@ export {
 } from "./route-result";
 export { type AssetListEntry, MAX_ASSET_LIST_LIMIT, MAX_EXPIRED_LOOKUPS } from "./routes/assets";
 export { edgeCacheTag } from "./routes/edge-cache";
+export { type IdentifiedGrant, identifyDownloadGrant } from "./routes/grant-bearer";
 export { servedCacheControl } from "./routes/media";
 export { isObjectExpired } from "./routes/object-response";
 export { MAX_UPLOAD_TOKEN_TTL_SECONDS, UPLOAD_TOKEN_TYPE, uploadGrantFromClaims } from "./routes/token-upload";
