@@ -50,6 +50,8 @@ export const DownloadGrantPath = {
 	CREATE: "/create",
 	/** The live grant for `{ id, secretHash }`. */
 	AUTHORIZE: "/authorize",
+	/** The grant for `{ id, secretHash }`, live or not: who it belongs to, before deciding anything. */
+	IDENTIFY: "/identify",
 	/** Spends one link of a live grant. Body: `{ id, secretHash, expiresIn, maxUses }`. */
 	ISSUE: "/issue",
 	/** Gives back a link spent by `ISSUE` whose creation failed. Body: `{ id }`. */
@@ -144,6 +146,8 @@ export class DownloadGrants {
 				return (body) => this.create(body as unknown as DownloadGrantRecord);
 			case DownloadGrantPath.AUTHORIZE:
 				return (body) => this.authorize(body);
+			case DownloadGrantPath.IDENTIFY:
+				return (body) => this.identify(body);
 			case DownloadGrantPath.ISSUE:
 				return (body) => this.issue(body);
 			case DownloadGrantPath.REFUND:
@@ -174,13 +178,25 @@ export class DownloadGrants {
 		return typeof id === "string" ? this.storage.get<DownloadGrantRecord>(grantKey(id)) : undefined;
 	}
 
-	/** The live record whose secret hash matches, or the response explaining why not. */
-	private async liveRecord(body: GrantCredentialBody): Promise<DownloadGrantRecord | Response> {
+	/** The record whose secret hash matches, live or not, or 401. */
+	private async matchingRecord(body: GrantCredentialBody): Promise<DownloadGrantRecord | Response> {
 		const record = await this.recordOf(body.id);
 		const secretHash = typeof body.secretHash === "string" ? body.secretHash : "";
 		if (!record || !isConstantTimeEqual(secretHash, record.secretHash)) return invalidGrant();
+		return record;
+	}
+
+	/** The live record whose secret hash matches, or the response explaining why not. */
+	private async liveRecord(body: GrantCredentialBody): Promise<DownloadGrantRecord | Response> {
+		const record = await this.matchingRecord(body);
+		if (record instanceof Response) return record;
 		if (isGrantDead(record)) return grantGone();
 		return record;
+	}
+
+	private async identify(body: GrantCredentialBody): Promise<Response> {
+		const record = await this.matchingRecord(body);
+		return record instanceof Response ? record : Response.json(grantInfoOf(record));
 	}
 
 	private async authorize(body: GrantCredentialBody): Promise<Response> {

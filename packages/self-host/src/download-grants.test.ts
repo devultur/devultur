@@ -64,6 +64,16 @@ describe("DownloadGrants", () => {
 		expect((await call(DownloadGrantPath.AUTHORIZE, { id: "other", secretHash: SECRET_HASH })).status).toBe(401);
 	});
 
+	it("identifies a revoked grant by its secret, and nothing without it", async () => {
+		vi.useFakeTimers({ now: NOW });
+		const { call } = grantsObject();
+		await call(DownloadGrantPath.CREATE, grantRecord());
+		await call(DownloadGrantPath.REVOKE, { id: "grant-1" });
+		const identified = await call(DownloadGrantPath.IDENTIFY, credential);
+		expect(await identified.json()).toMatchObject({ id: "grant-1", storagePrefix: "prefix-a/", revokedAt: NOW });
+		expect((await call(DownloadGrantPath.IDENTIFY, { id: "grant-1", secretHash: "b".repeat(64) })).status).toBe(401);
+	});
+
 	it("answers 410 grant_gone once the grant expires", async () => {
 		vi.useFakeTimers({ now: NOW });
 		const { call } = grantsObject();
