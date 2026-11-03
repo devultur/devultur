@@ -203,6 +203,58 @@ When the media host is a subdomain of your app's domain (`media.example.com` nex
 same site. Don't scope auth cookies to the parent domain (`Domain=example.com`): leave out `Domain` so each cookie stays
 on the host that set it, and the media host never receives your users' sessions.
 
+## Download grants
+
+A download link carries no credential, but issuing one takes the Worker's. When another system has to hand a file
+out (a service that answers "download" clicks, a job queue), give it a **download grant** instead: a capability over
+one file, with caps you set, that can't read, list, upload or touch anything else.
+
+```typescript
+import { createGrantClient, createWorkerClient } from "@devultur/core";
+
+// Your backend, with the Worker's credential.
+const { grant, id } = await createWorkerClient(secret, baseUrl).files.createDownloadGrant(key, {
+  link: { maxExpiresIn: 300, maxUses: 1 }, // every link: 5 minutes, one use at most
+  maxLinks: 50, // links it may issue in total
+  canDelete: true,
+  metadata: { exportId: "42" },
+});
+
+// The other system, holding only `grant`.
+const file = createGrantClient(grant, baseUrl);
+await file.head(); // size, sha256, expiresAt, encrypted, metadata; null once gone
+const { url } = await file.createDownloadLink({ expiresIn: 300, filename: "export.zip" });
+```
+
+- **Lifetime.** The grant lives as long as its file (30 days at most for a file without a TTL); `expiresIn` shortens
+  it. It answers `410 grant_gone` once it expires, is revoked, or its file is deleted, expires or is overwritten.
+- **Caps.** A link above `link.maxExpiresIn` (default 900 s, max 86 400) or `link.maxUses` (default 1, max 10) gets
+  `400 link_exceeds_grant` and spends nothing. `maxLinks` (default 20, max 100) is atomic: past it,
+  `410 grant_exhausted`.
+- **Only as a bearer.** The grant travels in `Authorization: Bearer`, never in a URL (`401 grant_in_query`). The links
+  it issues have their own opaque ids.
+- **Deleting.** With `canDelete`, `file.delete()` deletes the file, behind its lock (`409 retention_active`), and every
+  grant of it stops working.
+- **Revoking.** `file.revoke()`, or `files.revokeDownloadGrant(id)` with the public id. `files.listDownloadGrants(key)`
+  shows how many links each grant issued, so a leaked one stands out.
+
+If one leaks, the holder can issue at most `maxLinks` short links to that one file until the grant expires or you
+revoke it.
+
+| Request | Credential | Body → result |
+| --- | --- | --- |
+| `POST /v1/token/grant` | the Worker's | `{ key, expiresIn?, link?, maxLinks?, canDelete?, metadata? }` → `{ grant, id, key, expiresAt, link, maxLinks, canDelete, metadata? }` |
+| `GET /v1/token/grant?key=` | the Worker's | the file's grants, without secrets, with `linksIssued`, `createdAt` and `revokedAt` |
+| `DELETE /v1/token/grant/{id}` | the Worker's | `204` |
+| `HEAD /v1/grant/file` | the grant | the file's headers plus `x-devultur-encrypted`, `x-devultur-grant-key`, `x-devultur-grant-expires-at` and `x-devultur-grant-metadata` |
+| `POST /v1/grant/links` | the grant | `{ expiresIn?, maxUses?, filename?, metadata? }` → `{ id, url, expiresAt, maxUses }` |
+| `DELETE /v1/grant/file` | the grant, with `canDelete` | `204` |
+| `DELETE /v1/grant` | the grant | `204` |
+
+Grants need the `DOWNLOAD_GRANTS` Durable Object next to `DOWNLOAD_LINKS` (see [Self-hosting](self-host.md)).
+`issueCredential` hooks see them as kind `download-grant`, and an `authorizeGrant` hook runs before each use (see
+[Plugins](plugins.md#hooks)).
+
 ## Retention and holds
 
 To keep a file from being deleted or overwritten (WORM), lock it with a compliance or governance retention, or a

@@ -80,6 +80,7 @@ export {
 	isDownloadGrant,
 } from "./download-grant";
 export { contentDispositionAttachment, contentDispositionInline, sanitizeFilename } from "./filenames";
+export { createGrantClient, type GrantClient, type GrantFileHead, type GrantLinkOptions } from "./grant-client";
 export {
 	bytesToHex,
 	EXPIRES_AT_HEADER,

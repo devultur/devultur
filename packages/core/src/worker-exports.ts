@@ -2,6 +2,7 @@
 // scoped to a prefix for the runner, multipart upload with sha256, `head` to verify before publishing, single-use
 // download links, and server-side streaming without exposing credentials.
 import { errorFromResponse } from "./api-error";
+import type { CreateDownloadGrantOptions, DownloadGrant, DownloadGrantListEntry } from "./download-grant";
 import {
 	EXPIRES_AT_HEADER,
 	IMAGE_HEIGHT_HEADER,
@@ -107,6 +108,8 @@ export interface DownloadLinkOptions {
 }
 
 export interface DownloadLink {
+	/** Opaque id of the link (the last segment of `url`), to correlate it with delivery logs and events. */
+	id: string;
 	url: string;
 	expiresAt: number;
 	maxUses: number;
@@ -124,6 +127,15 @@ export interface FilesClient {
 	head(key: string): Promise<FileHead | null>;
 	/** Single-use download link: the link doesn't carry the credential. */
 	createDownloadLink(key: string, options?: DownloadLinkOptions): Promise<DownloadLink>;
+	/**
+	 * A download grant over this one file: hand its `grant` to another system (see `createGrantClient`) so it can issue
+	 * links within the caps you set, without your credential. The secret is returned once.
+	 */
+	createDownloadGrant(key: string, options?: CreateDownloadGrantOptions): Promise<DownloadGrant>;
+	/** Revokes a grant by its public id (`dgr_…`). Idempotent. */
+	revokeDownloadGrant(id: string): Promise<void>;
+	/** The file's grants (live, revoked or expired until cleaned up), without their secrets. */
+	listDownloadGrants(key: string): Promise<DownloadGrantListEntry[]>;
 	/** `Response` of the file to pipe from your backend to your user (without exposing a token). */
 	stream(key: string, options?: { range?: string; signal?: AbortSignal }): Promise<Response>;
 	delete(key: string): Promise<void>;
@@ -144,7 +156,7 @@ function positiveIntHeader(response: Response, name: string): number | undefined
 	return Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
-function headFromResponse(key: string, response: Response): FileHead {
+export function headFromResponse(key: string, response: Response): FileHead {
 	const expiresAt = Number(response.headers.get(EXPIRES_AT_HEADER));
 	const width = positiveIntHeader(response, IMAGE_WIDTH_HEADER);
 	const height = positiveIntHeader(response, IMAGE_HEIGHT_HEADER);
@@ -230,6 +242,21 @@ export function createFilesClient(fetchApi: FetchApi, request: JsonRequest): Fil
 				method: "POST",
 				body: JSON.stringify({ key, ...options }),
 			});
+		},
+
+		createDownloadGrant(key, options = {}) {
+			return request<DownloadGrant>("/v1/token/grant", {
+				method: "POST",
+				body: JSON.stringify({ key, ...options }),
+			});
+		},
+
+		async revokeDownloadGrant(id) {
+			await fetchApi(`/v1/token/grant/${encodeURIComponent(id)}`, { method: "DELETE" });
+		},
+
+		listDownloadGrants(key) {
+			return request<DownloadGrantListEntry[]>(`/v1/token/grant?key=${encodeURIComponent(key)}`);
 		},
 
 		stream(key, options = {}) {

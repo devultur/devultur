@@ -10,8 +10,9 @@ and your React app.
   captions and storyboards.
 - **Images**: on-the-fly resize and format negotiation (AVIF, WebP, JPEG), each variant computed once and cached in
   your bucket.
-- **Private delivery**: short-lived viewer tokens bound to a session, single-use download links, and optional
-  encryption at rest (AES-CTR for files, AES-128 HLS for video).
+- **Private delivery**: short-lived viewer tokens bound to a session, single-use download links, download grants that
+  let another system hand one file out without your credential, and optional encryption at rest (AES-CTR for files,
+  AES-128 HLS for video).
 - **Retention and holds**: keep files from being deleted or overwritten until a date or until released
   (compliance and governance modes, legal holds, an audit trail), enforced by the Worker on every route.
 - **React components**: `VideoPlayer`, `UploadZone`, captions, transcripts and progress tracking.
