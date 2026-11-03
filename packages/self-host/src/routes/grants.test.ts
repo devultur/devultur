@@ -279,7 +279,7 @@ describe("the grant's bearer", () => {
 		expect((await headFile(worker, readOnly.grant)).status).toBe(410);
 	});
 
-	it("emits media.deleted for the file it deleted, like any other delete; a refused delete emits nothing", async () => {
+	it("emits media.deleted with reason grant and its public id, never its secret; a refused delete emits nothing", async () => {
 		const events: WebhookEvent[] = [];
 		const pluginHooks: PluginHooks = { ...noHooks, onMediaEvent: [(_context, event) => void events.push(event)] };
 		const worker = exportsWorker({ pluginHooks });
@@ -302,9 +302,13 @@ describe("the grant's bearer", () => {
 		expect(events.map(({ type, data }) => ({ type, data }))).toEqual([
 			{
 				type: "media.deleted",
-				data: { key, mediaId: key, kind: "asset", visibility: "private", reason: "api" },
+				data: { key, mediaId: key, kind: "asset", visibility: "private", reason: "grant", grantId: deleter.id },
 			},
 		]);
+		expect(deleter.id).toMatch(PUBLIC_ID_PATTERN);
+		const payload = JSON.stringify(events);
+		expect(payload).not.toContain("dvg_");
+		expect(payload).not.toContain(deleter.grant);
 	});
 
 	it("can't delete a held file", async () => {

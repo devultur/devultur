@@ -38,7 +38,8 @@ Every event has the same envelope:
 | `key` | What was deleted: the object's key, or a video's folder (`{visibility}/video/{id}`). A whole video is one event. |
 | `mediaId` | The media id (`DevulturMedia.id`). For a file under `asset/`, its key. |
 | `kind` | `image`, `video`, `file` or `asset`. |
-| `reason` | `api` (`DELETE /v1/media/…`, or a download grant's `DELETE /v1/grant/file`). From your Worker's own code (a prefix delete), the reason it passes: `prefix` (the default), `purge` (a teardown) or `expired` (a sweeper of expired files). |
+| `reason` | `api` (`DELETE /v1/media/…`, with an API key) or `grant` (a download grant's `DELETE /v1/grant/file`, by whoever holds the grant). From your Worker's own code (a prefix delete), the reason it passes: `prefix` (the default), `purge` (a teardown) or `expired` (a sweeper of expired files). |
+| `grantId` | Present only when `reason` is `grant`: the public id (`dgr_…`) of the grant that deleted the file, never its secret. The file's other grants are revoked by the same delete. |
 | `retainedCount` | Present when part of the media was kept because it's locked. |
 
 A delete that a lock refuses, or that found nothing, sends nothing. Deleting one output of a video (a playlist, a

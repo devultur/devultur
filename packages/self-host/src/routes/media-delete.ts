@@ -70,8 +70,15 @@ export function handleKeyDelete(context: Context<WorkerApp>): Promise<Response> 
 	return deleteMediaKey(context, context.req.param("key") ?? "");
 }
 
+/** Who deletes, for the `media.deleted` event: an API key (`api`), or a download grant (by its public id, `dgr_…`). */
+export type KeyDeleteSource = { reason: "api" } | { reason: "grant"; grantId: string };
+
 /** Deletes one file (not a video folder) under the request's storage prefix, behind the lock guard: 204, 404 or 409. */
-export async function deleteMediaKey(context: Context<WorkerApp>, key: string): Promise<Response> {
+export async function deleteMediaKey(
+	context: Context<WorkerApp>,
+	key: string,
+	source: KeyDeleteSource = { reason: "api" },
+): Promise<Response> {
 	const fullKey = storageKey(context, key);
 	// Derived objects get deleted along with their original, never on their own (they'd just regenerate on the next request).
 	if (isVariantKey(key)) {
@@ -87,7 +94,7 @@ export async function deleteMediaKey(context: Context<WorkerApp>, key: string): 
 	if (blocked) return blocked;
 
 	await context.env.MEDIA_BUCKET.delete(fullKey);
-	await emitKeyDeleted(context, key, exists.etag);
+	await emitKeyDeleted(context, key, exists.etag, source);
 	// Variants and the mezzanine live under `{key}/__variants/`. Always swept (even with the kill switch on
 	// `cloudflare`, some may be left over from before). In MEDIA_BUCKET, only that sub-prefix: a bare `{key}/`
 	// could touch another object whose name starts the same way.
@@ -106,12 +113,17 @@ export async function deleteMediaKey(context: Context<WorkerApp>, key: string): 
  * The event of a key delete: `media.deleted` for an image, a file or an asset; for a video, only deleting its original
  * is an event (`original-deleted`: the outputs stay), and a single output of it is none.
  */
-async function emitKeyDeleted(context: Context<WorkerApp>, key: string, etag: string): Promise<void> {
+async function emitKeyDeleted(
+	context: Context<WorkerApp>,
+	key: string,
+	etag: string,
+	source: KeyDeleteSource,
+): Promise<void> {
 	const media = mediaOfKey(key);
 	if (!media) return;
 	if (media.kind !== "video") {
 		const { mediaId, kind, visibility } = media;
-		await emitMediaDeleted(context, { key, mediaId, kind, visibility, reason: "api" });
+		await emitMediaDeleted(context, { key, mediaId, kind, visibility, ...source });
 		return;
 	}
 	if (!isVideoRawKey(key)) return;
