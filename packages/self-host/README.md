@@ -15,7 +15,7 @@ pnpm add @devultur/self-host
 ```typescript
 // src/index.ts
 import { createWorker } from "@devultur/self-host";
-export { DownloadLink } from "@devultur/self-host";
+export { DownloadGrants, DownloadLink } from "@devultur/self-host";
 
 export default createWorker();
 ```
@@ -42,9 +42,17 @@ id = "<your KV namespace id>"
 name = "DOWNLOAD_LINKS"
 class_name = "DownloadLink"
 
+[[durable_objects.bindings]]
+name = "DOWNLOAD_GRANTS"
+class_name = "DownloadGrants"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["DownloadLink"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["DownloadGrants"]
 ```
 
 ```bash

@@ -61,6 +61,24 @@ export {
 } from "./crypto";
 export type { DownloadUrlOptions } from "./download";
 export { getDownloadUrl } from "./download";
+export type {
+	CreateDownloadGrantOptions,
+	DownloadGrant,
+	DownloadGrantLinkCaps,
+	DownloadGrantListEntry,
+	DownloadGrantSummary,
+} from "./download-grant";
+export {
+	DOWNLOAD_GRANT_ID_PREFIX,
+	DOWNLOAD_GRANT_PREFIX,
+	DownloadGrantErrorCode,
+	DownloadGrantLimits,
+	ENCRYPTED_HEADER,
+	GRANT_EXPIRES_AT_HEADER,
+	GRANT_KEY_HEADER,
+	GRANT_METADATA_HEADER,
+	isDownloadGrant,
+} from "./download-grant";
 export { contentDispositionAttachment, contentDispositionInline, sanitizeFilename } from "./filenames";
 export {
 	bytesToHex,

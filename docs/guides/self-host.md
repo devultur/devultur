@@ -44,7 +44,7 @@ media Worker from `@devultur/self-host`:
 
 ```typescript
 import { createWorker } from "@devultur/self-host";
-export { DownloadLink } from "@devultur/self-host";
+export { DownloadGrants, DownloadLink } from "@devultur/self-host";
 
 export default createWorker();
 ```
@@ -98,7 +98,7 @@ It prints a config snippet with the new namespace's `id`. Paste that id into the
 
 #### 4. Write `wrangler.toml`
 
-Bind both buckets, the KV namespace and the `DownloadLink` Durable Object:
+Bind both buckets, the KV namespace and the `DownloadLink` and `DownloadGrants` Durable Objects:
 
 ```toml
 name = "media"
@@ -123,13 +123,22 @@ id = "<kv-namespace-id>"
 name = "DOWNLOAD_LINKS"
 class_name = "DownloadLink"
 
+[[durable_objects.bindings]]
+name = "DOWNLOAD_GRANTS"
+class_name = "DownloadGrants"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["DownloadLink"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["DownloadGrants"]
 ```
 
-Without the `DOWNLOAD_LINKS` binding, `POST /v1/token/download` answers `501`. For staging and production in one
-file, see [Per-environment config](#per-environment-config).
+Without the `DOWNLOAD_LINKS` binding, `POST /v1/token/download` answers `501`; without `DOWNLOAD_GRANTS`, the download
+grant routes do. A Worker deployed before download grants keeps its `v1` migration and adds `v2`. For staging and
+production in one file, see [Per-environment config](#per-environment-config).
 
 #### 5. Set the secrets
 
@@ -189,6 +198,10 @@ account_id = "<your-account-id>"
 tag = "v1"
 new_sqlite_classes = ["DownloadLink"]
 
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["DownloadGrants"]
+
 # Staging
 [env.staging]
 name = "media-staging"
@@ -209,6 +222,10 @@ id = "<staging-kv-namespace-id>"
 name = "DOWNLOAD_LINKS"
 class_name = "DownloadLink"
 
+[[env.staging.durable_objects.bindings]]
+name = "DOWNLOAD_GRANTS"
+class_name = "DownloadGrants"
+
 # Production
 [env.production]
 name = "media-production"
@@ -228,6 +245,10 @@ id = "<production-kv-namespace-id>"
 [[env.production.durable_objects.bindings]]
 name = "DOWNLOAD_LINKS"
 class_name = "DownloadLink"
+
+[[env.production.durable_objects.bindings]]
+name = "DOWNLOAD_GRANTS"
+class_name = "DownloadGrants"
 ```
 
 `vars` aren't inherited either: repeat `[env.<name>.vars]` (for example `TRANSCODE_RUNNER`) in each one. Then set

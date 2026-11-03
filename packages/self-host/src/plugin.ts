@@ -2,6 +2,7 @@
 // (worker-secret auth, static config, credential policy, download links) use the same API as any plugin of yours.
 import type { Hono, MiddlewareHandler } from "hono";
 import type {
+	AuthorizeGrantHook,
 	AuthorizeLockChangeHook,
 	BeforeLinkRedeemHook,
 	IssueCredentialHook,
@@ -42,6 +43,8 @@ export interface WorkerPlugin {
 	issueCredential?: IssueCredentialHook;
 	/** Before `GET /v1/download/{id}` spends a use of a link that still has one. */
 	beforeLinkRedeem?: BeforeLinkRedeemHook;
+	/** Before a download grant is used, or revoked by its public id. */
+	authorizeGrant?: AuthorizeGrantHook;
 	/** Before `PUT /v1/lock` changes a lock: refuse it, or approve a governance bypass. */
 	authorizeLockChange?: AuthorizeLockChangeHook;
 	/** After every lock event, with its audit record. Runs after the response. */
@@ -77,6 +80,7 @@ export function composePlugins(plugins: readonly WorkerPlugin[]): ComposedPlugin
 		hooks: {
 			issueCredential: plugins.flatMap((plugin) => (plugin.issueCredential ? [plugin.issueCredential] : [])),
 			beforeLinkRedeem: plugins.flatMap((plugin) => (plugin.beforeLinkRedeem ? [plugin.beforeLinkRedeem] : [])),
+			authorizeGrant: plugins.flatMap((plugin) => (plugin.authorizeGrant ? [plugin.authorizeGrant] : [])),
 			authorizeLockChange: plugins.flatMap((plugin) =>
 				plugin.authorizeLockChange ? [plugin.authorizeLockChange] : [],
 			),

@@ -1,7 +1,7 @@
 // Test support: a `createWorker()` over in-memory buckets with one locked video (`vid1`: a compliance-retained raw, a
 // caption and an MP4), authenticated with the Worker secret. `settle()` waits for the work run after the response
 // (audit records).
-import { memoryBucket } from "../exports-test-harness";
+import { downloadGrantsNamespace, downloadLinkNamespace, memoryBucket } from "../exports-test-harness";
 import { createWorker } from "../index";
 import type { WorkerPlugin } from "../plugin";
 import { defaultPlugins } from "../plugins";
@@ -30,6 +30,8 @@ export function lockedFixture(options: { plugins?: WorkerPlugin[]; config?: Work
 		DELIVERY_SIGN_SECRET: "delivery",
 		MEDIA_BUCKET: mediaBucket,
 		KEYS_BUCKET: keysBucket,
+		DOWNLOAD_LINKS: downloadLinkNamespace(),
+		DOWNLOAD_GRANTS: downloadGrantsNamespace(),
 		MEDIA_KV: {
 			get: async (key: string, type?: string) => {
 				const value = kv.get(key) ?? null;

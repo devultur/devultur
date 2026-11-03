@@ -17,6 +17,7 @@ export const WorkerAuthErrorCode = {
 const MEDIA_PREFIX = "/v1/media/";
 const DOWNLOAD_PREFIX = "/v1/download/";
 const WEBHOOKS_PREFIX = "/v1/webhooks/";
+const GRANT_PATH = "/v1/grant";
 const UPLOAD_CREATE_PATH = "/v1/upload";
 const UPLOAD_URL_PREFIX = "/v1/upload/";
 
@@ -27,6 +28,7 @@ const isReadMethod = (method: string) => method === "GET" || method === "HEAD";
  * - `/health` and the playback metrics endpoint: public by design.
  * - Media delivery: public media is tokenless; the route itself requires a viewer token for private media.
  * - Download links: the opaque link id is the credential.
+ * - The bearer's download grant routes: the grant is the credential (the route checks it).
  * - Webhooks: they check their own shared secret.
  */
 export function isOpenRoute(method: string, path: string): boolean {
@@ -34,6 +36,7 @@ export function isOpenRoute(method: string, path: string): boolean {
 	if (path === "/health") return isReadMethod(method);
 	if (path === "/v1/metrics/playback") return method === "POST";
 	if (path.startsWith(MEDIA_PREFIX) || path.startsWith(DOWNLOAD_PREFIX)) return isReadMethod(method);
+	if (path === GRANT_PATH || path.startsWith(`${GRANT_PATH}/`)) return true;
 	return path.startsWith(WEBHOOKS_PREFIX) && method === "POST";
 }
 

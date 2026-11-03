@@ -280,6 +280,7 @@ describe("single-use download links", () => {
 		const seen: DownloadLinkInfo[] = [];
 		const pluginHooks: PluginHooks = {
 			issueCredential: [],
+			authorizeGrant: [],
 			authorizeLockChange: [],
 			onLockAudit: [],
 			beforeLinkRedeem: [
