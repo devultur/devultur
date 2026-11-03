@@ -828,11 +828,103 @@ These are server-side calls: `exposeApi` never lets a browser choose or change a
 [Retention and holds](https://github.com/devultur/devultur/blob/main/docs/guides/object-lock.md) guide covers the model,
 what's enforced and the caveats.
 
+## Media lifecycle webhooks
+
+The Worker can tell the component when media changes outside its own calls: a file deleted by another caller, a lock
+or hold changed, a file replaced, a video's original deleted after its transcode (see
+[Media webhooks](https://github.com/devultur/devultur/blob/main/docs/guides/webhooks.md)). The component applies each
+event to its records: `media.deleted` removes the record and its captions, `media.changed` sets its `lock`, `etag` and
+`originalDeleted`. Each event is applied once (by id, remembered 7 days by an hourly cron) and only when it's newer than
+the last one applied to the record (and than the record itself), since events arrive unordered.
+
+Point the Worker's webhook at the component's route and give both the same signing secret:
+
+```bash
+echo "whsec_$(openssl rand -base64 32)"              # the secret
+wrangler secret put MEDIA_WEBHOOK_SECRET            # on the Worker
+npx convex env set DEVULTUR_WEBHOOK_SECRET whsec_…  # on Convex
+```
+
+```toml
+# the Worker's wrangler.toml
+[vars]
+MEDIA_WEBHOOK_URL = "https://<deployment>.convex.site/devultur/webhook"
+```
+
+```typescript
+// convex/convex.config.ts: declare it and bind it, like the other two
+const app = defineApp({
+  env: {
+    DEVULTUR_SECRET: v.string(),
+    DEVULTUR_API_URL: v.string(),
+    DEVULTUR_WEBHOOK_SECRET: v.optional(v.string()),
+  },
+});
+app.use(devultur, {
+  httpPrefix: "/devultur/",
+  env: {
+    DEVULTUR_SECRET: app.env.DEVULTUR_SECRET,
+    DEVULTUR_API_URL: app.env.DEVULTUR_API_URL,
+    DEVULTUR_WEBHOOK_SECRET: app.env.DEVULTUR_WEBHOOK_SECRET,
+  },
+});
+```
+
+The route still takes the transcode events with the `DEVULTUR_SECRET` bearer. A signed request is verified with
+`DEVULTUR_WEBHOOK_SECRET` (two space-separated values during a rotation); without it, signed requests get `401`.
+
+### Your own references
+
+When your tables keep media references too, register the route in your app instead, with handlers of your own. It
+applies each event to the component first, then runs your internal mutation once per event:
+
+```typescript
+// convex/http.ts
+import { httpRouter } from "convex/server";
+import { registerDevulturWebhook } from "@devultur/convex";
+import { components, internal } from "./_generated/api";
+
+const http = httpRouter();
+registerDevulturWebhook(http, components.devultur, {
+  path: "/media-webhooks", // MEDIA_WEBHOOK_URL = https://<deployment>.convex.site/media-webhooks
+  onMediaDeleted: internal.media.onMediaDeleted,
+  onMediaChanged: internal.media.onMediaChanged,
+});
+export default http;
+```
+
+```typescript
+// convex/media.ts
+import { mediaDeletedEventValidator } from "@devultur/convex";
+import { internalMutation } from "./_generated/server";
+
+export const onMediaDeleted = internalMutation({
+  args: { event: mediaDeletedEventValidator },
+  handler: async (ctx, { event }) => {
+    const posts = await ctx.db
+      .query("posts")
+      .withIndex("by_cover_id", (q) => q.eq("coverId", event.data.mediaId))
+      .collect();
+    await Promise.all(posts.map((post) => ctx.db.patch(post._id, { coverId: undefined })));
+  },
+});
+```
+
+The signing secret is `signingSecret`, or your app's `DEVULTUR_WEBHOOK_SECRET` env var (fails closed without one). An
+event counts as handled only once your handler returns: if it throws (or the action dies before it's done), the route
+answers `500` and the Worker's retry runs it again, so keep it idempotent. Order your own changes by
+`event.occurredAt` (`isNewerEvent` from `@devultur/core`). Other event types get `204`: transcode events keep going to
+the component's own route.
+
+To find references left dangling before you had webhooks (or by a lost event), check them in pages, for example from a
+cron: `devultur.missingKeys(ctx, ids)` returns the media ids, at most 500 per call, that have no record.
+
 ## Documentation
 
 Guides and API reference: [github.com/devultur/devultur/tree/main/docs](https://github.com/devultur/devultur/tree/main/docs).
 The guides this README links to ship with the package, for the installed version, in
-`node_modules/@devultur/convex/docs/guides/`: `video-player.md`, `self-host.md`, `plugins.md` and `object-lock.md`.
+`node_modules/@devultur/convex/docs/guides/`: `video-player.md`, `self-host.md`, `plugins.md`, `object-lock.md` and
+`webhooks.md`.
 
 ## License
 

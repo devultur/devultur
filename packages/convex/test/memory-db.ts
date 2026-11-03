@@ -1,11 +1,13 @@
 // A minimal in-memory stand-in for a Convex `ctx.db`: enough of insert / get / patch / delete and
-// `query(table).withIndex(name, (q) => q.eq(...)).first() | .collect()` (plus `.filter()` and `.collect()` on a whole
-// table, `.paginate()` and `.withSearchIndex(...).paginate()`) to run the component's functions for real.
+// `query(table).withIndex(name, (q) => q.eq(...).lt(...)).first() | .collect() | .take(n)` (plus `.filter()` and
+// `.collect()` on a whole table, `.paginate()` and `.withSearchIndex(...).paginate()`) to run the component's functions
+// for real.
 
 type Document = Record<string, unknown> & { _id: string };
 
 interface IndexRange {
 	eq(field: string, value: unknown): IndexRange;
+	lt(field: string, value: number): IndexRange;
 }
 
 interface SearchRange {
@@ -58,11 +60,20 @@ export function memoryDb() {
 		},
 		query(table: string) {
 			const conditions: [string, unknown][] = [];
+			const below: [string, number][] = [];
 			const matches = () =>
-				rows(table).filter((document) => conditions.every(([field, value]) => document[field] === value));
+				rows(table).filter(
+					(document) =>
+						conditions.every(([field, value]) => document[field] === value) &&
+						below.every(([field, value]) => (document[field] as number) < value),
+				);
 			const range: IndexRange = {
 				eq(field, value) {
 					conditions.push([field, value]);
+					return range;
+				},
+				lt(field, value) {
+					below.push([field, value]);
 					return range;
 				},
 			};
@@ -95,7 +106,12 @@ export function memoryDb() {
 			return {
 				withIndex(_index: string, select: (q: IndexRange) => IndexRange) {
 					select(range);
-					return { first: async () => matches()[0] ?? null, collect: async () => matches(), order };
+					return {
+						first: async () => matches()[0] ?? null,
+						collect: async () => matches(),
+						take: async (count: number) => matches().slice(0, count),
+						order,
+					};
 				},
 				withSearchIndex(_index: string, select: (q: SearchRange) => SearchRange) {
 					select(search);

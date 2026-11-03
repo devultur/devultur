@@ -38,3 +38,14 @@ export const dv = {
 		});
 	},
 };
+
+/**
+ * Validators of the `{ event }` your `registerDevulturWebhook` handlers receive.
+ *
+ * @example
+ * export const onMediaDeleted = internalMutation({
+ *   args: { event: mediaDeletedEventValidator },
+ *   handler: async (ctx, { event }) => { ... },
+ * });
+ */
+export { mediaChangedEventValidator, mediaDeletedEventValidator } from "./component/lifecycleValidators";
