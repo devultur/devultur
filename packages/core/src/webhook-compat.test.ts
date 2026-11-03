@@ -1,4 +1,4 @@
-// 1.5.x call sites of the webhook API compile, and type their results, exactly as before. Checked by `tsc` (the
+// 1.6.x call sites of the webhook API compile, and type their results, exactly as before. Checked by `tsc` (the
 // package's typecheck) through `expectTypeOf`, and run as plain tests.
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { createWebhookEvent, type WebhookEvent } from "./lifecycle-events";
@@ -10,7 +10,7 @@ import { signWebhook } from "./webhook-signature";
 const router = createMediaRouter({ baseUrl: "https://media.example", secret: "worker-secret" });
 const transcodeStarted = JSON.stringify({ event: "transcode.started", videoId: "v1", totalSegments: 1, duration: 2 });
 
-describe("1.5.x webhook call sites", () => {
+describe("1.6.x webhook call sites", () => {
 	it("router.handleWebhook with options typed WebhookVerifyOptions returns a MediaEvent", async () => {
 		const options: WebhookVerifyOptions = { authorization: "Bearer worker-secret", secret: "worker-secret" };
 		const event = await router.handleWebhook(transcodeStarted, options);
