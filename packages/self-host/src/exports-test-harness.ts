@@ -8,6 +8,7 @@
 import type { CacheRule, ObjectLock, SecurityPolicy } from "@devultur/core";
 import { createHash } from "node:crypto";
 import { Hono } from "hono";
+import type { DownloadGrantState, DownloadGrantStorage } from "./download-grants";
 import { DownloadLink, type DownloadLinkState, type DownloadLinkStorage } from "./download-link";
 import { type PluginContext, updateRequestState } from "./request-state";
 import { assets } from "./routes/assets";
@@ -191,21 +192,29 @@ function memoryKv() {
 	};
 }
 
-function memoryDurableStorage(): DownloadLinkStorage & { alarm?: number } {
+type MemoryDurableStorage = DownloadLinkStorage & DownloadGrantStorage & { alarm?: number };
+
+function memoryDurableStorage(): MemoryDurableStorage {
 	const values = new Map<string, unknown>();
-	const storage: DownloadLinkStorage & { alarm?: number } = {
+	const storage: MemoryDurableStorage = {
 		get: async <T>(key: string) => values.get(key) as T | undefined,
 		put: async <T>(key: string, value: T) => void values.set(key, value),
+		list: async <T>({ prefix }: { prefix: string }) =>
+			new Map([...values].filter(([key]) => key.startsWith(prefix))) as Map<string, T>,
+		delete: async (key: string) => values.delete(key),
 		deleteAll: async () => values.clear(),
 		setAlarm: async (time: number) => {
 			storage.alarm = time;
+		},
+		deleteAlarm: async () => {
+			storage.alarm = undefined;
 		},
 	};
 	return storage;
 }
 
 // Real `blockConcurrencyWhile`: nothing else runs in the instance until the callback finishes (per-instance queue).
-function memoryDurableState(): DownloadLinkState {
+export function memoryDurableState(): DownloadLinkState & DownloadGrantState & { storage: MemoryDurableStorage } {
 	let tail: Promise<unknown> = Promise.resolve();
 	return {
 		storage: memoryDurableStorage(),
