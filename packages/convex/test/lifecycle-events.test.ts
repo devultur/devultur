@@ -1,6 +1,11 @@
-import { createWebhookEvent, type MediaChangedData, type MediaDeletedData } from "@devultur/core";
+import {
+	createWebhookEvent,
+	type MediaChangedData,
+	type MediaDeletedData,
+	type MediaDeleteReason,
+} from "@devultur/core";
 import { describe, expect, it, vi } from "vitest";
-import { lifecycleEventArgs } from "../src/component/lifecycleValidators";
+import { lifecycleEventArgs, mediaDeletedEventValidator } from "../src/component/lifecycleValidators";
 import { memoryDb } from "./memory-db";
 
 // `applyLifecycleEvent`, its pruning and `missingKeys` for real, against an in-memory database.
@@ -132,6 +137,24 @@ describe("applyLifecycleEvent", () => {
 
 		expect(late.isApplied).toBe(false);
 		expect(await record()).toBeNull();
+	});
+
+	it("removes the record on a grant's delete and keeps the grant's id for the app", async () => {
+		const { apply, record } = await withVideo();
+		const event = deleted("2030-01-01T00:00:00Z", { reason: "grant", grantId: "dgr_abc" });
+
+		await apply(event);
+
+		expect(lifecycleEventArgs(event).data).toMatchObject({ reason: "grant", grantId: "dgr_abc" });
+		expect(lifecycleEventArgs(deleted("2030-01-01T00:00:00Z")).data).not.toHaveProperty("grantId");
+		expect(await record()).toBeNull();
+	});
+
+	it("accepts every delete reason the Worker sends", () => {
+		const reasons = mediaDeletedEventValidator.fields.data.fields.reason.members.map(({ value }) => value);
+		const everyReason = ["api", "grant", "prefix", "purge", "expired"] satisfies MediaDeleteReason[];
+
+		expect(reasons.toSorted()).toEqual(everyReason.toSorted());
 	});
 
 	it("ignores fields a newer Worker adds", async () => {

@@ -13,5 +13,6 @@ Apply the Worker's media lifecycle webhooks to the component's records.
 - `registerDevulturWebhook(http, components.devultur, { path, signingSecret?, onMediaDeleted?, onMediaChanged? })`
   registers the route in your app: it applies each event to the component, then runs your internal mutation; the event
   counts as handled only once that returns, so a failure or a crash in between is retried.
-  `mediaDeletedEventValidator` and `mediaChangedEventValidator` validate its `{ event }`.
+  `mediaDeletedEventValidator` and `mediaChangedEventValidator` validate its `{ event }`; a download grant's delete
+  arrives with `reason: "grant"` and the grant's public id in `grantId`.
 - `devultur.missingKeys(ctx, keys)` returns the media ids with no record, to find dangling references.

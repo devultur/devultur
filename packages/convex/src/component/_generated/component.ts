@@ -60,10 +60,11 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             | {
                 apiVersion: 1;
                 data: {
+                  grantId?: string;
                   key: string;
                   kind: "image" | "video" | "file" | "asset";
                   mediaId: string;
-                  reason: "api" | "prefix" | "purge" | "expired";
+                  reason: "api" | "grant" | "prefix" | "purge" | "expired";
                   retainedCount?: number;
                   visibility: "public" | "private";
                 };

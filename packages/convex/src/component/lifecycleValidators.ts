@@ -19,7 +19,15 @@ export const mediaDeletedEventValidator = v.object({
 		mediaId: v.string(),
 		kind: v.union(v.literal("image"), v.literal("video"), v.literal("file"), v.literal("asset")),
 		visibility: v.union(v.literal("public"), v.literal("private")),
-		reason: v.union(v.literal("api"), v.literal("prefix"), v.literal("purge"), v.literal("expired")),
+		reason: v.union(
+			v.literal("api"),
+			v.literal("grant"),
+			v.literal("prefix"),
+			v.literal("purge"),
+			v.literal("expired"),
+		),
+		/** The download grant's public id (`dgr_…`), only with `reason: "grant"`. */
+		grantId: v.optional(v.string()),
 		retainedCount: v.optional(v.number()),
 	}),
 });
@@ -66,8 +74,8 @@ function lockArgs(lock: NonNullable<MediaChangedEventArgs["data"]["lock"]>) {
 export function lifecycleEventArgs(event: MediaLifecycleEvent): LifecycleEventArgs {
 	const envelope = { id: event.id, occurredAt: event.occurredAt, apiVersion: 1 as const };
 	if (event.type === "media.deleted") {
-		const { key, mediaId, kind, visibility, reason, retainedCount } = event.data;
-		const data = defined({ key, mediaId, kind, visibility, reason, retainedCount });
+		const { key, mediaId, kind, visibility, reason, grantId, retainedCount } = event.data;
+		const data = defined({ key, mediaId, kind, visibility, reason, grantId, retainedCount });
 		return { ...envelope, type: event.type, data };
 	}
 	const { key, mediaId, changes, lock, etag } = event.data;
