@@ -1,5 +1,14 @@
 # @devultur/react
 
+## 1.6.1
+
+### Patch Changes
+
+- [#72](https://github.com/devultur/devultur/pull/72) [`882a171`](https://github.com/devultur/devultur/commit/882a171c7b4ae5cba0255d49cb0f2d39dc5da7db) Thanks [@demarchenac](https://github.com/demarchenac)! - A download link whose file was deleted answers `410 file_gone` instead of `404`: the link existed, its file doesn't (`@devultur/convex` labels the code in English and Spanish). Removes the reads of the field names renamed before 1.0 in download links and pending uploads (`callerContext`, `objectMetadata`), now that no link or pending upload written with them can still be alive, and two unused bindings in `useVideoPlayer`.
+
+- Updated dependencies []:
+  - @devultur/core@1.6.1
+
 ## 1.6.0
 
 ### Patch Changes
