@@ -59,6 +59,18 @@ export const devulturErrorLabels: DevulturErrorLabels = {
 	link_expired: "Este enlace de descarga ya venció.",
 	link_used: "Este enlace de descarga ya se usó.",
 	not_configured: "Esta función no está configurada.",
+	invalid_grant: "Este permiso de descarga no es válido.",
+	grant_gone: "Este permiso de descarga ya no es válido.",
+	grant_exhausted: "Este permiso de descarga ya emitió todos sus enlaces.",
+	grant_exists: "Este permiso de descarga ya existe.",
+	grant_in_query: "Envía el permiso de descarga en el encabezado Authorization, nunca en una URL.",
+	grant_not_found: "Este permiso de descarga no existe.",
+	grant_cannot_delete: "Este permiso de descarga no puede eliminar su archivo.",
+	link_exceeds_grant: "El enlace de descarga supera lo que permite el permiso.",
+	invalid_link_caps: "Los límites del enlace de descarga no son válidos.",
+	invalid_max_links: "El número de enlaces no es válido.",
+	invalid_can_delete: "Si el permiso puede eliminar su archivo debe ser verdadero o falso.",
+	invalid_metadata: "Los metadatos no son válidos.",
 	retention_active: (details) => {
 		if (details.hold === true) return "Este archivo tiene una retención legal y no se puede modificar ni eliminar.";
 		const until = formatDate(details.until, LOCALE);
