@@ -4,15 +4,9 @@
 // interleaves with another issue. One instance per file (not per grant) lets the owner list a file's grants and revoke
 // one by its public id without an index. Only the SHA-256 of each grant's secret is stored. An alarm at the earliest
 // expiry drops expired grants. No `cloudflare:workers` import (a class with `fetch`): Node tests pass a fake storage.
+import { DownloadGrantErrorCode, type DownloadGrantLinkCaps } from "@devultur/core";
 import { isConstantTimeEqual } from "./bearer";
 import type { PluginContext } from "./request-state";
-
-export interface DownloadGrantLinkCaps {
-	/** Longest `expiresIn` (seconds) of a link the grant issues. */
-	maxExpiresIn: number;
-	/** Most `maxUses` of a link the grant issues. */
-	maxUses: number;
-}
 
 export interface DownloadGrantRecord {
 	/** Grant id, unique within its file. */
@@ -64,14 +58,6 @@ export const DownloadGrantPath = {
 	LIST: "/list",
 	/** Revokes every grant of the file: it's gone. They stay listed until they expire. */
 	REVOKE_ALL: "/revoke-all",
-} as const;
-
-export const DownloadGrantErrorCode = {
-	INVALID: "invalid_grant",
-	GONE: "grant_gone",
-	EXHAUSTED: "grant_exhausted",
-	LINK_EXCEEDS_GRANT: "link_exceeds_grant",
-	NOT_FOUND: "grant_not_found",
 } as const;
 
 /** Storage surface of a DO that the class uses (the Workers one satisfies it; tests pass a Map). */

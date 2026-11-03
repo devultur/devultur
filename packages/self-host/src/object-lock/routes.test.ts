@@ -149,6 +149,22 @@ const ROUTES: Record<string, Classification> = {
 	"POST /v1/token": { nonDestructive: "signs a viewer token" },
 	"POST /v1/token/upload": { nonDestructive: "signs an upload token" },
 	"POST /v1/token/download": { nonDestructive: "issues a download link" },
+	"POST /v1/token/grant": { nonDestructive: "issues a download grant" },
+	"DELETE /v1/token/grant/:id": { nonDestructive: "revokes a download grant" },
+	"POST /v1/grant/links": { nonDestructive: "issues a download link with a grant" },
+	"DELETE /v1/grant": { nonDestructive: "revokes the grant it's sent with" },
+	"DELETE /v1/grant/file": {
+		guarded: async ({ send, isIntact }) => {
+			const issued = await send("/v1/token/grant", {
+				method: "POST",
+				body: JSON.stringify({ key: RAW_KEY, canDelete: true }),
+			});
+			const { grant } = (await issued.json()) as { grant: string };
+			const deleted = await send("/v1/grant/file", { method: "DELETE", headers: { Authorization: `Bearer ${grant}` } });
+			await expectRetentionActive(deleted);
+			expect(isIntact()).toBe(true);
+		},
+	},
 };
 
 const WRITE_METHODS = new Set(["POST", "PUT", "DELETE", "PATCH"]);

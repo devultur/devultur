@@ -73,6 +73,9 @@ export interface WorkerEnv {
 	// Durable Object of the one-time-use download links (`DownloadLink`, see download-link.ts). Without the
 	// binding `POST /v1/token/download` answers 501.
 	DOWNLOAD_LINKS?: DurableObjectNamespace;
+	// Durable Object of the download grants, one per file (`DownloadGrants`, see download-grants.ts). Without the
+	// binding (or without `DOWNLOAD_LINKS`) the grant routes answer 501.
+	DOWNLOAD_GRANTS?: DurableObjectNamespace;
 	// Who does the image transforms. Empty/`worker` (default) = WASM codecs in the Worker + variant in R2,
 	// with Cloudflare Images as a fallback; `cloudflare` = kill switch, everything goes to `cf.image` like before.
 	IMAGE_TRANSFORMS?: string;

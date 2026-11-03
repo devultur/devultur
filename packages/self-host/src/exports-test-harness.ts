@@ -9,10 +9,13 @@ import type { CacheRule, ObjectLock, SecurityPolicy } from "@devultur/core";
 import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import type { DownloadGrantState, DownloadGrantStorage } from "./download-grants";
+import { DownloadGrants } from "./download-grants";
 import { DownloadLink, type DownloadLinkState, type DownloadLinkStorage } from "./download-link";
 import { type PluginContext, updateRequestState } from "./request-state";
 import { assets } from "./routes/assets";
 import { download, handleDownloadLink } from "./routes/download";
+import { grantBearer } from "./routes/grant-bearer";
+import { grantOwner } from "./routes/grant-owner";
 import { media } from "./routes/media";
 import { token } from "./routes/token";
 import { upload } from "./routes/upload";
@@ -245,6 +248,33 @@ export function downloadLinkNamespace() {
 	};
 }
 
+/**
+ * In-memory DO namespace of `DownloadGrants`, with ids like Workers': 64-hex hashes of the name, readable back with
+ * `idFromString`.
+ */
+export function downloadGrantsNamespace() {
+	const instances = new Map<string, DownloadGrants>();
+	const instanceFor = (id: string) => {
+		const existing = instances.get(id);
+		if (existing) return existing;
+		const created = new DownloadGrants(memoryDurableState());
+		instances.set(id, created);
+		return created;
+	};
+	const durableId = (hex: string) => ({ toString: () => hex });
+	return {
+		instances,
+		idFromName: (name: string) => durableId(createHash("sha256").update(name).digest("hex")),
+		idFromString: (hex: string) => {
+			if (!/^[0-9a-f]{64}$/.test(hex)) throw new TypeError("Invalid Durable Object id");
+			return durableId(hex);
+		},
+		get: (id: { toString(): string }) => ({
+			fetch: (input: string, init?: RequestInit) => instanceFor(id.toString()).fetch(new Request(input, init)),
+		}),
+	};
+}
+
 /** Scope of the test worker (beyond its `prefix-a/` storage prefix) and other context variables. */
 export interface ExportsWorkerOptions extends Partial<WorkerVariables> {
 	uploadGrant?: UploadGrant;
@@ -255,6 +285,8 @@ export interface ExportsWorkerOptions extends Partial<WorkerVariables> {
 	maxFileLifetimeSeconds?: number;
 	uploadMetadata?: Record<string, string>;
 	lock?: ObjectLock;
+	/** Storage prefix of the requests (default `prefix-a/`). */
+	storagePrefix?: string;
 }
 
 export function exportsWorker(options: ExportsWorkerOptions = {}) {
@@ -267,6 +299,7 @@ export function exportsWorker(options: ExportsWorkerOptions = {}) {
 		maxFileLifetimeSeconds,
 		uploadMetadata,
 		lock,
+		storagePrefix = "prefix-a/",
 		...variables
 	} = options;
 	// One clock for both buckets, like R2's: a key and the object it encrypts compare by when each was written.
@@ -276,10 +309,11 @@ export function exportsWorker(options: ExportsWorkerOptions = {}) {
 	const keysBucket = memoryBucket({ now });
 	const kv = memoryKv();
 	const links = downloadLinkNamespace();
+	const grants = downloadGrantsNamespace();
 	const app = new Hono<WorkerApp>();
 	app.use("*", async (context, next) => {
 		updateRequestState(context, {
-			storagePrefix: "prefix-a/",
+			storagePrefix,
 			config: {
 				...(security ? { security } : {}),
 				...(cacheRules ? { cacheRules } : {}),
@@ -298,12 +332,15 @@ export function exportsWorker(options: ExportsWorkerOptions = {}) {
 	app.route("/v1/token", token);
 	app.post("/v1/token/download", handleDownloadLink);
 	app.route("/v1/download", download);
+	app.route("/v1/token/grant", grantOwner);
+	app.route("/v1/grant", grantBearer);
 	app.route("/v1/assets", assets);
 	const env = {
 		MEDIA_BUCKET: mediaBucket,
 		KEYS_BUCKET: keysBucket,
 		MEDIA_KV: kv,
 		DOWNLOAD_LINKS: links,
+		DOWNLOAD_GRANTS: grants,
 		DELIVERY_SIGN_SECRET: SIGN_SECRET,
 	} as unknown as WorkerApp["Bindings"];
 	const waits: Promise<unknown>[] = [];
@@ -319,5 +356,5 @@ export function exportsWorker(options: ExportsWorkerOptions = {}) {
 			body: JSON.stringify(body),
 			headers: { "Content-Type": "application/json", ...headers },
 		});
-	return { app, env, mediaBucket, keysBucket, kv, links, send, postJson, settle };
+	return { app, env, mediaBucket, keysBucket, kv, links, grants, send, postJson, settle };
 }

@@ -2,18 +2,25 @@
 // the hooks of every plugin in order and hands the composed result to the routes through a context variable.
 import type { ObjectLock } from "@devultur/core";
 import type { Context } from "hono";
+import type { DownloadGrantInfo } from "./download-grants";
 import type { LockAuditRecord } from "./object-lock/audit";
 import type { Json } from "./request-state";
 import type { DownloadLinkInfo } from "./route-result";
 
-/** What is being issued: a viewer token, an upload token, a download link or the transcode runner's token. */
-export type CredentialKind = "viewer" | "upload" | "download-link" | "service";
+/**
+ * What is being issued: a viewer token, an upload token, a download link, a download grant or the transcode runner's
+ * token.
+ */
+export type CredentialKind = "viewer" | "upload" | "download-link" | "download-grant" | "service";
 
 export interface CredentialRequest {
 	kind: CredentialKind;
 	/** Scopes the credential will carry. */
 	scopes: string[];
-	/** What it is bound to: the upload prefix (`asset/…/`), the download link's key or the original being transcoded. */
+	/**
+	 * What it is bound to: the upload prefix (`asset/…/`), the key of the download link or grant, or the original being
+	 * transcoded.
+	 */
 	path?: string;
 	/** Expiry the request asked for (epoch ms). */
 	expiresAt: number;
@@ -42,6 +49,26 @@ export type IssueCredentialHook = (
 export type BeforeLinkRedeemHook = (
 	context: AnyContext,
 	link: DownloadLinkInfo,
+) => Response | null | Promise<Response | null>;
+
+/**
+ * What a download grant is used for: its bearer reads the file's head, issues a link, deletes the file or revokes the
+ * grant; or the owner revokes it by its public id.
+ */
+export type GrantAction = "head" | "issue-link" | "delete-file" | "revoke" | "owner-revoke";
+
+export interface GrantAccessRequest {
+	action: GrantAction;
+	grant: DownloadGrantInfo;
+}
+
+/**
+ * Before a download grant is used (or revoked by the owner), once the Worker checked it belongs to the request's storage
+ * prefix. A response refuses (returned as is; a refused link spends nothing); `null` lets it go on.
+ */
+export type AuthorizeGrantHook = (
+	context: AnyContext,
+	request: GrantAccessRequest,
 ) => Response | null | Promise<Response | null>;
 
 /**
@@ -78,6 +105,7 @@ export type OnLockAuditHook = (context: AnyContext, record: LockAuditRecord) => 
 export interface PluginHooks {
 	issueCredential: IssueCredentialHook[];
 	beforeLinkRedeem: BeforeLinkRedeemHook[];
+	authorizeGrant: AuthorizeGrantHook[];
 	authorizeLockChange: AuthorizeLockChangeHook[];
 	onLockAudit: OnLockAuditHook[];
 }
@@ -85,7 +113,13 @@ export interface PluginHooks {
 /** Context variable that carries the hooks to the routes. Internal. */
 export const PLUGIN_HOOKS_VARIABLE = "pluginHooks";
 
-const NO_HOOKS: PluginHooks = { issueCredential: [], beforeLinkRedeem: [], authorizeLockChange: [], onLockAudit: [] };
+const NO_HOOKS: PluginHooks = {
+	issueCredential: [],
+	beforeLinkRedeem: [],
+	authorizeGrant: [],
+	authorizeLockChange: [],
+	onLockAudit: [],
+};
 
 export function getPluginHooks(context: AnyContext): PluginHooks {
 	// Merged over the empty set: a mount that only provides some hooks (a test, an older composer) still works.
@@ -115,6 +149,15 @@ export async function decideCredential(context: AnyContext, request: CredentialR
 export async function gateLinkRedemption(context: AnyContext, link: DownloadLinkInfo): Promise<Response | null> {
 	for (const hook of getPluginHooks(context).beforeLinkRedeem) {
 		const refusal = await hook(context, link);
+		if (refusal) return refusal;
+	}
+	return null;
+}
+
+/** Runs the `authorizeGrant` hooks in plugin order: the first response refuses. */
+export async function gateGrantAccess(context: AnyContext, request: GrantAccessRequest): Promise<Response | null> {
+	for (const hook of getPluginHooks(context).authorizeGrant) {
+		const refusal = await hook(context, request);
 		if (refusal) return refusal;
 	}
 	return null;

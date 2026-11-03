@@ -1,5 +1,9 @@
 import {
+	ENCRYPTED_HEADER,
 	EXPIRES_AT_HEADER,
+	GRANT_EXPIRES_AT_HEADER,
+	GRANT_KEY_HEADER,
+	GRANT_METADATA_HEADER,
 	REPR_DIGEST_HEADER,
 	SESSION_HEADER,
 	SHA256_HEADER,
@@ -23,9 +27,7 @@ import { webhooks } from "./routes/webhooks";
 import type { WorkerApp } from "./types";
 
 export {
-	DownloadGrantErrorCode,
 	type DownloadGrantInfo,
-	type DownloadGrantLinkCaps,
 	type DownloadGrantRecord,
 	type DownloadGrantState,
 	type DownloadGrantStorage,
@@ -55,11 +57,14 @@ export { LOCK_METADATA_KEY } from "./object-lock/state";
 export type { ComposedPlugins, PluginMiddleware, PluginRoute, WorkerPlugin } from "./plugin";
 export type {
 	AllowedCredential,
+	AuthorizeGrantHook,
 	AuthorizeLockChangeHook,
 	BeforeLinkRedeemHook,
 	CredentialDecision,
 	CredentialKind,
 	CredentialRequest,
+	GrantAccessRequest,
+	GrantAction,
 	IssueCredentialHook,
 	LockChangeAction,
 	LockChangeDecision,
@@ -90,9 +95,16 @@ export {
 	updateRequestState,
 	type WorkerConfig,
 } from "./request-state";
-export { type DownloadLinkInfo, getRouteResult, type RouteResult, type TranscodeJob } from "./route-result";
+export {
+	type DownloadGrantEvent,
+	type DownloadLinkInfo,
+	getRouteResult,
+	type RouteResult,
+	type TranscodeJob,
+} from "./route-result";
 export { type AssetListEntry, MAX_ASSET_LIST_LIMIT, MAX_EXPIRED_LOOKUPS } from "./routes/assets";
 export { edgeCacheTag } from "./routes/edge-cache";
+export { type IdentifiedGrant, identifyDownloadGrant } from "./routes/grant-bearer";
 export { servedCacheControl } from "./routes/media";
 export { isObjectExpired } from "./routes/object-response";
 export { MAX_UPLOAD_TOKEN_TTL_SECONDS, UPLOAD_TOKEN_TYPE, uploadGrantFromClaims } from "./routes/token-upload";
@@ -139,7 +151,17 @@ export function createWorker(options?: CreateWorkerOptions) {
 			origin: "*",
 			allowMethods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"],
 			allowHeaders: ["Content-Type", "Authorization", "Range", SESSION_HEADER, SHA256_HEADER],
-			exposeHeaders: [SHA256_HEADER, SHA256_VERIFIED_HEADER, REPR_DIGEST_HEADER, EXPIRES_AT_HEADER, "Content-Range"],
+			exposeHeaders: [
+				SHA256_HEADER,
+				SHA256_VERIFIED_HEADER,
+				REPR_DIGEST_HEADER,
+				EXPIRES_AT_HEADER,
+				ENCRYPTED_HEADER,
+				GRANT_EXPIRES_AT_HEADER,
+				GRANT_KEY_HEADER,
+				GRANT_METADATA_HEADER,
+				"Content-Range",
+			],
 		}),
 	);
 	app.use("*", async (context, next) => {

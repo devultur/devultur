@@ -60,8 +60,12 @@ export async function handleVideoDelete(context: Context<WorkerApp>): Promise<Re
 	return context.json({ videoId, deletedCount, deletedKeyCount });
 }
 
-export async function handleKeyDelete(context: Context<WorkerApp>): Promise<Response> {
-	const key = context.req.param("key") ?? "";
+export function handleKeyDelete(context: Context<WorkerApp>): Promise<Response> {
+	return deleteMediaKey(context, context.req.param("key") ?? "");
+}
+
+/** Deletes one file (not a video folder) under the request's storage prefix, behind the lock guard: 204, 404 or 409. */
+export async function deleteMediaKey(context: Context<WorkerApp>, key: string): Promise<Response> {
 	const fullKey = storageKey(context, key);
 	// Derived objects get deleted along with their original, never on their own (they'd just regenerate on the next request).
 	if (isVariantKey(key)) {

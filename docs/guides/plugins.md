@@ -8,7 +8,7 @@ same API as yours. Add plugins to extend the Worker, or replace a default one.
 import { createWorker, defaultPlugins } from "@devultur/self-host";
 import { usageLog } from "./plugins/usage-log";
 
-export { DownloadLink } from "@devultur/self-host";
+export { DownloadGrants, DownloadLink } from "@devultur/self-host";
 
 export default createWorker({
   plugins: [...defaultPlugins({ transcode: { maxResolution: "1080p" } }), usageLog()],
@@ -22,7 +22,7 @@ export default createWorker({
 | `staticConfig(config)` | Applies the [rules](self-host.md#rules) to every request. Put it first: later plugins narrow it. |
 | `workerSecretAuth()` | Control routes require `Authorization: Bearer <WORKER_AUTH_SECRET>`; the transcode runner uploads with the same secret. |
 | `credentialPolicy(options?)` | Decides before a credential is issued. Without options it issues what is asked; `maxTtlSeconds: { viewer: 3600 }` caps a kind. |
-| `downloadLinks()` | `POST /v1/token/download` and `GET /v1/download/<id>` (needs the `DOWNLOAD_LINKS` Durable Object). Without it both answer `404`. |
+| `downloadLinks()` | `POST /v1/token/download` and `GET /v1/download/<id>` (needs the `DOWNLOAD_LINKS` Durable Object), and download grants: `/v1/token/grant` and `/v1/grant/*` (also need `DOWNLOAD_GRANTS`). Without it they answer `404`. |
 
 `createWorker()` refuses to start when no plugin authenticates requests, so dropping `workerSecretAuth()` without
 an auth plugin of yours fails at deploy, not in production.
@@ -42,6 +42,7 @@ interface WorkerPlugin {
   routes?: Array<{ path: string; app: Hono }>;
   issueCredential?: (context: Context, request: CredentialRequest) => CredentialDecision | Promise<CredentialDecision>;
   beforeLinkRedeem?: (context: Context, link: DownloadLinkInfo) => Response | null | Promise<Response | null>;
+  authorizeGrant?: (context: Context, request: GrantAccessRequest) => Response | null | Promise<Response | null>;
   authorizeLockChange?: (context: Context, request: LockChangeRequest) => LockChangeDecision | Promise<LockChangeDecision>;
   onLockAudit?: (context: Context, record: LockAuditRecord) => void | Promise<void>;
 }
@@ -94,8 +95,8 @@ updateRequestState(context, { context: { appId: "web" } });
 
 ## Hooks
 
-**`issueCredential`** runs before the Worker issues a viewer token, an upload token, a download link or the runner's
-service token. It gets the `kind`, the `scopes`, the `path` it is bound to and the requested `expiresAt` (epoch ms).
+**`issueCredential`** runs before the Worker issues a viewer token, an upload token, a download link, a download grant
+or the runner's service token. It gets the `kind`, the `scopes`, the `path` it is bound to and the requested `expiresAt` (epoch ms).
 Return `{ allow: false, response }` to refuse, or `{ allow: true, expiresAt?, claims? }` to issue it: `expiresAt`
 caps the expiry, and `claims` are added to a token. The hooks of every plugin run in order: the first refusal wins,
 the earliest `expiresAt` applies, and the claims of all of them are added.
@@ -119,6 +120,12 @@ allow gets `403 { "code": "token_rejected" }`; which claim failed is only logged
 
 **`beforeLinkRedeem`** runs before `GET /v1/download/<id>` spends a use of a link. Return a `Response` to refuse it
 (the use isn't spent), or `null` to let it go on. It gets the link's `storagePrefix`, `key` and plugin `context`.
+
+**`authorizeGrant`** runs before a download grant is used, once the Worker checked the grant is live and belongs to the
+request's storage prefix: `action` is `head`, `issue-link`, `delete-file` or `revoke` (its bearer), or `owner-revoke`
+(the owner, by its public id). It also gets the `grant` (its key, caps, `linksIssued`, metadata and the plugin `context`
+it was issued with, never its secret). Return a `Response` to refuse (a refused link spends nothing), or `null`. Use it
+to tie a grant to the credential that issued it, for example to refuse it once that credential is revoked.
 
 **`authorizeLockChange`** runs before the Worker changes a lock ([Retention and holds](object-lock.md)):
 `PUT /v1/lock/<key>` once per change, and `POST /v1/lock/hold` once per page. It gets:
@@ -173,7 +180,8 @@ const auditToD1: WorkerPlugin = {
 ## After the route
 
 - `getRouteResult(context)` tells a middleware that runs after `await next()` what the route did: `redeemedLink`
-  (the download link just redeemed), `originalDeleted` (`transcode.complete` deleted the original),
+  (the download link just redeemed), `issuedGrant` and `revokedGrant` (a download grant, with its public id; a revoke
+  says `by: "bearer"` or `"owner"`), `grantDeletedKey` (a grant deleted its file), `originalDeleted` (`transcode.complete` deleted the original),
   `originalRetained` (it kept a locked original instead) and
   `transcodeJob` (the job a runner callback belongs to, with its plugin `context`).
 - `getPendingUpload(context)`, before the route, returns the upload an upload URL points to: its key, storage key,

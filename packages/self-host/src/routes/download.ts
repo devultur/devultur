@@ -7,6 +7,7 @@
 import { contentDispositionAttachment, relativeMediaPath, TokenScope } from "@devultur/core";
 import { type Context, Hono } from "hono";
 import { DownloadLinkPath, type DownloadLinkRecord, recordContext } from "../download-link";
+import { randomBase64Url } from "../grant-credential";
 import { contentDispositionInline, storageKey } from "../helpers";
 import { cappedExpiry, decideCredential, gateLinkRedemption, getPluginHooks } from "../plugin-hooks";
 import { getRequestState } from "../request-state";
@@ -29,13 +30,7 @@ interface DownloadLinkRequest {
 	filename?: unknown;
 }
 
-function newLinkId(): string {
-	const bytes = crypto.getRandomValues(new Uint8Array(16));
-	return btoa(String.fromCharCode(...bytes))
-		.replace(/\+/g, "-")
-		.replace(/\//g, "_")
-		.replace(/=+$/, "");
-}
+const newLinkId = () => randomBase64Url(16);
 
 function linkStub(namespace: DurableObjectNamespace, linkId: string) {
 	return namespace.get(namespace.idFromName(linkId));
@@ -61,7 +56,7 @@ function parseLinkRequest(body: DownloadLinkRequest) {
 	return { key, expiresIn, maxUses, filename };
 }
 
-/** `POST /v1/token/download` `{ key, expiresIn?, maxUses?, filename? }` → `{ url, expiresAt, maxUses }`. */
+/** `POST /v1/token/download` `{ key, expiresIn?, maxUses?, filename? }` → `{ id, url, expiresAt, maxUses }`. */
 export async function handleDownloadLink(context: WorkerContext): Promise<Response> {
 	const namespace = context.env.DOWNLOAD_LINKS;
 	if (!namespace) return context.json({ error: "Download links are not configured", code: "not_configured" }, 501);
@@ -85,9 +80,8 @@ export async function handleDownloadLink(context: WorkerContext): Promise<Respon
 	});
 	if (!decision.allow) return decision.response;
 	const expiresAt = cappedExpiry(requestedExpiresAt, decision.expiresAt, (epochMs) => epochMs);
-	const linkId = newLinkId();
 	const scope = getRequestState(context);
-	const record: Omit<DownloadLinkRecord, "uses"> = {
+	const created = await storeLink(context, namespace, {
 		storageKey: fullKey,
 		key: parsed.key,
 		expiresAt,
@@ -95,14 +89,24 @@ export async function handleDownloadLink(context: WorkerContext): Promise<Respon
 		...(parsed.filename ? { filename: parsed.filename } : {}),
 		storagePrefix: scope.storagePrefix,
 		...(scope.context ? { context: scope.context } : {}),
-	};
+	});
+	if (!created) return context.json({ error: "Could not create the download link" }, 500);
+	return context.json({ ...created, expiresAt, maxUses: parsed.maxUses });
+}
+
+/** Stores a new link in its `DownloadLink` and returns its id and URL, or null if it couldn't be stored. */
+export async function storeLink(
+	context: WorkerContext,
+	namespace: DurableObjectNamespace,
+	record: Omit<DownloadLinkRecord, "uses">,
+): Promise<{ id: string; url: string } | null> {
+	const linkId = newLinkId();
 	const created = await linkStub(namespace, linkId).fetch(`https://download-link${DownloadLinkPath.CREATE}`, {
 		method: "POST",
 		body: JSON.stringify(record),
 	});
-	if (!created.ok) return context.json({ error: "Could not create the download link" }, 500);
-	const origin = new URL(context.req.url).origin;
-	return context.json({ url: `${origin}/v1/download/${linkId}`, expiresAt, maxUses: parsed.maxUses });
+	if (!created.ok) return null;
+	return { id: linkId, url: `${new URL(context.req.url).origin}/v1/download/${linkId}` };
 }
 
 function attachmentDisposition(record: DownloadLinkRecord, storedDisposition: string | undefined): string {

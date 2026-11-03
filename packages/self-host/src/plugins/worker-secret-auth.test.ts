@@ -50,6 +50,10 @@ const PROTECTED_ROUTES: Array<[method: string, path: string]> = [
 	["POST", "/v1/token"],
 	["POST", "/v1/token/upload"],
 	["POST", "/v1/token/download"],
+	["POST", "/v1/token/grant"],
+	["GET", "/v1/token/grant"],
+	["DELETE", "/v1/token/grant/dgr_x"],
+	["POST", "/v1/grants"],
 	["POST", "/v1/webhooks-not-a-webhook"],
 	["GET", "/v1/unknown"],
 ];
@@ -63,6 +67,13 @@ describe("isOpenRoute", () => {
 		expect(isOpenRoute("GET", "/v1/download/link-1")).toBe(true);
 		expect(isOpenRoute("POST", "/v1/webhooks/transcode")).toBe(true);
 		expect(isOpenRoute("OPTIONS", "/v1/upload")).toBe(true);
+	});
+
+	it("opens the bearer's download grant routes: the grant is their credential", () => {
+		expect(isOpenRoute("HEAD", "/v1/grant/file")).toBe(true);
+		expect(isOpenRoute("POST", "/v1/grant/links")).toBe(true);
+		expect(isOpenRoute("DELETE", "/v1/grant/file")).toBe(true);
+		expect(isOpenRoute("DELETE", "/v1/grant")).toBe(true);
 	});
 
 	it("keeps writes and control routes closed", () => {

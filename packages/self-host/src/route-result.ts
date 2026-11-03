@@ -1,6 +1,7 @@
 // Route result: what a route did that the request alone does not say, for plugin middleware that runs after
 // `await next()` (usage logs, cache purges, notifications). Set by the routes, read with `getRouteResult`.
 import type { Context } from "hono";
+import type { DownloadGrantInfo } from "./download-grants";
 import type { PluginContext } from "./request-state";
 
 /** A download link as the Worker hands it to plugins. */
@@ -24,7 +25,19 @@ export interface TranscodeJob {
 	context?: PluginContext;
 }
 
+/** A download grant as the Worker hands it to plugins, with its public id (`dgr_…`). */
+export interface DownloadGrantEvent {
+	publicId: string;
+	grant: DownloadGrantInfo;
+}
+
 export interface RouteResult {
+	/** `POST /v1/token/grant` issued this grant. */
+	issuedGrant?: DownloadGrantEvent;
+	/** The grant was revoked: by its bearer (`DELETE /v1/grant`, or with its file) or by the owner (by public id). */
+	revokedGrant?: DownloadGrantEvent & { by: "bearer" | "owner" };
+	/** `DELETE /v1/grant/file` deleted this file (its key, relative to the storage prefix). */
+	grantDeletedKey?: string;
 	/** `GET /v1/download/{id}` redeemed this link (one use spent). */
 	redeemedLink?: DownloadLinkInfo;
 	/** `transcode.complete` deleted the video's original (`config.transcode.deleteOriginalOnSuccess`). */

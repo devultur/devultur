@@ -20,6 +20,10 @@ export interface DownloadLinkRecord {
 	storagePrefix: string;
 	/** Plugin context of the request that issued the link (opaque to the Worker). */
 	context?: PluginContext;
+	/** Public id (`dgr_…`) of the download grant that issued the link. */
+	grantId?: string;
+	/** Opaque metadata the link was issued with. */
+	metadata?: Record<string, string>;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
