@@ -8,7 +8,6 @@ import { usePlaybackMetrics } from "./playback-metrics/use-playback-metrics";
 import type { QualityLevel, VideoPlayerError, VideoPlayerRenderProps } from "./types";
 
 const HLS_EXTENSION = ".m3u8";
-const HLS_MIME_TYPE = "application/vnd.apple.mpegurl";
 
 interface UseVideoPlayerOptions {
 	src: string;
@@ -112,7 +111,7 @@ export function useVideoPlayer({
 
 				const hls = new HlsConstructor(hlsConfig);
 
-				hls.on(HlsConstructor.Events.MANIFEST_PARSED, (_event, data) => {
+				hls.on(HlsConstructor.Events.MANIFEST_PARSED, () => {
 					const levels = hls.levels.map((level) => ({
 						height: level.height,
 						width: level.width,

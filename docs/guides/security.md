@@ -235,6 +235,7 @@ const { url } = await file.createDownloadLink({ expiresIn: 300, filename: "expor
   it issues have their own opaque ids.
 - **Deleting.** With `canDelete`, `file.delete()` deletes the file, behind its lock (`409 retention_active`), and every
   grant of it stops working.
+  A link already issued for it answers `410 file_gone`.
 - **Revoking.** `file.revoke()`, or `files.revokeDownloadGrant(id)` with the public id. `files.listDownloadGrants(key)`
   shows how many links each grant issued, so a leaked one stands out.
 

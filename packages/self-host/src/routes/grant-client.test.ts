@@ -57,7 +57,7 @@ describe("download grants through the clients", () => {
 
 		await file.delete();
 		expect(mediaBucket.objects.has(uploaded.key)).toBe(false);
-		expect((await fetch(second.url)).status).toBe(404);
+		expect((await fetch(second.url)).status).toBe(410);
 		expect(await file.head()).toBeNull();
 	});
 
