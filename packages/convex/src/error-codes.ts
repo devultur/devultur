@@ -42,6 +42,7 @@ export const DEVULTUR_ERROR_CODES = [
 	"link_not_found",
 	"link_expired",
 	"link_used",
+	"file_gone",
 	"not_configured",
 	// Download grants
 	"invalid_grant",

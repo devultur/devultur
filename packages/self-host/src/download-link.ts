@@ -26,18 +26,6 @@ export interface DownloadLinkRecord {
 	metadata?: Record<string, string>;
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** Plugin context of a link record. Pure. */
-export function recordContext(record: DownloadLinkRecord): PluginContext | undefined {
-	if (record.context) return record.context;
-	// TODO(remove after 2026-10-31): a link created before the field rename (links live up to 7 days) keeps it under
-	// its legacy field name.
-	const legacy = (record as unknown as Record<string, unknown>).callerContext;
-	return isRecord(legacy) ? (legacy as PluginContext) : undefined;
-}
-
 export const DownloadLinkPath = {
 	CREATE: "/create",
 	REDEEM: "/redeem",

@@ -6,7 +6,7 @@
 // hook (e.g. a delivery limit), the link is read without consuming it and the hook decides before redeeming.
 import { contentDispositionAttachment, relativeMediaPath, TokenScope } from "@devultur/core";
 import { type Context, Hono } from "hono";
-import { DownloadLinkPath, type DownloadLinkRecord, recordContext } from "../download-link";
+import { DownloadLinkPath, type DownloadLinkRecord } from "../download-link";
 import { randomBase64Url } from "../grant-credential";
 import { contentDispositionInline, storageKey } from "../helpers";
 import { cappedExpiry, decideCredential, gateLinkRedemption, getPluginHooks } from "../plugin-hooks";
@@ -122,8 +122,11 @@ const relayLinkFailure = (response: Response) =>
 	new Response(response.body, { status: response.status, headers: response.headers });
 
 function linkInfoOf(record: DownloadLinkRecord): DownloadLinkInfo {
-	const context = recordContext(record);
-	return { storagePrefix: record.storagePrefix, key: record.key, ...(context ? { context } : {}) };
+	return {
+		storagePrefix: record.storagePrefix,
+		key: record.key,
+		...(record.context ? { context: record.context } : {}),
+	};
 }
 
 /** With `beforeLinkRedeem` hooks, asks them BEFORE redeeming: a refusal doesn't spend the use. Without, nothing to ask. */
@@ -153,7 +156,8 @@ download.get("/:linkId", async (context) => {
 	const record = (await redeemed.json()) as DownloadLinkRecord;
 
 	const object = await context.env.MEDIA_BUCKET.get(record.storageKey);
-	if (!object) return context.json({ error: "Not found" }, 404);
+	// The link exists; its file doesn't anymore (deleted, by its owner or a download grant).
+	if (!object) return context.json({ error: "This link's file was deleted", code: "file_gone" }, 410);
 	if (isObjectExpired(object.customMetadata)) return expiredResponse();
 	addRouteResult(context, { redeemedLink: linkInfoOf(record) });
 

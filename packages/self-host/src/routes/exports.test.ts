@@ -260,6 +260,17 @@ describe("single-use download links", () => {
 		expect(new Uint8Array(await partial.arrayBuffer())).toEqual(BYTES.subarray(0, 3));
 	});
 
+	it("answers 410 file_gone once its file is deleted, without serving anything", async () => {
+		const worker = exportsWorker();
+		const { key } = await uploadAsset(worker, { path: "exports/deleted.zip" });
+		const { link } = await linkFor(worker, { key, maxUses: 2 });
+		await worker.send(`/v1/media/${key}`, { method: "DELETE" });
+
+		const res = await worker.send(new URL(link.url).pathname);
+		expect(res.status).toBe(410);
+		expect(await res.json()).toMatchObject({ code: "file_gone" });
+	});
+
 	it("expires, 404s unknown ids and refuses missing or expired files", async () => {
 		vi.useFakeTimers({ now: 9_000_000 });
 		const worker = exportsWorker();

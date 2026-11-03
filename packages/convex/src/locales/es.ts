@@ -58,6 +58,7 @@ export const devulturErrorLabels: DevulturErrorLabels = {
 	link_not_found: "Este enlace de descarga no existe.",
 	link_expired: "Este enlace de descarga ya venció.",
 	link_used: "Este enlace de descarga ya se usó.",
+	file_gone: "El archivo de este enlace de descarga se eliminó.",
 	not_configured: "Esta función no está configurada.",
 	invalid_grant: "Este permiso de descarga no es válido.",
 	grant_gone: "Este permiso de descarga ya no es válido.",

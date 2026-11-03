@@ -45,27 +45,11 @@ export function uploadPendingIdOf(uploadUrl: string): string | null | undefined 
 	return PENDING_ID_PATTERN.test(id) ? id : null;
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === "object" && value !== null && !Array.isArray(value);
-
-// TODO(remove after 2026-10-24): a pending written before the field rename (it lives 1 h) keeps its plugin context and
-// upload metadata under the legacy field names.
-function withLegacyFieldNames(pending: UploadPending & Record<string, unknown>): UploadPending {
-	const { callerContext, objectMetadata, ...current } = pending;
-	return {
-		...current,
-		...(current.context === undefined && isRecord(callerContext) ? { context: callerContext as PluginContext } : {}),
-		...(current.uploadMetadata === undefined && isRecord(objectMetadata)
-			? { uploadMetadata: objectMetadata as Record<string, string> }
-			: {}),
-	};
-}
-
 function parsePending(raw: string | null): UploadPending | null {
 	if (!raw) return null;
 	try {
-		const pending = JSON.parse(raw) as UploadPending & Record<string, unknown>;
-		return pending?.storageKey ? withLegacyFieldNames(pending) : null;
+		const pending = JSON.parse(raw) as UploadPending;
+		return pending?.storageKey ? pending : null;
 	} catch {
 		return null;
 	}
