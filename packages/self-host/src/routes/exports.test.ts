@@ -283,6 +283,8 @@ describe("single-use download links", () => {
 			authorizeGrant: [],
 			authorizeLockChange: [],
 			onLockAudit: [],
+			onMediaEvent: [],
+			resolveWebhookTarget: [],
 			beforeLinkRedeem: [
 				async (_context, link) => {
 					seen.push(link);

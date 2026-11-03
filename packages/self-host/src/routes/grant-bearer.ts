@@ -239,7 +239,7 @@ async function handleDeleteFile(context: WorkerContext): Promise<Response> {
 	if (!grant.canDelete) {
 		return grantError(403, DownloadGrantErrorCode.CANNOT_DELETE, "This download grant can't delete its file");
 	}
-	const deleted = await deleteMediaKey(context, grant.key);
+	const deleted = await deleteMediaKey(context, grant.key, { reason: "grant", grantId: publicId });
 	if (deleted.status !== 204) return deleted;
 	// The file is gone: every grant of it answers 410 from now on.
 	await callGrants(stub, DownloadGrantPath.REVOKE_ALL);

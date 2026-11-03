@@ -1,9 +1,10 @@
 // Request state: everything the plugins tell the routes about the current request, in one context variable. Every
 // request starts at the bucket root with no rules; plugins narrow it with `updateRequestState` (for example the storage
 // prefix and the rules of whoever the credential belongs to). The routes only read it with `getRequestState`.
-import type { CacheRule, ObjectLock, SecurityPolicy, TranscodeSettings } from "@devultur/core";
+import type { CacheRule, ObjectLock, SecurityPolicy, TranscodeSettings, WebhookEventType } from "@devultur/core";
 import type { Context } from "hono";
 import type { UploadGrant } from "./export-types";
+import { assertWebhookScope } from "./media-events/target";
 import type { MaxResolution, RawStorageClass, UploadRules } from "./types";
 
 /** Any JSON value. */
@@ -35,6 +36,32 @@ export interface TranscodeConfig {
 	deleteOriginalOnSuccess?: boolean;
 	/** Base of the output URLs in the client webhook. Unset: the origin of the transcode request. */
 	outputBaseUrl?: string;
+}
+
+/**
+ * Where the Worker sends its media events (signed, see docs/guides/webhooks.md). Overrides `MEDIA_WEBHOOK_URL` and
+ * `MEDIA_WEBHOOK_SECRET` for the request's scope.
+ */
+export interface WebhookConfig {
+	/**
+	 * Names this webhook in queued events and transcode jobs, which keep only the scope: its URL and secrets are
+	 * resolved again at delivery (`resolveWebhookTarget` of a plugin; `staticConfig` resolves its own). Required, and
+	 * unique to this webhook, when a plugin sets it per request: `updateRequestState` throws without one. Only
+	 * `defaultPlugins(config)` / `staticConfig(config)` may omit it (they use `config`). `env` is the `MEDIA_WEBHOOK_*`
+	 * vars.
+	 */
+	scope?: string;
+	/** An `https` URL on a public host. */
+	url: string;
+	/** Signing secret (`whsec_<base64>` or any string). Several during a rotation: each one signs. */
+	secret: string | string[];
+	/**
+	 * Events sent. Default `media.deleted` and `media.changed`; list `transcode.*` or `captions.*` types to get those
+	 * too, in the same envelope.
+	 */
+	events?: WebhookEventType[];
+	/** Allows `http` and private or loopback hosts. Local development only. */
+	allowUnsafeUrl?: boolean;
 }
 
 /** Rules the routes enforce. */
@@ -73,6 +100,8 @@ export interface WorkerConfig {
 	 * Unset: `scriptable`.
 	 */
 	contentSniffing?: ContentSniffingMode;
+	/** Media event webhook of the scope. Unset: `MEDIA_WEBHOOK_URL` / `MEDIA_WEBHOOK_SECRET`, or none. */
+	webhooks?: WebhookConfig;
 }
 
 /**
@@ -158,6 +187,8 @@ function mergeRecord<T extends object>(current: T | undefined, patch: T | undefi
  * `context` merge field by field.
  */
 export function updateRequestState(context: AnyContext, patch: RequestStatePatch): RequestState {
+	// A webhook without its scope would be resolved, when queued, to whatever answers for the default one.
+	assertWebhookScope(patch.config?.webhooks);
 	const current = getRequestState(context);
 	const config = mergeConfig(current.config, patch.config);
 	const access = mergeRecord(current.access, patch.access);

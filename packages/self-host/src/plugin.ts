@@ -1,12 +1,14 @@
 // Plugins: how the Worker is extended, and how it is built. `createWorker({ plugins })` composes them; the default ones
 // (worker-secret auth, static config, credential policy, download links) use the same API as any plugin of yours.
 import type { Hono, MiddlewareHandler } from "hono";
+import type { WebhookTargetResolver } from "./media-events/target";
 import type {
 	AuthorizeGrantHook,
 	AuthorizeLockChangeHook,
 	BeforeLinkRedeemHook,
 	IssueCredentialHook,
 	OnLockAuditHook,
+	OnMediaEventHook,
 	PluginHooks,
 } from "./plugin-hooks";
 
@@ -49,6 +51,13 @@ export interface WorkerPlugin {
 	authorizeLockChange?: AuthorizeLockChangeHook;
 	/** After every lock event, with its audit record. Runs after the response. */
 	onLockAudit?: OnLockAuditHook;
+	/** After every media event (deleted, changed), to deliver it your own way: the built-in webhook is then skipped. */
+	onMediaEvent?: OnMediaEventHook;
+	/**
+	 * The webhook of a scope your plugin sets in `config.webhooks.scope`, resolved when an event is delivered (a queued
+	 * one, or a transcode's): its URL and current secrets. Return null for a scope that isn't yours.
+	 */
+	resolveWebhookTarget?: WebhookTargetResolver;
 }
 
 export interface ComposedPlugins {
@@ -85,6 +94,10 @@ export function composePlugins(plugins: readonly WorkerPlugin[]): ComposedPlugin
 				plugin.authorizeLockChange ? [plugin.authorizeLockChange] : [],
 			),
 			onLockAudit: plugins.flatMap((plugin) => (plugin.onLockAudit ? [plugin.onLockAudit] : [])),
+			onMediaEvent: plugins.flatMap((plugin) => (plugin.onMediaEvent ? [plugin.onMediaEvent] : [])),
+			resolveWebhookTarget: plugins.flatMap((plugin) =>
+				plugin.resolveWebhookTarget ? [plugin.resolveWebhookTarget] : [],
+			),
 		},
 	};
 }
