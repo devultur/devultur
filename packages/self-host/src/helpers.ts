@@ -1,8 +1,8 @@
 import { type SecurityPolicy, visibilityFromKey } from "@devultur/core";
 import type { Context } from "hono";
 import { isBearerAuthorized } from "./bearer";
-import { withCurrentClaimNames } from "./legacy-claims";
 import { getRequestState } from "./request-state";
+import { reservedClaimName } from "./token-claims";
 import type { WorkerApp } from "./types";
 import { HashAlgorithm } from "./types";
 
@@ -131,7 +131,9 @@ export async function verifyViewerToken(
 
 	const now = Math.floor(Date.now() / 1000);
 	if (typeof payload.exp === "number" && payload.exp < now) return null;
-	return withCurrentClaimNames(payload);
+	// A reserved claim is one the gate no longer reads, so it wouldn't limit the token: refuse it rather than serve it unbound.
+	if (reservedClaimName(payload)) return null;
+	return payload;
 }
 
 import {

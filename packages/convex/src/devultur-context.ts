@@ -1,11 +1,11 @@
 "use client";
 
-// The contexts both providers fill, and the hooks that read them.
+// The contexts both providers fill, and the hooks that read them without throwing. The hooks that throw outside a
+// provider live in `provider-hooks.ts`, so their messages stay out of an entry that only uses these.
 import React from "react";
 import type { DevulturKind, DevulturMedia, Visibility } from "@devultur/core";
 import type { UploadProgress } from "@devultur/react";
 import type { FunctionReference } from "convex/server";
-import { DevulturCapabilityError } from "./capability-error";
 import type { MediaSession } from "./media-session";
 
 type AnyAction = FunctionReference<"action">;
@@ -77,12 +77,6 @@ export interface DevulturContextValue extends MediaSession {
 export const DevulturContext = /* @__PURE__ */ React.createContext<DevulturContextValue | null>(null);
 export const DevulturApiContext = /* @__PURE__ */ React.createContext<DevulturApi | null>(null);
 
-export function useDevultur(): DevulturContextValue {
-	const context = React.use(DevulturContext);
-	if (!context) throw new Error("useDevultur must be used within <DevulturProvider> or <DevulturViewerProvider>");
-	return context;
-}
-
 /**
  * `useDevultur()` for components that also render outside a provider: the same value under `<DevulturProvider>` or
  * `<DevulturViewerProvider>`, and `null` outside both instead of throwing.
@@ -100,15 +94,4 @@ export function useDevulturOptional(): DevulturContextValue | null {
  */
 export function useCanDeliver(): boolean {
 	return Boolean(React.use(DevulturContext)?.baseUrl);
-}
-
-/**
- * The `api` passed to `<DevulturProvider>`: your app's exported Devultur functions. Under a `<DevulturViewerProvider>`
- * it throws a `DevulturCapabilityError`.
- */
-export function useDevulturApi(): DevulturApi {
-	const api = React.use(DevulturApiContext);
-	if (api) return api;
-	if (React.use(DevulturContext)) throw new DevulturCapabilityError("api");
-	throw new Error("useDevulturApi must be used within <DevulturProvider>");
 }

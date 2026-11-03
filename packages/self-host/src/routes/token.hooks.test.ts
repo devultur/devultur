@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createWorker, defaultPlugins, type WorkerPlugin } from "../index";
 import type { CredentialDecision, CredentialRequest } from "../plugin-hooks";
 import { WORKER_SECRETS, withWorkerAuth } from "../plugins/worker-secret-auth-test-env";
@@ -72,6 +72,21 @@ describe("POST /v1/token and the issueCredential hook", () => {
 		const { token, expiresIn } = (await res.json()) as { token: string; expiresIn: number };
 		expect(claimsOf(token)).toMatchObject({ tag: "a", sub: "u1", scope: "media:read" });
 		expect(expiresIn).toBeLessThanOrEqual(30);
+	});
+
+	it.each(["pid", "ppx", "scopes"])("refuses to issue a token when a hook adds the reserved claim %s", async (name) => {
+		const { hooks } = recordingHook({ allow: true, claims: { [name]: "x" } });
+		const res = await issueToken({ userId: "u1" }, hooks);
+		expect(res.status).toBe(500);
+		expect(await res.json()).not.toHaveProperty("token");
+	});
+
+	it("logs an error that names the reserved claim", async () => {
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+		const { hooks } = recordingHook({ allow: true, claims: { scopes: ["media:read"] } });
+		await issueToken({ userId: "u1" }, hooks);
+		expect(String(logged.mock.calls[0]?.[1])).toMatch(/claim `scopes`, which is reserved/);
+		logged.mockRestore();
 	});
 
 	it("asks the hook before an upload token, with its prefix", async () => {

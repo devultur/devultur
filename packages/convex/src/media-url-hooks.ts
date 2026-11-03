@@ -11,8 +11,8 @@ import {
 	mediaPath,
 	visibilityFromKey,
 } from "@devultur/core";
-import { useDevultur } from "./devultur-context";
 import type { MediaRenderOptions } from "./media-session";
+import { useDevultur } from "./provider-hooks";
 import { useRequestTokenWhen } from "./request-token";
 
 /**

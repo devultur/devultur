@@ -4,9 +4,10 @@ import React from "react";
 import { type DevulturMedia, mediaPath, type Visibility } from "@devultur/core";
 import { type MediaUploadError, type MediaUploadState, UploadHttpError, uploadFileWithProgress } from "@devultur/react";
 import { useAction } from "convex/react";
-import { type UploadTarget, useDevulturApi } from "./devultur-context";
+import type { UploadTarget } from "./devultur-context";
 import { useVideoState } from "./media-hooks";
 import { deriveUploadState, type UploadPhase } from "./media-upload-derive";
+import { useDevulturApi } from "./provider-hooks";
 import { confirmUploadBestEffort, readImageDimensions } from "./upload-hints";
 
 // --- useMediaUpload (unified lifecycle: upload → transcode → ready, one state machine) ---

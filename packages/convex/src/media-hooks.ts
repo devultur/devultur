@@ -14,8 +14,9 @@ import {
 	type ProcessingPhase,
 } from "@devultur/core";
 import { useQuery } from "convex/react";
-import { DevulturApiContext, useDevultur } from "./devultur-context";
+import { DevulturApiContext } from "./devultur-context";
 import type { VideoProps } from "./media-url-hooks";
+import { useDevultur } from "./provider-hooks";
 import { useRequestTokenWhen } from "./request-token";
 
 // --- useDevulturMedia (reactive media status from component's table) ---
