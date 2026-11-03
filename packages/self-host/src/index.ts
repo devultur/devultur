@@ -22,6 +22,15 @@ import { upload } from "./routes/upload";
 import { webhooks } from "./routes/webhooks";
 import type { WorkerApp } from "./types";
 
+export {
+	DownloadGrantErrorCode,
+	type DownloadGrantInfo,
+	type DownloadGrantLinkCaps,
+	type DownloadGrantRecord,
+	type DownloadGrantState,
+	type DownloadGrantStorage,
+	DownloadGrants,
+} from "./download-grants";
 export { DownloadLink, type DownloadLinkRecord, type DownloadLinkStorage } from "./download-link";
 export { deletePrefix, hashKey, isServiceToken, storageKey, verifyViewerToken } from "./helpers";
 export { imageOriginAuthorization, isImageOriginRequest, readImageOriginScope } from "./image/cloudflare";

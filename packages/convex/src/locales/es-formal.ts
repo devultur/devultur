@@ -27,6 +27,7 @@ export const devulturErrorLabels: DevulturErrorLabels = {
 		if (details.field === "tags") return "Use como máximo 20 etiquetas, de hasta 50 caracteres cada una.";
 		return labelText(es.devulturErrorLabels.invalid_media_metadata, details);
 	},
+	grant_in_query: "Envíe el permiso de descarga en el encabezado Authorization, nunca en una URL.",
 	lock_conflict: `La protección del archivo cambió mientras tanto. ${TRY_AGAIN}`,
 	lock_privilege_required: "No tiene permiso para acortar ni quitar la protección de este archivo.",
 	encryption_key_missing: "Este archivo ya no se puede leer. Vuelva a subirlo.",

@@ -82,6 +82,18 @@ export const devulturErrorLabels: DevulturErrorLabels = {
 	link_expired: "This download link has expired.",
 	link_used: "This download link was already used.",
 	not_configured: "This feature isn't set up.",
+	invalid_grant: "This download grant isn't valid.",
+	grant_gone: "This download grant is no longer valid.",
+	grant_exhausted: "This download grant has issued all its links.",
+	grant_exists: "This download grant already exists.",
+	grant_in_query: "Send the download grant in the Authorization header, never in a URL.",
+	grant_not_found: "This download grant doesn't exist.",
+	grant_cannot_delete: "This download grant can't delete its file.",
+	link_exceeds_grant: "The download link exceeds what the grant allows.",
+	invalid_link_caps: "The download link limits aren't valid.",
+	invalid_max_links: "The number of links isn't valid.",
+	invalid_can_delete: "Whether the grant can delete its file must be true or false.",
+	invalid_metadata: "The metadata isn't valid.",
 	retention_active: (details) => {
 		if (details.hold === true) return "This file is on hold and can't be changed or deleted.";
 		const until = formatDate(details.until, "en");
