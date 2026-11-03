@@ -88,6 +88,23 @@ describe("handleWebhook with lifecycle events", () => {
 		expect(store.isRemoved()).toBe(true);
 	});
 
+	it("removes the record on a grant's media.deleted, which names the grant", async () => {
+		const store = recordStore({});
+		const event = createWebhookEvent("media.deleted", {
+			key: "private/file/doc1/a.pdf",
+			mediaId: "doc1",
+			kind: "file",
+			visibility: "private",
+			reason: "grant",
+			grantId: "dgr_abc",
+		});
+
+		await handleWebhook({ event, recordId: RECORD_ID, ...store });
+
+		expect(event.data).toMatchObject({ reason: "grant", grantId: "dgr_abc" });
+		expect(store.isRemoved()).toBe(true);
+	});
+
 	it("patches the lock on media.changed and ignores an older one arriving after it", async () => {
 		const store = recordStore({});
 

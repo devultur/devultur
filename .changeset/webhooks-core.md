@@ -16,3 +16,5 @@ Add media lifecycle webhook events and Standard Webhooks signatures.
 - `handleWebhook` applies `media.deleted` (through a new `remove` callback) and `media.changed` (the `lock` and
   `etag`), ignoring an event older than the last one applied, and unwraps transcode and captions events sent in the
   envelope.
+- `media.deleted` says why in `reason`: `api`, `grant` (a download grant's delete, with the grant's public id in
+  `grantId`), `prefix`, `purge` or `expired`.

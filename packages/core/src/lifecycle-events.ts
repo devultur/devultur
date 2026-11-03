@@ -22,11 +22,13 @@ export const MediaLifecycleEventName = {
 export type MediaLifecycleEventType = (typeof MediaLifecycleEventName)[keyof typeof MediaLifecycleEventName];
 
 /**
- * Why the media was deleted: `api` (`DELETE /v1/media/…`). From the Worker's own code, the reason its prefix delete
- * passes: `prefix` (the default), `purge` (a teardown of a whole storage prefix), `expired` (a sweeper of files whose
- * lifetime ran out). A video's original deleted after its transcode is a `media.changed` (`original-deleted`).
+ * Why the media was deleted: `api` (`DELETE /v1/media/…`, with an API key), `grant` (a download grant's
+ * `DELETE /v1/grant/file`, by whoever holds the grant; `grantId` says which). From the Worker's own code, the reason its
+ * prefix delete passes: `prefix` (the default), `purge` (a teardown of a whole storage prefix), `expired` (a sweeper of
+ * files whose lifetime ran out). A video's original deleted after its transcode is a `media.changed`
+ * (`original-deleted`).
  */
-export type MediaDeleteReason = "api" | "prefix" | "purge" | "expired";
+export type MediaDeleteReason = "api" | "grant" | "prefix" | "purge" | "expired";
 
 /**
  * What changed: `lock` (its retention), `hold` (a hold set or released), `replaced` (new bytes at the same key),
@@ -45,6 +47,11 @@ export interface MediaDeletedData {
 	kind: MediaEventKind;
 	visibility: Visibility;
 	reason: MediaDeleteReason;
+	/**
+	 * Public id (`dgr_…`) of the download grant that deleted the media; present only when `reason` is `grant`. Never the
+	 * grant's secret.
+	 */
+	grantId?: string;
 	/** Objects of the media that were kept because they're locked (a video folder deleted in part). */
 	retainedCount?: number;
 }
