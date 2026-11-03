@@ -27,6 +27,7 @@ import type {
 	WebhookVerifyOptions,
 	WorkerConfig,
 } from "./types";
+import { authenticateWebhook } from "./webhook";
 import { createWorkerClient, type WorkerClient } from "./worker-client";
 
 function isDirectStorageConfig(config: MediaRouterConfig): config is DirectStorageConfig {
@@ -163,6 +164,8 @@ export function createMediaRouter(config: MediaRouterConfig): MediaRouter {
 			const event = typeof payload === "string" ? JSON.parse(payload) : payload;
 			return event as MediaEvent;
 		},
+
+		verifyWebhook: authenticateWebhook,
 
 		getMediaUrl(media: DevulturMedia, options?: MediaUrlOptions): string {
 			if (worker) return worker.getMediaUrl(media, options);
